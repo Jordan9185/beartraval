@@ -45,7 +45,7 @@ public struct RootView: View {
                 .tabItem { Label("Map", systemImage: "map") }
             SavedView(session: session)
                 .tabItem { Label("Saved", systemImage: "bookmark") }
-            EmptyTab(title: "Shopping", systemImage: "bag", message: "尚未新增商品")
+            ShoppingTab(session: session)
                 .tabItem { Label("Shopping", systemImage: "bag") }
         }
         .sheet(isPresented: $showsDebug) { DebugMenuView(session: session) }

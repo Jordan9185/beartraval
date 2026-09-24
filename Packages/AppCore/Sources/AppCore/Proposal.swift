@@ -10,21 +10,25 @@ public struct ProposalChange: Codable, Hashable, Sendable {
     public var afterStopId: UUID?
     public var dwellMinutes: Int?
     public var kind: StopKind
+    /// Purchase Stop 對應的商品（WP8）。
+    public var shoppingItemId: UUID?
 
-    public init(placeId: UUID, rawLabel: String, beforeStopId: UUID?, afterStopId: UUID?, dwellMinutes: Int?, kind: StopKind = .standard) {
+    public init(placeId: UUID, rawLabel: String, beforeStopId: UUID?, afterStopId: UUID?, dwellMinutes: Int?, kind: StopKind = .standard,
+                shoppingItemId: UUID? = nil) {
         self.placeId = placeId
         self.rawLabel = rawLabel
         self.beforeStopId = beforeStopId
         self.afterStopId = afterStopId
         self.dwellMinutes = dwellMinutes
         self.kind = kind
+        self.shoppingItemId = shoppingItemId
     }
 
     /// 依 Route Match 的插入位置產生；位置以相鄰 Stop 的 id 表示，伺服器依當下排序解析。
-    public init(insertion: Insertion, placeId: UUID, label: String, kind: StopKind = .standard) {
+    public init(insertion: Insertion, placeId: UUID, label: String, kind: StopKind = .standard, shoppingItemId: UUID? = nil) {
         self.init(placeId: placeId, rawLabel: label,
                   beforeStopId: insertion.nextStopID, afterStopId: insertion.nextStopID == nil ? insertion.previousStopID : nil,
-                  dwellMinutes: insertion.addedDwellMinutes, kind: kind)
+                  dwellMinutes: insertion.addedDwellMinutes, kind: shoppingItemId == nil ? kind : .purchase, shoppingItemId: shoppingItemId)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -34,6 +38,7 @@ public struct ProposalChange: Codable, Hashable, Sendable {
         case beforeStopId = "before_stop_id"
         case afterStopId = "after_stop_id"
         case dwellMinutes = "dwell_minutes"
+        case shoppingItemId = "shopping_item_id"
     }
 }
 
@@ -194,13 +199,13 @@ public struct AddToDayFlow: Sendable {
 
     /// 用最新的當日資料計算並建立 proposal；無法估算時回傳 nil 與結果。
     public func propose(placeID: UUID, label: String, point: RoutePoint, dwellMinutes: Int,
-                        tripID: UUID, dayID: UUID, mode: TravelMode) async throws -> (Pending?, DayMatch) {
+                        tripID: UUID, dayID: UUID, mode: TravelMode, shoppingItemID: UUID? = nil) async throws -> (Pending?, DayMatch) {
         let plan = try await service.loadDayPlan(tripID: tripID, dayID: dayID)
         let match = await matcher.match(RouteCandidate(point: point, dwellMinutes: dwellMinutes), into: plan, mode: mode)
         guard let best = match.best else { return (nil, match) }
         let proposal = try await service.createProposal(
             dayID: dayID, expectedRouteRevision: plan.routeRevision,
-            change: ProposalChange(insertion: best, placeId: placeID, label: label),
+            change: ProposalChange(insertion: best, placeId: placeID, label: label, shoppingItemId: shoppingItemID),
             summary: MatchSummary(best, mode: mode, provider: match.provider))
         let labels = Dictionary(uniqueKeysWithValues: plan.stops.map { ($0.id, $0.label) })
         return (Pending(proposal: proposal, match: match, insertion: best, stopLabels: labels), match)
@@ -215,7 +220,7 @@ public struct AddToDayFlow: Sendable {
             let (fresh, match) = try await propose(placeID: change.placeId, label: change.rawLabel, point: point,
                                                    dwellMinutes: pending.insertion.addedDwellMinutes,
                                                    tripID: pending.proposal.tripId, dayID: pending.proposal.dayId,
-                                                   mode: pending.match.mode)
+                                                   mode: pending.match.mode, shoppingItemID: change.shoppingItemId)
             return fresh.map(ConfirmResult.needsReconfirm) ?? .noLongerAvailable(match)
         }
     }

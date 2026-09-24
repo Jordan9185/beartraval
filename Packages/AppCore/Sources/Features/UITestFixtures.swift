@@ -98,3 +98,52 @@ struct FakePlaceSearch: PlaceSearching {
     }
 }
 #endif
+
+#if DEBUG
+/// XCUITest：`-UITestShopping 1` 直接進 Shopping（假服務）。
+public struct ShoppingUITestRoot: View {
+    @State private var service = FakeShoppingService()
+    @State private var token = 0
+
+    public init() {}
+
+    public var body: some View {
+        NavigationStack {
+            ShoppingListView(service: service, tripID: FakeShoppingService.tripID, canEdit: true, queue: nil, reloadToken: token) { _ in
+                Text("merchant")
+            }
+            .navigationTitle("Shopping")
+        }
+    }
+}
+
+final class FakeShoppingService: ShoppingService, @unchecked Sendable {
+    static let tripID = UUID()
+    let me = UUID()
+    private var items: [ShoppingItem] = []
+    private var events: [PurchaseEvent] = []
+    private let lock = NSLock()
+
+    var currentUserID: UUID? { me }
+
+    func shoppingEntries(of tripID: UUID) async throws -> [ShoppingEntry] {
+        lock.withLock { items.map { item in ShoppingEntry(item: item, interestedUserIDs: [me], events: events.filter { $0.itemId == item.id }) } }
+    }
+
+    func addShoppingItem(tripID: UUID, name: String, note: String?, url: String?, clientOpID: UUID?) async throws -> ShoppingItem {
+        lock.withLock {
+            let item = ShoppingItem(id: UUID(), tripId: tripID, name: name, addedBy: me)
+            items.append(item)
+            return item
+        }
+    }
+
+    func recordPurchase(itemID: UUID, purchased: Bool, clientOpID: UUID?) async throws {
+        lock.withLock { events.append(PurchaseEvent(id: events.count, itemId: itemID, actorId: me, type: purchased ? .purchased : .undone, createdAt: Date())) }
+    }
+
+    func setShoppingInterest(itemID: UUID, interested: Bool) async throws {}
+    func merchants(of itemID: UUID) async throws -> [MerchantCandidate] { [] }
+    func addMerchant(itemID: UUID, placeID: UUID, evidence: MerchantCandidate.EvidenceType, url: String?, note: String?) async throws {}
+}
+#endif

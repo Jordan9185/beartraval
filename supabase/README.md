@@ -16,6 +16,7 @@
 - 所有寫入都經由 RPC（`security definer`），在函式內檢查角色；直接 insert/update/delete 一律被拒。
 - 行程寫入帶 `expected_route_revision`，不符回 `STALE_REVISION`，不寫入任何資料。
 - 當日 `route_revision` 一改變（任何 RPC），觸發器就把該日未確認的 proposal 標為 `stale`。
+- Purchase Stop：proposal 的 change 帶 `shopping_item_id`，確認後 Stop 為 `purchase` 並回連商品；Stop 被刪除時商品回到未安排。
 - 地點一進入正式行程（stops），同 Trip 同地點的 Saved 自動標為 `added_to_itinerary`，不再出現在待加入清單。
 
 ## RPC
@@ -40,6 +41,10 @@
 | `accept_invite(token)` | 已登入 | 加入 Trip |
 | `set_member_role(trip_id, user_id, role)` / `remove_member(trip_id, user_id)` | Owner | |
 | `get_trip_changes(trip_id, since_revision)` | 成員 | 重連後補拉錯過的變更 |
+| `add_shopping_item(trip_id, name, note?, url?, client_op_id?)` | Owner／Editor | 新增商品（未安排）；重送冪等 |
+| `set_shopping_interest(item_id, interested)` | Owner／Editor | 想買（成員集合，與購買分開） |
+| `add_merchant_candidate(item_id, place_id, evidence_type, evidence_url?, evidence_note?)` | Owner／Editor | 可能販售店與證據（30 天過期）；庫存一律 unknown |
+| `record_purchase(item_id, purchased, client_op_id?)` | Owner／Editor | 購買／撤銷事件；撤銷限購買者或 Owner |
 | `set_display_name(name)` | 已登入 | 顯示名稱（只有共同 Trip 的成員看得到） |
 | `invite_preview(token)` | 僅 service_role | 邀請預覽頁用：Trip 名稱、日期、邀請者、權限；不含行程 |
 
@@ -60,7 +65,7 @@ SQLSTATE `PTnnn` 會讓 PostgREST 回傳 HTTP `nnn`：
 | PT404 | `NOT_FOUND`、`INVITE_INVALID` | 404 |
 | PT409 | `STALE_REVISION`、`ALREADY_COMMITTED`、`PROPOSAL_CLOSED`、`DUPLICATE_SAVED` | 409 |
 | PT410 | `INVITE_EXPIRED`、`INVITE_REVOKED` | 410 |
-| PT422 | `INVALID_SAVED`、`PLACE_UNRESOLVED`、`EMPTY_TEXT`、`DATE_OUTSIDE_TRIP`、`INVALID_PLACE`、`INVALID_DATES`、`INVALID_TIME_ZONE`、`INVALID_STOPS`、`PLACE_NOT_FOUND`、`STOP_NOT_IN_DAY`、`INVALID_ROLE` | 422 |
+| PT422 | `INVALID_ITEM`、`EVIDENCE_REQUIRED`、`INVALID_SAVED`、`PLACE_UNRESOLVED`、`EMPTY_TEXT`、`DATE_OUTSIDE_TRIP`、`INVALID_PLACE`、`INVALID_DATES`、`INVALID_TIME_ZONE`、`INVALID_STOPS`、`PLACE_NOT_FOUND`、`STOP_NOT_IN_DAY`、`INVALID_ROLE` | 422 |
 
 ## 測試
 

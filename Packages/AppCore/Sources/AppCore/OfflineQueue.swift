@@ -4,6 +4,7 @@ import Foundation
 public enum QueuedOperation: Codable, Equatable, Sendable {
     case savePlace(tripID: UUID, label: String, category: SavedCategory, placeID: UUID?, source: SavedSource?)
     case setInterest(savedID: UUID, interested: Bool)
+    case recordPurchase(itemID: UUID, purchased: Bool)
 }
 
 public struct QueuedItem: Codable, Identifiable, Equatable, Sendable {
@@ -94,6 +95,8 @@ extension TripRepository: QueuedOperationExecutor {
             _ = try await savePlace(tripID: tripID, label: label, category: category, placeID: placeID, source: source, clientOpID: item.id)
         case let .setInterest(savedID, interested):
             try await setInterest(savedID: savedID, interested: interested)
+        case let .recordPurchase(itemID, purchased):
+            try await recordPurchase(itemID: itemID, purchased: purchased, clientOpID: item.id)
         }
     }
 }

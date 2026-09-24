@@ -285,3 +285,53 @@ struct SyncIntegrationTests {
         }
     }
 }
+
+/// WP8：選店經 proposal 建 Purchase Stop；旅伴購買同步到另一台（AC-10、AC-11）。
+@Suite(.enabled(if: IntegrationEnv.config != nil))
+struct ShoppingIntegrationTests {
+    @MainActor
+    @Test func purchaseStopAndSyncedPurchase() async throws {
+        func signedIn() async throws -> TripRepository {
+            let client = Backend.makeClient(IntegrationEnv.config!, storage: MemoryStorage())
+            _ = try await client.auth.signUp(email: "it-\(UUID().uuidString.prefix(8).lowercased())@example.com", password: UUID().uuidString)
+            return TripRepository(client: client)
+        }
+        let owner = try await signedIn(), amy = try await signedIn()
+        let trip = try await owner.createTrip(name: "Shop", startDate: "2026-10-01", endDate: "2026-10-01", timeZone: "Asia/Tokyo")
+        _ = try await amy.acceptInvite(token: try await owner.createInvite(tripID: trip.id, role: .editor))
+        let day = try #require(try await owner.days(of: trip.id).first)
+
+        let item = try await amy.addShoppingItem(tripID: trip.id, name: "ReFa", note: nil, url: nil, clientOpID: UUID())
+        #expect(try await owner.shoppingEntries(of: trip.id).first?.status == .unscheduled, "AC-09")
+
+        // 選店 → proposal → 確認 → Purchase Stop。
+        let store = try await owner.upsertPlace(PlaceDraft(providerPlaceId: "it-\(UUID().uuidString)", name: "Fukuya", latitude: 34.39, longitude: 132.46, countryCode: "JP"))
+        try await owner.addMerchant(itemID: item.id, placeID: store.id, evidence: .poiCategory, url: nil, note: "search")
+        let point = RoutePoint(coordinate: Coordinate(latitude: 34.39, longitude: 132.46), countryCode: "JP")
+        let flow = AddToDayFlow(service: owner, matcher: RouteMatcher(provider: FakeProvider([:])))
+        let (pending, _) = try await flow.propose(placeID: store.id, label: "ReFa @ Fukuya", point: point, dwellMinutes: 30,
+                                                  tripID: trip.id, dayID: day.id, mode: .walking, shoppingItemID: item.id)
+        guard case .added = try await flow.confirm(try #require(pending), point: point) else { Issue.record("not added"); return }
+        let entry = try #require(try await owner.shoppingEntries(of: trip.id).first)
+        #expect(entry.status == .scheduled)
+        #expect(entry.plannedDate == "2026-10-01")
+        #expect(try await owner.stops(of: trip.id).first?.kind == .purchase)
+        #expect(try await owner.merchants(of: item.id).first?.inventoryStatus == "unknown")
+
+        // Owner 裝置訂閱；Amy 標記已購買 → Owner 收到並看到已購買。
+        var events: [TripEvent] = []
+        let sync = TripSync(tripID: trip.id, repository: owner, revision: try await owner.tripRevision(trip.id)) { events += $0 }
+        await sync.start()
+        try await Task.sleep(for: .seconds(1))
+        try await amy.recordPurchase(itemID: item.id, purchased: true, clientOpID: UUID())
+        for _ in 0..<50 where !events.contains(where: { $0.kind == "shopping.changed" }) { try await Task.sleep(for: .milliseconds(200)) }
+        await sync.stop()
+        #expect(events.contains { $0.kind == "shopping.changed" })
+        #expect(try await owner.shoppingEntries(of: trip.id).first?.isPurchased == true)
+        #expect(TodayShopping.items(try await owner.shoppingEntries(of: trip.id), on: "2026-10-01").isEmpty, "purchased leaves today's list")
+
+        // Owner 可撤銷旅伴的誤勾。
+        try await owner.recordPurchase(itemID: item.id, purchased: false, clientOpID: nil)
+        #expect(try await amy.shoppingEntries(of: trip.id).first?.status == .scheduled)
+    }
+}

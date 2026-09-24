@@ -12,6 +12,8 @@ struct BearTravelApp: App {
             // XCUITest：`-UITestImport <scenario>` 直接進匯入流程（假服務，不連後端）。
             if let scenario = UserDefaults.standard.string(forKey: "UITestImport") {
                 ImportUITestRoot(scenario: scenario)
+            } else if UserDefaults.standard.bool(forKey: "UITestShopping") {
+                ShoppingUITestRoot()
             } else {
                 RootView(session: session).onOpenURL { session?.handle(url: $0) }
             }
