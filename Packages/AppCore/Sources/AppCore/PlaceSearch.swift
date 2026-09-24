@@ -19,7 +19,7 @@ public struct MapKitPlaceSearch: PlaceSearching {
         return items.prefix(limit).map { PlaceOption(draft: Self.draft(from: $0)) }
     }
 
-    static func draft(from item: MKMapItem) -> PlaceDraft {
+    public static func draft(from item: MKMapItem) -> PlaceDraft {
         let coordinate: CLLocationCoordinate2D
         let address: String?
         if #available(iOS 26, macOS 26, *) {

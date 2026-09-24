@@ -125,3 +125,63 @@ struct ImportIntegrationTests {
         }
     }
 }
+
+/// WP5 完成證據：兩個客戶端同日修改，第二個收到 STALE 並重新確認（AC-13）。
+@Suite(.enabled(if: IntegrationEnv.config != nil))
+struct ProposalIntegrationTests {
+    @Test func twoEditorsSecondGetsStaleAndReconfirms() async throws {
+        let ownerClient = Backend.makeClient(IntegrationEnv.config!, storage: MemoryStorage())
+        _ = try await ownerClient.auth.signUp(email: "it-\(UUID().uuidString.prefix(8).lowercased())@example.com", password: UUID().uuidString)
+        let editorClient = Backend.makeClient(IntegrationEnv.config!, storage: MemoryStorage())
+        _ = try await editorClient.auth.signUp(email: "it-\(UUID().uuidString.prefix(8).lowercased())@example.com", password: UUID().uuidString)
+        let owner = TripRepository(client: ownerClient), editor = TripRepository(client: editorClient)
+
+        // Owner 建 Trip 與兩個已確認地點，邀請 Editor。
+        let trip = try await owner.createTrip(name: "Race", startDate: "2026-10-01", endDate: "2026-10-01", timeZone: "Asia/Tokyo")
+        let day = try #require(try await owner.days(of: trip.id).first)
+        func place(_ name: String, _ lat: Double) async throws -> Place {
+            try await owner.upsertPlace(PlaceDraft(providerPlaceId: "it-\(UUID().uuidString)", name: name, latitude: lat, longitude: 132.4, countryCode: "JP"))
+        }
+        let pa = try await place("A", 34.01), pb = try await place("B", 34.02), px = try await place("X", 34.09), py = try await place("Y", 34.08)
+        _ = try await owner.commitItinerary(dayID: day.id, expectedRouteRevision: 0, stops: [
+            StopDraft(placeId: pa.id, rawLabel: "A"), StopDraft(placeId: pb.id, rawLabel: "B"),
+        ])
+        struct InviteParams: Encodable { let p_trip_id: UUID, p_role: String }
+        struct AcceptParams: Encodable { let p_token: String }
+        let token: String = try await ownerClient.rpc("create_invite", params: InviteParams(p_trip_id: trip.id, p_role: "editor")).execute().value
+        try await editorClient.rpc("accept_invite", params: AcceptParams(p_token: token)).execute()
+
+        // 路線時間用假供應商；這裡驗證的是後端的 revision 行為。
+        func coord(_ p: Place) -> RoutePoint { RoutePoint(coordinate: Coordinate(latitude: p.latitude, longitude: p.longitude), countryCode: "JP") }
+        var table: [(RoutePoint, RoutePoint, Double)] = []
+        for (p, q) in [(pa, pb), (pa, px), (px, pb), (pb, px), (px, pa), (pa, py), (py, pb), (pb, py), (py, pa), (py, px), (px, py)] {
+            table.append((coord(p), coord(q), 5))
+        }
+        let matcher = RouteMatcher(provider: FakeProvider(legs(table)))
+        let ownerFlow = AddToDayFlow(service: owner, matcher: matcher)
+        let editorFlow = AddToDayFlow(service: editor, matcher: matcher)
+
+        // 兩人都看到 revision 1 的試算結果。
+        let (ownerPending, _) = try await ownerFlow.propose(placeID: px.id, label: "X", point: coord(px), dwellMinutes: 30,
+                                                            tripID: trip.id, dayID: day.id, mode: .walking)
+        let (editorPending, _) = try await editorFlow.propose(placeID: py.id, label: "Y", point: coord(py), dwellMinutes: 30,
+                                                              tripID: trip.id, dayID: day.id, mode: .walking)
+        #expect(ownerPending?.proposal.expectedRouteRevision == 1)
+        #expect(editorPending?.proposal.expectedRouteRevision == 1)
+
+        // Owner 先確認；Editor 確認時收到過期，拿到重新計算的 proposal。
+        guard case .added = try await ownerFlow.confirm(ownerPending!, point: coord(px)) else { Issue.record("owner should add"); return }
+        let editorResult = try await editorFlow.confirm(editorPending!, point: coord(py))
+        guard case .needsReconfirm(let fresh) = editorResult else { Issue.record("expected reconfirm, got \(editorResult)"); return }
+        #expect(fresh.proposal.expectedRouteRevision == 2)
+        #expect(try await owner.stops(of: trip.id).map(\.rawLabel).contains("Y") == false, "stale confirm wrote nothing")
+
+        let staleRow: [ChangeProposal] = try await editorClient.from("change_proposals").select().eq("id", value: editorPending!.proposal.id).execute().value
+        #expect(staleRow.first?.status == .stale)
+
+        // Editor 看過新數字後再確認。
+        guard case .added = try await editorFlow.confirm(fresh, point: coord(py)) else { Issue.record("editor should add"); return }
+        let labels = try await owner.stops(of: trip.id).map(\.rawLabel)
+        #expect(Set(labels) == ["A", "B", "X", "Y"])
+    }
+}

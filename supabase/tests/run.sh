@@ -92,4 +92,51 @@ else
   failed=1
 fi
 
+# Two editors confirm proposals made against the same revision at the same time.
+# The second waits for the day lock, then gets "stale" and nothing is written.
+"$PG_BIN/createdb" -T bt_template t_proposal_race
+"${PSQL[@]}" -d t_proposal_race <<'SQL' >/dev/null
+set role authenticated;
+select tests.login('00000000-0000-0000-0000-00000000000a');
+select id from app.create_trip('Race', '2026-10-01', '2026-10-01', 'Asia/Seoul');
+select app.upsert_place('apple_mapkit', 'race', 'Race', 37.5, 127.0);
+SQL
+RACE_DAY="$("${PSQL[@]}" -d t_proposal_race -At -c "select id from app.trip_days limit 1")"
+RACE_PLACE="$("${PSQL[@]}" -d t_proposal_race -At -c "select id from app.places where provider_place_id = 'race'")"
+propose() {
+  "${PSQL[@]}" -d t_proposal_race -At <<SQL
+set role authenticated;
+select tests.login('00000000-0000-0000-0000-00000000000a');
+select id from app.create_proposal('$RACE_DAY', 0, '{"place_id": "$RACE_PLACE", "raw_label": "$1"}');
+SQL
+}
+P_A="$(propose "from A" | tail -1)"
+P_B="$(propose "from B" | tail -1)"
+
+"${PSQL[@]}" -d t_proposal_race -At >"$WORK/pa.out" 2>&1 <<SQL &
+set role authenticated;
+select tests.login('00000000-0000-0000-0000-00000000000a');
+begin;
+select app.confirm_proposal('$P_A') ->> 'status';
+select pg_sleep(1.5);
+commit;
+SQL
+PA_PID=$!
+sleep 0.5
+"${PSQL[@]}" -d t_proposal_race -At >"$WORK/pb.out" 2>&1 <<SQL
+set role authenticated;
+select tests.login('00000000-0000-0000-0000-00000000000a');
+select app.confirm_proposal('$P_B') ->> 'status';
+SQL
+wait "$PA_PID"
+RACE_LABELS="$("${PSQL[@]}" -d t_proposal_race -At -c "select string_agg(raw_label, ',') from app.stops where deleted_at is null")"
+
+if grep -qx confirmed "$WORK/pa.out" && grep -qx stale "$WORK/pb.out" && [[ "$RACE_LABELS" == "from A" ]]; then
+  echo "PASS proposal race (second concurrent confirm got stale; no silent overwrite)"
+else
+  echo "FAIL proposal race (stops=$RACE_LABELS)"
+  cat "$WORK/pa.out" "$WORK/pb.out"
+  failed=1
+fi
+
 exit $failed

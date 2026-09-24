@@ -15,6 +15,7 @@
 - 所有資料表在 `app` schema。用戶端只能 `select`，RLS 限制為該 Trip 的有效成員。
 - 所有寫入都經由 RPC（`security definer`），在函式內檢查角色；直接 insert/update/delete 一律被拒。
 - 行程寫入帶 `expected_route_revision`，不符回 `STALE_REVISION`，不寫入任何資料。
+- 當日 `route_revision` 一改變（任何 RPC），觸發器就把該日未確認的 proposal 標為 `stale`。
 
 ## RPC
 
@@ -27,6 +28,9 @@
 | `commit_import(import_id, days jsonb)` | 建立者 | 在同一交易建 Trip、各日 Stop；Place 須先 `upsert_place` |
 | `record_parse_result(...)` | 僅 service_role | 由 `parse-import` Edge Function 寫入解析結果 |
 | `commit_itinerary(day_id, expected_route_revision, stops jsonb)` | Owner／Editor | 以有序清單取代當日行程；回傳新 route_revision |
+| `create_proposal(day_id, expected_route_revision, change jsonb, route_match jsonb)` | Owner／Editor | 建立加入行程的 proposal（地點須已確認）；不寫入 Stop |
+| `confirm_proposal(proposal_id)` | Owner／Editor | 插入 Stop；當日已變更時回 `{"status":"stale"}` 且不寫入 |
+| `reject_proposal(proposal_id)` | Owner／Editor | 取消 proposal |
 | `create_invite(trip_id, role, expires_in, max_uses)` | Owner | 回傳一次性明文 token，DB 只存 SHA-256 |
 | `revoke_invite(invite_id)` | Owner | |
 | `accept_invite(token)` | 已登入 | 加入 Trip |
@@ -44,9 +48,9 @@ SQLSTATE `PTnnn` 會讓 PostgREST 回傳 HTTP `nnn`：
 | PT401 | `UNAUTHENTICATED` | 401 |
 | PT403 | `FORBIDDEN_ROLE` | 403 |
 | PT404 | `NOT_FOUND`、`INVITE_INVALID` | 404 |
-| PT409 | `STALE_REVISION`、`ALREADY_COMMITTED` | 409 |
+| PT409 | `STALE_REVISION`、`ALREADY_COMMITTED`、`PROPOSAL_CLOSED` | 409 |
 | PT410 | `INVITE_EXPIRED`、`INVITE_REVOKED` | 410 |
-| PT422 | `EMPTY_TEXT`、`DATE_OUTSIDE_TRIP`、`INVALID_PLACE`、`INVALID_DATES`、`INVALID_TIME_ZONE`、`INVALID_STOPS`、`PLACE_NOT_FOUND`、`STOP_NOT_IN_DAY`、`INVALID_ROLE` | 422 |
+| PT422 | `PLACE_UNRESOLVED`、`EMPTY_TEXT`、`DATE_OUTSIDE_TRIP`、`INVALID_PLACE`、`INVALID_DATES`、`INVALID_TIME_ZONE`、`INVALID_STOPS`、`PLACE_NOT_FOUND`、`STOP_NOT_IN_DAY`、`INVALID_ROLE` | 422 |
 
 ## 測試
 

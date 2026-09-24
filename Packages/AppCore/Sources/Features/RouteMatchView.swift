@@ -9,8 +9,11 @@ import UIKit
 /// 只試算、不寫入；加入行程走 proposal（WP5）。
 struct RouteMatchView: View {
     let session: SessionModel
+    let tripID: UUID
     let timeline: [DayTimeline]
     let places: [UUID: Place]
+    /// 成功加入行程後呼叫，讓時間軸重新載入。
+    let onAdded: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
@@ -21,6 +24,13 @@ struct RouteMatchView: View {
     @State private var matches: [DayMatch] = []
     @State private var isWorking = false
     @State private var message: String?
+    @State private var adding: AddRequest?
+
+    struct AddRequest: Identifiable {
+        let id = UUID()
+        let dayID: UUID
+        let mode: TravelMode
+    }
 
     var body: some View {
         NavigationStack {
@@ -70,11 +80,24 @@ struct RouteMatchView: View {
                         Section(dayTitle(match.dayID) + "（\(match.mode.displayName)）") {
                             DayMatchRow(match: match, candidate: candidate, previousStop: previousPoint(match),
                                         positionText: { positionText($0, dayID: match.dayID) }, stopName: stopName)
+                            if match.best != nil {
+                                Button("加入這天…") { adding = AddRequest(dayID: match.dayID, mode: match.mode) }
+                            }
                         }
                     }
                 }
             }
             .navigationTitle("試算順路")
+            .sheet(item: $adding) { request in
+                if let candidate {
+                    ProposalReviewView(session: session, tripID: tripID, dayID: request.dayID, dayTitle: dayTitle(request.dayID),
+                                       mode: request.mode, candidate: candidate, dwellMinutes: dwellMinutes) {
+                        adding = nil
+                        onAdded()
+                        dismiss()
+                    }
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("關閉") { dismiss() } }
             }
@@ -156,23 +179,17 @@ struct RouteMatchView: View {
 
 struct SearchResult: Identifiable, Equatable {
     let id = UUID()
-    let name: String
-    let address: String?
-    let point: RoutePoint
+    /// 加入行程時以此註冊 Place（upsert_place）。
+    let draft: PlaceDraft
 
     init(_ item: MKMapItem) {
-        name = item.name ?? "（未命名）"
-        let coordinate: CLLocationCoordinate2D
-        var country: String?
-        if #available(iOS 26, macOS 26, *) {
-            coordinate = item.location.coordinate
-            address = item.address?.shortAddress ?? item.address?.fullAddress
-        } else {
-            coordinate = item.placemark.coordinate
-            address = item.placemark.title
-        }
-        country = item.placemark.countryCode
-        point = RoutePoint(coordinate: Coordinate(latitude: coordinate.latitude, longitude: coordinate.longitude), countryCode: country)
+        draft = MapKitPlaceSearch.draft(from: item)
+    }
+
+    var name: String { draft.name }
+    var address: String? { draft.address }
+    var point: RoutePoint {
+        RoutePoint(coordinate: Coordinate(latitude: draft.latitude, longitude: draft.longitude), countryCode: draft.countryCode)
     }
 
     var mapPoint: MapPoint {

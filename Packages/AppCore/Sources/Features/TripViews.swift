@@ -188,7 +188,9 @@ struct TripDetailView: View {
             #endif
         }
         .sheet(isPresented: $showsRouteMatch) {
-            RouteMatchView(session: session, timeline: timeline, places: places)
+            RouteMatchView(session: session, tripID: trip.id, timeline: timeline, places: places) {
+                Task { await reload() }
+            }
         }
         .refreshable { await reload() }
         .task { await reload() }
