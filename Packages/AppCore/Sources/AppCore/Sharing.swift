@@ -176,6 +176,13 @@ public final class TripSync {
                 await self?.catchUp()
             }
         })
+        // 保險：Realtime 漏送（例如伺服器剛啟動、背景斷線）時，定期補拉仍會收斂。
+        tasks.append(Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                await self?.catchUp()
+            }
+        })
         self.channel = channel
         await channel.subscribe()
     }

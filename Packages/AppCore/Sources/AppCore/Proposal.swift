@@ -113,7 +113,7 @@ public enum ConfirmOutcome: Equatable, Sendable {
 }
 
 public protocol ProposalService: Sendable {
-    func createProposal(dayID: UUID, expectedRouteRevision: Int, change: ProposalChange, summary: MatchSummary) async throws -> ChangeProposal
+    func createProposal(dayID: UUID, expectedRouteRevision: Int, change: ProposalChange, summary: MatchSummary, createdByAI: Bool) async throws -> ChangeProposal
     func confirm(proposalID: UUID) async throws -> ConfirmOutcome
     func reject(proposalID: UUID) async throws
     /// 重新讀取當日（最新 revision 與 Stop），供重新計算。
@@ -121,13 +121,15 @@ public protocol ProposalService: Sendable {
 }
 
 extension TripRepository: ProposalService {
-    public func createProposal(dayID: UUID, expectedRouteRevision: Int, change: ProposalChange, summary: MatchSummary) async throws -> ChangeProposal {
+    public func createProposal(dayID: UUID, expectedRouteRevision: Int, change: ProposalChange, summary: MatchSummary, createdByAI: Bool) async throws -> ChangeProposal {
         struct Params: Encodable {
             let p_day_id: UUID, p_expected_route_revision: Int, p_change: ProposalChange, p_route_match: MatchSummary
+            let p_created_by_ai: Bool
         }
         do {
             return try await client.rpc("create_proposal", params: Params(
-                p_day_id: dayID, p_expected_route_revision: expectedRouteRevision, p_change: change, p_route_match: summary
+                p_day_id: dayID, p_expected_route_revision: expectedRouteRevision, p_change: change, p_route_match: summary,
+                p_created_by_ai: createdByAI
             )).execute().value
         } catch {
             throw BackendError.from(error)
@@ -199,14 +201,15 @@ public struct AddToDayFlow: Sendable {
 
     /// 用最新的當日資料計算並建立 proposal；無法估算時回傳 nil 與結果。
     public func propose(placeID: UUID, label: String, point: RoutePoint, dwellMinutes: Int,
-                        tripID: UUID, dayID: UUID, mode: TravelMode, shoppingItemID: UUID? = nil) async throws -> (Pending?, DayMatch) {
+                        tripID: UUID, dayID: UUID, mode: TravelMode, shoppingItemID: UUID? = nil,
+                        createdByAI: Bool = false) async throws -> (Pending?, DayMatch) {
         let plan = try await service.loadDayPlan(tripID: tripID, dayID: dayID)
         let match = await matcher.match(RouteCandidate(point: point, dwellMinutes: dwellMinutes), into: plan, mode: mode)
         guard let best = match.best else { return (nil, match) }
         let proposal = try await service.createProposal(
             dayID: dayID, expectedRouteRevision: plan.routeRevision,
             change: ProposalChange(insertion: best, placeId: placeID, label: label, shoppingItemId: shoppingItemID),
-            summary: MatchSummary(best, mode: mode, provider: match.provider))
+            summary: MatchSummary(best, mode: mode, provider: match.provider), createdByAI: createdByAI)
         let labels = Dictionary(uniqueKeysWithValues: plan.stops.map { ($0.id, $0.label) })
         return (Pending(proposal: proposal, match: match, insertion: best, stopLabels: labels), match)
     }

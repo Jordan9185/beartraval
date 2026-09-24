@@ -12,6 +12,7 @@ struct TodayView: View {
     @State private var nearby: [(SavedEntry, DayMatch)] = []
     @State private var computingNearby = false
     @State private var adding: SavedEntry?
+    @State private var showsAssistant = false
 
     /// 順路門檻：加入後多花不超過此分鐘數才算「順路」。
     static let nearbyThresholdMinutes = 20
@@ -35,7 +36,17 @@ struct TodayView: View {
                         ForEach(store.trips) { Text($0.name).tag(Optional($0.id)) }
                     }
                 }
+                if store.snapshot != nil {
+                    Button("AI 助手", systemImage: "sparkles") { showsAssistant = true }
+                }
                 if let onDebug { Button("Debug", systemImage: "ladybug", action: onDebug) }
+            }
+            .sheet(isPresented: $showsAssistant) {
+                if let snapshot = store.snapshot {
+                    AssistantView(session: session, snapshot: snapshot, canApply: store.myRole?.canEdit == true) {
+                        Task { await store.reload() }
+                    }
+                }
             }
             .refreshable { await store.reload() }
         }

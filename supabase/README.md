@@ -97,6 +97,10 @@ supabase status     # 取得 anon key
 - API key：本機放 `supabase/functions/.env`（`ANTHROPIC_API_KEY=...`，已 gitignore），雲端用 `supabase secrets set ANTHROPIC_API_KEY=...`。
 - 沒有 key 時回 `missing_api_key`，session 標為 failed，原文保留。
 
+## Edge Function：`ask-trip`（AI 助手）
+
+以使用者 JWT 讀取 Trip（RLS），組成 Trip 範圍的上下文，用 `ai/trip-assistant` 的 `askTrip()` 回答並驗證引用。路線分鐘數只能來自 App 在裝置上算好的 `route_facts`。回傳的 `proposal` 只是建議：App 重新計算後建立 `created_by_ai = true` 的 proposal，仍需使用者確認。問答存在 `app.ai_messages`（刪 Trip 即刪，D11）；日誌只記延遲、token 數與狀態，不記 prompt。
+
 ## iOS 整合測試
 
 `Packages/AppCore` 的 `ItineraryIntegrationTests` 會對本機 Supabase 呼叫 RPC（建 Trip、註冊 Place、提交行程、過期 revision、非成員被拒）。每次以隨機 Email 註冊兩個測試使用者，只在設定環境變數時執行：

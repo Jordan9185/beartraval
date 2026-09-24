@@ -1,4 +1,4 @@
-name: AI parse tests
+name: AI tests
 
 on:
   push:
@@ -23,6 +23,23 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: ai/itinerary-parse/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run eval:dry
+
+  trip-assistant:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ai/trip-assistant
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ai/trip-assistant/package-lock.json
       - run: npm ci
       - run: npm run typecheck
       - run: npm test

@@ -421,3 +421,7 @@ verify_jwt = true
 # 邀請預覽頁（公開，不需登入；只顯示 Trip 名稱、日期、邀請者，決策 D4）。
 [functions.invite]
 verify_jwt = false
+
+# AI 助手：Trip 範圍問答（WP10）。
+[functions.ask-trip]
+verify_jwt = true

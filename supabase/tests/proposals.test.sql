@@ -77,3 +77,10 @@ select tests.ok((select status = 'stale' from app.change_proposals where id = :'
 select tests.throws(format($$select app.confirm_proposal(%L)$$, :'p3'), 'PT409', 'confirmed proposal cannot be confirmed again');
 select app.reject_proposal(:'p4');
 select tests.ok((select status = 'rejected' from app.change_proposals where id = :'p4'), 'stale proposal can be dismissed');
+
+-- AI-suggested proposals are marked and still need confirmation.
+select tests.login(:'owner');
+select id as pai from app.create_proposal(:'day_id', (select route_revision from app.trip_days where id = :'day_id'),
+  format('{"place_id": %s, "raw_label": "AI 建議"}', to_json(:'pa'::text))::jsonb, null, true) \gset
+select tests.ok((select created_by_ai and status = 'proposed' from app.change_proposals where id = :'pai'), 'AI proposal recorded, not applied');
+select tests.ok((select count(*) from app.stops where raw_label = 'AI 建議') = 0, 'AI proposal wrote no stop');

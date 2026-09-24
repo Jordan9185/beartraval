@@ -1,0 +1,21 @@
+{
+  "name": "@beartravel/trip-assistant",
+  "private": true,
+  "type": "module",
+  "description": "AI trip assistant (WP10): trip-scoped Q&A with citations and add-to-day proposals.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "eval": "tsx eval/run.ts",
+    "eval:dry": "tsx eval/run.ts --dry-run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

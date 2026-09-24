@@ -14,6 +14,8 @@ struct ProposalReviewView: View {
     let dwellMinutes: Int
     /// 建立 Purchase Stop 時的商品（WP8）。
     var shoppingItemID: UUID? = nil
+    /// AI 助手建議的變更（仍需使用者確認）。
+    var createdByAI = false
     let onAdded: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -36,6 +38,9 @@ struct ProposalReviewView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if createdByAI {
+                    Section { Label("AI 助手的建議，確認後才會加入。", systemImage: "sparkles").font(.caption) }
+                }
                 if let notice {
                     Section {
                         Label(notice, systemImage: "arrow.triangle.2.circlepath").foregroundStyle(.orange)
@@ -93,7 +98,7 @@ struct ProposalReviewView: View {
             let place = try await session.trips.upsertPlace(candidate.draft)
             let (fresh, _) = try await flow.propose(placeID: place.id, label: place.nameLocal ?? place.name, point: candidate.point,
                                                     dwellMinutes: dwellMinutes, tripID: tripID, dayID: dayID, mode: mode,
-                                                    shoppingItemID: shoppingItemID)
+                                                    shoppingItemID: shoppingItemID, createdByAI: createdByAI)
             pending = fresh
             phase = fresh == nil ? .unavailable : .review
         } catch {

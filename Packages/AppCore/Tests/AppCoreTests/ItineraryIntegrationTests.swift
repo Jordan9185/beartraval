@@ -362,3 +362,32 @@ struct SnapshotIntegrationTests {
         #expect(next.shopping.count == 2)
     }
 }
+
+/// WP10：AI 助手只回答成員自己的 Trip；Viewer 可問；沒有 key 時明確失敗、不寫入行程。
+@Suite(.enabled(if: IntegrationEnv.config != nil))
+struct AssistantIntegrationTests {
+    @Test func askRespectsMembershipAndNeverWrites() async throws {
+        func signedIn() async throws -> TripRepository {
+            let client = Backend.makeClient(IntegrationEnv.config!, storage: MemoryStorage())
+            _ = try await client.auth.signUp(email: "it-\(UUID().uuidString.prefix(8).lowercased())@example.com", password: UUID().uuidString)
+            return TripRepository(client: client)
+        }
+        let owner = try await signedIn(), viewer = try await signedIn(), outsider = try await signedIn()
+        let trip = try await owner.createTrip(name: "AI", startDate: "2026-10-01", endDate: "2026-10-01", timeZone: "Asia/Seoul")
+        _ = try await viewer.acceptInvite(token: try await owner.createInvite(tripID: trip.id, role: .viewer))
+        let before = try await owner.tripRevision(trip.id)
+
+        let result = try await viewer.ask(tripID: trip.id, question: "明天會下雨嗎？", today: "2026-10-01", routeFacts: [])
+        if case .failed(let reason) = result {
+            #expect(reason == "missing_api_key")
+        } else if case .answered(let answer) = result {
+            #expect(answer.cannotDetermine, "weather is not in the trip data")
+            #expect(answer.proposal == nil)
+        }
+        #expect(try await owner.tripRevision(trip.id) == before, "asking never changes the trip")
+
+        await #expect(throws: BackendError.self) {
+            _ = try await outsider.ask(tripID: trip.id, question: "有什麼行程？", today: nil, routeFacts: [])
+        }
+    }
+}

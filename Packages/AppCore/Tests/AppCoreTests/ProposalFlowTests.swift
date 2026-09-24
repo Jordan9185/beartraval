@@ -17,7 +17,7 @@ final class FakeProposalService: ProposalService, @unchecked Sendable {
         lock.withLock { DayPlan(dayID: dayID, routeRevision: revision, localMidnight: Date(timeIntervalSince1970: 0), stops: stops, excludedPendingCount: 0) }
     }
 
-    func createProposal(dayID: UUID, expectedRouteRevision: Int, change: ProposalChange, summary: MatchSummary) async throws -> ChangeProposal {
+    func createProposal(dayID: UUID, expectedRouteRevision: Int, change: ProposalChange, summary: MatchSummary, createdByAI: Bool) async throws -> ChangeProposal {
         try lock.withLock {
             guard expectedRouteRevision == revision else { throw BackendError.staleRevision }
             let p = ChangeProposal(id: UUID(), tripId: tripID, dayId: dayID, change: change, expectedRouteRevision: expectedRouteRevision, status: .proposed)
