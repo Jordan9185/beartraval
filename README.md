@@ -4,7 +4,7 @@
 
 - 平台：原生 iOS（SwiftUI + Share Extension）
 - 分頁：Today / Trip / Map / Saved / Shopping；右上 AI 入口，右下全域新增
-- 目前階段：**規劃中**（尚未開始寫 App 程式碼）
+- 目前階段：**WP1 骨架 + Spike S1／S2 工具**（Xcode 專案、Share Extension、除錯工具）
 
 ## 三條必須走通的主流程
 
@@ -21,6 +21,20 @@
 | [docs/planning/mvp-technical-plan.md](docs/planning/mvp-technical-plan.md) | MVP 技術規劃 v0.1（決策 D1–D11 已確認）：架構、Work Packages、資料契約、Route Match、Share 驗證、驗收計畫 |
 
 參考 wireframe：<https://ai-travel-companion-mvp-wireframe.jordan8125.chatgpt.site/>（示意資料，非正式架構）
+
+## 開發
+
+需求：Xcode 26+、[XcodeGen](https://github.com/yonaskolb/XcodeGen)（`brew install xcodegen`）。`.xcodeproj` 由 `project.yml` 產生，不進版控。
+
+```bash
+xcodegen generate
+open BearTravel.xcodeproj
+```
+
+- 真機簽章：建立 `Config/Local.xcconfig.local`（已 gitignore），填 `DEVELOPMENT_TEAM = <Team ID>`；bundle id 衝突時再加 `BUNDLE_ID_PREFIX = com.<你的名字>`。
+- 結構：`App/`（App target）、`ShareExtension/`、`Packages/AppCore`（`AppCore` Domain／規則、`Features` SwiftUI 頁、`ShareCore` Extension 共用子集）、`Tools/RouteSpike`（S1 macOS 實測工具）。
+- 測試：`swift test --package-path Packages/AppCore`，或在 Xcode 跑 BearTravel scheme 的 Test。
+- Spike 工具：DEBUG build 在 Today 右上角 🐞。
 
 ## 下一步
 

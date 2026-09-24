@@ -1,0 +1,31 @@
+id,city,lang,query,expect
+P01,seoul,ko,올리브영 명동타운,Olive Young 명동 타운점（連鎖分店）
+P02,seoul,en,Olive Young Myeongdong Town,同 P01
+P03,seoul,ja,オリーブヤング 明洞タウン,同 P01
+P04,seoul,zh,Olive Young 明洞,同 P01
+P05,seoul,ko,광장시장,광장시장
+P06,seoul,en,Gwangjang Market,광장시장
+P07,seoul,zh,广藏市场,광장시장
+P08,seoul,ko,다이소 명동역점,다이소 명동역점（連鎖分店）
+P09,seoul,ko,무신사 스탠다드 성수,무신사 스탠다드 성수점
+P10,seoul,en,Musinsa Standard Seongsu,同 P09
+P11,seoul,ko,어니언 성수,카페 어니언 성수
+P12,seoul,en,Cafe Onion Seongsu,同 P11
+P13,seoul,ko,스타벅스 명동,多間分店，需可區分
+P14,seoul,zh,明洞餃子,명동교자 본점
+P15,seoul,ko,명동교자,명동교자 본점
+P16,hiroshima,ja,ReFa 広島,ReFa 取扱店（連鎖）
+P17,hiroshima,ja,ユニクロ 広島,多間分店，需可區分
+P18,hiroshima,en,UNIQLO Hiroshima,同 P17
+P19,hiroshima,zh,優衣庫 廣島,同 P17
+P20,hiroshima,ja,お好み村,お好み村
+P21,hiroshima,en,Okonomimura,お好み村
+P22,hiroshima,ja,広島城,広島城
+P23,hiroshima,en,Hiroshima Castle,広島城
+P24,hiroshima,ja,原爆ドーム,原爆ドーム
+P25,hiroshima,zh,原爆圓頂館,原爆ドーム
+P26,hiroshima,ja,ドン・キホーテ 広島八丁堀,ドン・キホーテ 広島八丁堀店
+P27,hiroshima,en,Don Quijote Hiroshima,同 P26（或多間）
+P28,hiroshima,ja,無印良品 広島,多間分店
+P29,hiroshima,ja,にしき堂 光町本店,にしき堂 本店
+P30,hiroshima,en,Nishikido Hiroshima,にしき堂

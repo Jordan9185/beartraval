@@ -1,0 +1,8 @@
+// 共用設定。個人簽章設定放在 Config/Local.xcconfig.local（已 gitignore），例如：
+//   DEVELOPMENT_TEAM = ABCDE12345
+//   BUNDLE_ID_PREFIX = com.yourname
+BUNDLE_ID_PREFIX = com.jordan9185
+DEVELOPMENT_TEAM =
+APP_GROUP_ID = group.$(BUNDLE_ID_PREFIX).beartravel
+
+#include? "Local.xcconfig.local"

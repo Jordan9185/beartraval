@@ -27,3 +27,6 @@ supabase/.branches/
 # Node
 node_modules/
 ai/itinerary-parse/eval/results/
+
+# XcodeGen 產物（由 project.yml 產生）
+*.xcodeproj

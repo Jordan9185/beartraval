@@ -1,0 +1,151 @@
+run_at,od_id,city,detour_case,mode,from,to,straight_m,status,apple_minutes,apple_distance_m,latency_ms,error_domain,error_code,geo_error,error_message
+2026-09-24T06:11:07Z,S01,seoul,,walking,명동역,동대문디자인플라자,2116,ok,30.2,2261,254,,,,
+2026-09-24T06:11:07Z,S01,seoul,,transit,명동역,동대문디자인플라자,2116,unavailable,,,115,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S01,seoul,,driving,명동역,동대문디자인플라자,2116,ok,4.3,2571,104,,,,
+2026-09-24T06:11:07Z,S02,seoul,,walking,명동역,경복궁,2232,ok,40.8,2935,109,,,,
+2026-09-24T06:11:07Z,S02,seoul,,transit,명동역,경복궁,2232,unavailable,,,103,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S02,seoul,,driving,명동역,경복궁,2232,ok,8.2,3270,162,,,,
+2026-09-24T06:11:07Z,S03,seoul,,walking,경복궁,북촌한옥마을,633,ok,15.7,1175,77,,,,
+2026-09-24T06:11:07Z,S03,seoul,,transit,경복궁,북촌한옥마을,633,unavailable,,,77,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S03,seoul,,driving,경복궁,북촌한옥마을,633,ok,3.6,1025,109,,,,
+2026-09-24T06:11:07Z,S04,seoul,,walking,북촌한옥마을,인사동 쌈지길,941,ok,15.2,1184,84,,,,
+2026-09-24T06:11:07Z,S04,seoul,,transit,북촌한옥마을,인사동 쌈지길,941,unavailable,,,78,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S04,seoul,,driving,북촌한옥마을,인사동 쌈지길,941,ok,2.8,1180,68,,,,
+2026-09-24T06:11:07Z,S05,seoul,,walking,인사동 쌈지길,광장시장,1350,ok,23.2,1726,99,,,,
+2026-09-24T06:11:07Z,S05,seoul,,transit,인사동 쌈지길,광장시장,1350,unavailable,,,86,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S05,seoul,,driving,인사동 쌈지길,광장시장,1350,ok,2.9,1792,74,,,,
+2026-09-24T06:11:07Z,S06,seoul,,walking,광장시장,동대문디자인플라자,932,ok,16.7,1182,81,,,,
+2026-09-24T06:11:07Z,S06,seoul,,transit,광장시장,동대문디자인플라자,932,unavailable,,,92,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S06,seoul,,driving,광장시장,동대문디자인플라자,932,ok,4.1,1869,95,,,,
+2026-09-24T06:11:07Z,S07,seoul,,walking,서울역,남대문시장,767,ok,14.0,981,69,,,,
+2026-09-24T06:11:07Z,S07,seoul,,transit,서울역,남대문시장,767,unavailable,,,90,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S07,seoul,,driving,서울역,남대문시장,767,ok,3.2,2274,83,,,,
+2026-09-24T06:11:07Z,S08,seoul,,walking,남대문시장,명동역,817,ok,13.0,967,75,,,,
+2026-09-24T06:11:07Z,S08,seoul,,transit,남대문시장,명동역,817,unavailable,,,90,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S08,seoul,,driving,남대문시장,명동역,817,ok,1.9,1323,66,,,,
+2026-09-24T06:11:07Z,S09,seoul,,walking,홍대입구역,연남동 경의선숲길,645,ok,10.5,755,79,,,,
+2026-09-24T06:11:07Z,S09,seoul,,transit,홍대입구역,연남동 경의선숲길,645,unavailable,,,76,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S09,seoul,,driving,홍대입구역,연남동 경의선숲길,645,ok,2.0,1305,71,,,,
+2026-09-24T06:11:07Z,S10,seoul,,walking,홍대입구역,망원시장,1640,ok,28.6,1972,106,,,,
+2026-09-24T06:11:07Z,S10,seoul,,transit,홍대입구역,망원시장,1640,unavailable,,,90,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S10,seoul,,driving,홍대입구역,망원시장,1640,ok,3.7,2662,73,,,,
+2026-09-24T06:11:07Z,S11,seoul,,walking,합정역,망원시장,995,ok,17.1,1268,87,,,,
+2026-09-24T06:11:07Z,S11,seoul,,transit,합정역,망원시장,995,unavailable,,,95,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S11,seoul,,driving,합정역,망원시장,995,ok,2.5,1420,73,,,,
+2026-09-24T06:11:07Z,S12,seoul,,walking,성수역,서울숲,1617,ok,27.1,1989,147,,,,
+2026-09-24T06:11:07Z,S12,seoul,,transit,성수역,서울숲,1617,unavailable,,,82,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S12,seoul,,driving,성수역,서울숲,1617,ok,3.6,2580,91,,,,
+2026-09-24T06:11:07Z,S13,seoul,,walking,성수역,건대입구역,1355,ok,18.2,1374,87,,,,
+2026-09-24T06:11:07Z,S13,seoul,,transit,성수역,건대입구역,1355,unavailable,,,99,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S13,seoul,,driving,성수역,건대입구역,1355,ok,1.6,1521,67,,,,
+2026-09-24T06:11:07Z,S14,seoul,,walking,강남역,가로수길,2595,ok,40.2,2907,211,,,,
+2026-09-24T06:11:07Z,S14,seoul,,transit,강남역,가로수길,2595,unavailable,,,100,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S14,seoul,,driving,강남역,가로수길,2595,ok,3.5,2913,76,,,,
+2026-09-24T06:11:07Z,S15,seoul,,walking,가로수길,압구정로데오,1681,ok,29.8,2202,132,,,,
+2026-09-24T06:11:07Z,S15,seoul,,transit,가로수길,압구정로데오,1681,unavailable,,,96,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S15,seoul,,driving,가로수길,압구정로데오,1681,ok,2.6,2202,72,,,,
+2026-09-24T06:11:07Z,S16,seoul,,walking,코엑스,롯데월드타워,3803,ok,63.5,4355,284,,,,
+2026-09-24T06:11:07Z,S16,seoul,,transit,코엑스,롯데월드타워,3803,unavailable,,,79,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S16,seoul,,driving,코엑스,롯데월드타워,3803,ok,5.0,4274,77,,,,
+2026-09-24T06:11:07Z,S17,seoul,,walking,명동역,N서울타워,1089,ok,35.7,1835,77,,,,
+2026-09-24T06:11:07Z,S17,seoul,,transit,명동역,N서울타워,1089,unavailable,,,105,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S17,seoul,,driving,명동역,N서울타워,1089,ok,13.9,2183,180,,,,
+2026-09-24T06:11:07Z,S18,seoul,,walking,여의도 IFC몰,여의도한강공원,796,ok,16.5,1199,69,,,,
+2026-09-24T06:11:07Z,S18,seoul,,transit,여의도 IFC몰,여의도한강공원,796,unavailable,,,73,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S18,seoul,,driving,여의도 IFC몰,여의도한강공원,796,ok,4.6,1222,127,,,,
+2026-09-24T06:11:07Z,S19,seoul,,walking,서울역,홍대입구역,4091,ok,70.0,4632,176,,,,
+2026-09-24T06:11:07Z,S19,seoul,,transit,서울역,홍대입구역,4091,unavailable,,,119,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S19,seoul,,driving,서울역,홍대입구역,4091,ok,5.5,5735,94,,,,
+2026-09-24T06:11:07Z,S20,seoul,,walking,명동역,성수역,6393,ok,119.7,7449,238,,,,
+2026-09-24T06:11:07Z,S20,seoul,,transit,명동역,성수역,6393,unavailable,,,94,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S20,seoul,,driving,명동역,성수역,6393,ok,7.7,7440,104,,,,
+2026-09-24T06:11:07Z,S21,seoul,river,walking,서울숲,압구정로데오,1915,ok,31.9,2456,148,,,,
+2026-09-24T06:11:07Z,S21,seoul,river,transit,서울숲,압구정로데오,1915,unavailable,,,83,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S21,seoul,river,driving,서울숲,압구정로데오,1915,ok,3.2,3153,94,,,,
+2026-09-24T06:11:07Z,S22,seoul,river,walking,여의도 IFC몰,마포역,2402,ok,40.0,2937,155,,,,
+2026-09-24T06:11:07Z,S22,seoul,river,transit,여의도 IFC몰,마포역,2402,unavailable,,,76,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S22,seoul,river,driving,여의도 IFC몰,마포역,2402,ok,2.6,2574,67,,,,
+2026-09-24T06:11:07Z,S23,seoul,hill,walking,N서울타워,이태원역,1937,ok,48.2,2884,82,,,,
+2026-09-24T06:11:07Z,S23,seoul,hill,transit,N서울타워,이태원역,1937,unavailable,,,94,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S23,seoul,hill,driving,N서울타워,이태원역,1937,ok,8.0,4038,139,,,,
+2026-09-24T06:11:07Z,S24,seoul,river,walking,건대입구역,잠실역,4009,ok,59.0,4288,299,,,,
+2026-09-24T06:11:07Z,S24,seoul,river,transit,건대입구역,잠실역,4009,unavailable,,,171,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S24,seoul,river,driving,건대입구역,잠실역,4009,ok,6.3,4839,83,,,,
+2026-09-24T06:11:07Z,S25,seoul,railway,walking,서울역,서계동,390,ok,9.1,611,66,,,,
+2026-09-24T06:11:07Z,S25,seoul,railway,transit,서울역,서계동,390,unavailable,,,93,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,S25,seoul,railway,driving,서울역,서계동,390,ok,1.7,927,71,,,,
+2026-09-24T06:11:07Z,H01,hiroshima,,walking,広島駅,原爆ドーム,2018,ok,40.8,2682,103,,,,
+2026-09-24T06:11:07Z,H01,hiroshima,,transit,広島駅,原爆ドーム,2018,ok,19.2,2394,251,,,,
+2026-09-24T06:11:07Z,H01,hiroshima,,driving,広島駅,原爆ドーム,2018,ok,13.6,2513,94,,,,
+2026-09-24T06:11:07Z,H02,hiroshima,,walking,広島駅,平和記念資料館,2190,ok,45.1,3072,107,,,,
+2026-09-24T06:11:07Z,H02,hiroshima,,transit,広島駅,平和記念資料館,2190,ok,18.5,3558,217,,,,
+2026-09-24T06:11:07Z,H02,hiroshima,,driving,広島駅,平和記念資料館,2190,ok,16.7,3754,113,,,,
+2026-09-24T06:11:07Z,H03,hiroshima,,walking,原爆ドーム,平和記念資料館,440,ok,7.6,596,70,,,,
+2026-09-24T06:11:07Z,H03,hiroshima,,transit,原爆ドーム,平和記念資料館,440,ok,7.8,558,192,,,,
+2026-09-24T06:11:07Z,H03,hiroshima,,driving,原爆ドーム,平和記念資料館,440,ok,5.6,1165,149,,,,
+2026-09-24T06:11:07Z,H04,hiroshima,,walking,平和記念資料館,本通,599,ok,11.6,878,67,,,,
+2026-09-24T06:11:07Z,H04,hiroshima,,transit,平和記念資料館,本通,599,ok,12.9,878,167,,,,
+2026-09-24T06:11:07Z,H04,hiroshima,,driving,平和記念資料館,本通,599,ok,11.2,2108,95,,,,
+2026-09-24T06:11:07Z,H05,hiroshima,,walking,本通,お好み村,289,ok,4.2,331,76,,,,
+2026-09-24T06:11:07Z,H05,hiroshima,,transit,本通,お好み村,289,ok,4.5,331,169,,,,
+2026-09-24T06:11:07Z,H05,hiroshima,,driving,本通,お好み村,289,ok,3.2,492,80,,,,
+2026-09-24T06:11:07Z,H06,hiroshima,,walking,お好み村,八丁堀,316,ok,6.0,374,69,,,,
+2026-09-24T06:11:07Z,H06,hiroshima,,transit,お好み村,八丁堀,316,ok,6.5,374,166,,,,
+2026-09-24T06:11:07Z,H06,hiroshima,,driving,お好み村,八丁堀,316,ok,3.2,449,67,,,,
+2026-09-24T06:11:07Z,H07,hiroshima,,walking,八丁堀,縮景園,769,ok,13.9,964,74,,,,
+2026-09-24T06:11:07Z,H07,hiroshima,,transit,八丁堀,縮景園,769,ok,10.6,1096,184,,,,
+2026-09-24T06:11:07Z,H07,hiroshima,,driving,八丁堀,縮景園,769,ok,6.7,1054,84,,,,
+2026-09-24T06:11:07Z,H08,hiroshima,,walking,縮景園,広島城,799,ok,14.0,1000,66,,,,
+2026-09-24T06:11:07Z,H08,hiroshima,,transit,縮景園,広島城,799,ok,14.7,1000,169,,,,
+2026-09-24T06:11:07Z,H08,hiroshima,,driving,縮景園,広島城,799,ok,6.3,856,85,,,,
+2026-09-24T06:11:07Z,H09,hiroshima,,walking,広島城,原爆ドーム,955,ok,20.1,1555,75,,,,
+2026-09-24T06:11:07Z,H09,hiroshima,,transit,広島城,原爆ドーム,955,ok,12.5,1782,164,,,,
+2026-09-24T06:11:07Z,H09,hiroshima,,driving,広島城,原爆ドーム,955,ok,9.9,1452,98,,,,
+2026-09-24T06:11:07Z,H10,hiroshima,,walking,広島駅,マツダスタジアム,1048,ok,15.8,1169,76,,,,
+2026-09-24T06:11:07Z,H10,hiroshima,,transit,広島駅,マツダスタジアム,1048,ok,10.8,1710,183,,,,
+2026-09-24T06:11:07Z,H10,hiroshima,,driving,広島駅,マツダスタジアム,1048,ok,3.9,1105,84,,,,
+2026-09-24T06:11:07Z,H11,hiroshima,,walking,広島駅,縮景園,785,ok,16.9,1242,65,,,,
+2026-09-24T06:11:07Z,H11,hiroshima,,transit,広島駅,縮景園,785,ok,11.6,1831,184,,,,
+2026-09-24T06:11:07Z,H11,hiroshima,,driving,広島駅,縮景園,785,ok,6.9,1195,88,,,,
+2026-09-24T06:11:07Z,H12,hiroshima,,walking,横川駅,原爆ドーム,1663,ok,26.8,2018,77,,,,
+2026-09-24T06:11:07Z,H12,hiroshima,,transit,横川駅,原爆ドーム,1663,ok,15.0,2254,201,,,,
+2026-09-24T06:11:07Z,H12,hiroshima,,driving,横川駅,原爆ドーム,1663,ok,10.2,2144,87,,,,
+2026-09-24T06:11:07Z,H13,hiroshima,,walking,紙屋町,広島港,4917,ok,92.9,5856,184,,,,
+2026-09-24T06:11:07Z,H13,hiroshima,,transit,紙屋町,広島港,4917,ok,39.9,5709,152,,,,
+2026-09-24T06:11:07Z,H13,hiroshima,,driving,紙屋町,広島港,4917,ok,18.4,6269,112,,,,
+2026-09-24T06:11:07Z,H14,hiroshima,,walking,広島駅,広島港,5094,ok,91.3,5453,180,,,,
+2026-09-24T06:11:07Z,H14,hiroshima,,transit,広島駅,広島港,5094,ok,37.7,5558,204,,,,
+2026-09-24T06:11:07Z,H14,hiroshima,,driving,広島駅,広島港,5094,ok,15.3,5198,98,,,,
+2026-09-24T06:11:07Z,H15,hiroshima,,walking,平和記念資料館,広島港,4599,ok,86.0,5458,188,,,,
+2026-09-24T06:11:07Z,H15,hiroshima,,transit,平和記念資料館,広島港,4599,ok,44.9,5464,167,,,,
+2026-09-24T06:11:07Z,H15,hiroshima,,driving,平和記念資料館,広島港,4599,ok,17.1,5870,108,,,,
+2026-09-24T06:11:07Z,H16,hiroshima,,walking,広島駅,宮島口駅,18485,ok,400.0,21568,324,,,,
+2026-09-24T06:11:07Z,H16,hiroshima,,transit,広島駅,宮島口駅,18485,ok,26.0,21723,185,,,,
+2026-09-24T06:11:07Z,H16,hiroshima,,driving,広島駅,宮島口駅,18485,ok,37.6,23238,158,,,,
+2026-09-24T06:11:07Z,H17,hiroshima,,walking,平和記念資料館,宮島口駅,16360,ok,344.3,18951,277,,,,
+2026-09-24T06:11:07Z,H17,hiroshima,,transit,平和記念資料館,宮島口駅,16360,ok,50.0,19054,188,,,,
+2026-09-24T06:11:07Z,H17,hiroshima,,driving,平和記念資料館,宮島口駅,16360,ok,26.4,20655,107,,,,
+2026-09-24T06:11:07Z,H18,hiroshima,,walking,西広島駅,平和記念資料館,3242,ok,61.5,4049,116,,,,
+2026-09-24T06:11:07Z,H18,hiroshima,,transit,西広島駅,平和記念資料館,3242,ok,35.6,5100,153,,,,
+2026-09-24T06:11:07Z,H18,hiroshima,,driving,西広島駅,平和記念資料館,3242,ok,13.1,3968,107,,,,
+2026-09-24T06:11:07Z,H19,hiroshima,,walking,広島駅,比治山公園,1354,ok,24.5,1654,92,,,,
+2026-09-24T06:11:07Z,H19,hiroshima,,transit,広島駅,比治山公園,1354,ok,10.2,1729,207,,,,
+2026-09-24T06:11:07Z,H19,hiroshima,,driving,広島駅,比治山公園,1354,ok,7.0,1482,87,,,,
+2026-09-24T06:11:07Z,H20,hiroshima,,walking,八丁堀,横川駅,2210,ok,40.9,2879,99,,,,
+2026-09-24T06:11:07Z,H20,hiroshima,,transit,八丁堀,横川駅,2210,ok,17.2,3193,201,,,,
+2026-09-24T06:11:07Z,H20,hiroshima,,driving,八丁堀,横川駅,2210,ok,14.9,3357,97,,,,
+2026-09-24T06:11:07Z,H21,hiroshima,sea,walking,宮島口駅,厳島神社,2354,ok,39.0,3376,62,,,,
+2026-09-24T06:11:07Z,H21,hiroshima,sea,transit,宮島口駅,厳島神社,2354,ok,27.6,3126,92,,,,
+2026-09-24T06:11:07Z,H21,hiroshima,sea,driving,宮島口駅,厳島神社,2354,ok,31.5,4003,112,,,,
+2026-09-24T06:11:07Z,H22,hiroshima,river,walking,平和記念資料館,観音町,1292,ok,24.9,1723,87,,,,
+2026-09-24T06:11:07Z,H22,hiroshima,river,transit,平和記念資料館,観音町,1292,ok,16.1,1846,200,,,,
+2026-09-24T06:11:07Z,H22,hiroshima,river,driving,平和記念資料館,観音町,1292,ok,4.9,1692,88,,,,
+2026-09-24T06:11:07Z,H23,hiroshima,railway,walking,二葉の里,猿猴橋町,610,ok,13.0,888,70,,,,
+2026-09-24T06:11:07Z,H23,hiroshima,railway,transit,二葉の里,猿猴橋町,610,ok,13.2,834,187,,,,
+2026-09-24T06:11:07Z,H23,hiroshima,railway,driving,二葉の里,猿猴橋町,610,ok,5.7,919,84,,,,
+2026-09-24T06:11:07Z,H24,hiroshima,sea,walking,広島港,似島港,2758,unavailable,,,55,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,H24,hiroshima,sea,transit,広島港,似島港,2758,unavailable,,,61,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,H24,hiroshima,sea,driving,広島港,似島港,2758,unavailable,,,139,MKErrorDomain,4,-8 FAILED_NO_RESULT,Directions are not available.
+2026-09-24T06:11:07Z,H25,hiroshima,river,walking,西広島駅,天満町,2057,ok,37.9,2543,84,,,,
+2026-09-24T06:11:07Z,H25,hiroshima,river,transit,西広島駅,天満町,2057,ok,20.8,3058,205,,,,
+2026-09-24T06:11:07Z,H25,hiroshima,river,driving,西広島駅,天満町,2057,ok,8.3,2621,74,,,,
