@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved.orig
+
+# Secrets / local config
+*.xcconfig.local
+.env
+.env.*
+Secrets.plist
+
+# Supabase local
+supabase/.temp/
+supabase/.branches/
