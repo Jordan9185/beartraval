@@ -8,7 +8,8 @@ public enum PayloadInspector {
 
     /// 在 main actor 上執行：`NSExtensionItem`／`NSItemProvider` 不是 Sendable，由 Extension 的 UI 直接呼叫。
     @MainActor
-    public static func inspect(_ extensionItems: [NSExtensionItem], sourceLabel: String? = nil) async -> PayloadRecord {
+    public static func inspect(_ extensionItems: [NSExtensionItem], sourceLabel: String? = nil,
+                               timeout: TimeInterval = loadTimeout) async -> PayloadRecord {
         let start = Date()
         var items: [PayloadRecord.Item] = []
         for extensionItem in extensionItems {
@@ -16,7 +17,7 @@ public enum PayloadInspector {
             for provider in extensionItem.attachments ?? [] {
                 var loads: [PayloadRecord.Load] = []
                 for type in provider.registeredTypeIdentifiers {
-                    loads.append(await load(provider, type: type))
+                    loads.append(await load(provider, type: type, timeout: timeout))
                 }
                 attachments.append(.init(
                     registeredTypeIdentifiers: provider.registeredTypeIdentifiers,
@@ -48,13 +49,13 @@ public enum PayloadInspector {
     }
 
     @MainActor
-    static func load(_ provider: NSItemProvider, type: String) async -> PayloadRecord.Load {
+    static func load(_ provider: NSItemProvider, type: String, timeout: TimeInterval = loadTimeout) async -> PayloadRecord.Load {
         let start = Date()
         let once = OnceResult()
         let result: Described = await withCheckedContinuation { continuation in
             once.install(continuation)
-            DispatchQueue.global().asyncAfter(deadline: .now() + loadTimeout) {
-                once.resume(Described(kind: .timeout, error: "超過 \(Int(loadTimeout)) 秒未回傳"))
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                once.resume(Described(kind: .timeout, error: "超過 \(Int(timeout)) 秒未回傳"))
             }
             if prefersFileRepresentation(type) {
                 _ = provider.loadFileRepresentation(forTypeIdentifier: type) { url, error in

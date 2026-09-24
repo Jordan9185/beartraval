@@ -10,7 +10,8 @@ struct PayloadInspectorTests {
         item.attributedContentText = NSAttributedString(string: "分享內文")
         item.attachments = [url, text]
 
-        let record = await PayloadInspector.inspect([item], sourceLabel: "Threads 純文字")
+        // CI 的模擬器第一次載入可能很慢；逾時放寬，驗證的是內容而不是速度。
+        let record = await PayloadInspector.inspect([item], sourceLabel: "Threads 純文字", timeout: 60)
 
         #expect(record.sourceLabel == "Threads 純文字")
         let attachments = try #require(record.items.first?.attachments)
