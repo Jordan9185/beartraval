@@ -225,6 +225,34 @@ MVP 的路線與 POI 只用 Apple（MapKit／Apple Maps Server API）。韓國�
 2. 同一天、同一交通模式的 Base Route 與 Route Match 使用同一供應商與同一計算基準。
 3. 結果記錄 `provider`，之後加入其他供應商時可區分。
 
+**外開在地地圖 App（折衷方案）【已決策，2026-09-24】**
+
+App 不串接韓國在地服務的 API，改為提供店名、地點等資訊，讓使用者自行在 Naver 地圖或 Kakao 地圖查路線。
+
+- **出現位置**：
+  - Route Match 結果為 unknown／`ROUTE_UNAVAILABLE` 且地點在韓國時（主要入口）。
+  - Stop 詳情、Saved 卡片、Map Pin 詳情（任何韓國地點都可用，不限算不出時）。
+- **按鈕**：「在 Naver 地圖查看」「在 Kakao 地圖查看」，另有「複製店名／地址」。
+- **帶入資訊**：
+  - 目的地：候選地點的名稱（優先韓文名）與座標。
+  - 起點：插入位置的前一個 Stop（沒有則不帶，由在地 App 使用目前位置）。
+  - 交通方式：對應當日模式（大眾運輸／步行／開車）。
+- **連結格式（候選，待真機驗證）**：
+
+| App | 路線 | 搜尋 | 未安裝時的網頁版 |
+|---|---|---|---|
+| Naver 地圖 | `nmap://route/{public\|walk\|car}?slat=&slng=&sname=&dlat=&dlng=&dname=&appname=<bundle id>` | `nmap://search?query=&appname=` | `https://map.naver.com/`（搜尋頁） |
+| Kakao 地圖 | `kakaomap://route?sp=lat,lng&ep=lat,lng&by={PUBLICTRANSIT\|FOOT\|CAR}` | `kakaomap://search?q=` | `https://map.kakao.com/link/to/{name},{lat},{lng}` |
+
+- **實作要點**：
+  - `Info.plist` 的 `LSApplicationQueriesSchemes` 加入 `nmap`、`kakaomap`，用 `canOpenURL` 判斷是否已安裝。
+  - 未安裝時開網頁版，或引導到 App Store。
+  - 座標可能與在地 App 的店家位置略有偏差，所以同時帶入名稱；兩者衝突時，以使用者在在地 App 看到的店家為準。
+- **不做**：
+  - 不從在地 App 讀回分鐘數。
+  - App 內的 detour 仍顯示「無法估算」，不因外開而顯示數字（AC-14）。
+- **待決策（D12）**：使用者在在地 App 查到時間後，是否允許手動輸入分鐘數？若允許，需標記為「使用者輸入」，並與服務計算的結果分開顯示。我的建議是 MVP 先不做，視實地測試回饋再決定。
+
 **之後的在地服務候選（未排入 MVP）**
 
 | 模式 | 候選 | 外國人申請（網路資料，未驗證） |
@@ -302,6 +330,7 @@ MVP 的路線與 POI 只用 Apple（MapKit／Apple Maps Server API）。韓國�
 | D9 | 每日起訖點 | 無 / 每日可設住宿為起訖 | Route Match 頭尾插入是否合理 | **可設住宿**；未設時允許頭尾插入 |
 | D10 | 預設交通方式 | 步行+大眾運輸 / 開車 / 每日設定 | 路線供應商需求 | **每日可設，預設大眾運輸（含步行）**，但依 S1 結果可能需改預設 |
 | D11 | AI 資料保存 | 原文與對話保存期限 | 隱私、刪除 | **隨 Trip 保存，刪 Trip 即刪**；不記錄完整 prompt 於日誌 |
+| D12 | 外開在地地圖後可否手動輸入分鐘數 | 不做 / 允許並標記「使用者輸入」 | 首爾大眾運輸日可顯示數字，但資料可信度不同 | **MVP 先不做**，視實地測試回饋（§4.3.1）；**待你確認** |
 
 （不重開：分頁結構、AI 只提 proposal、Fixed 不可動、Saved/Shopping 分開、detour 定義、庫存未知等規格已確認的 UX 原則。）
 

@@ -21,4 +21,4 @@
 ## 已確認技術決策（詳見 docs/planning/mvp-technical-plan.md §6）
 
 - 後端 Supabase（Postgres + RLS + Realtime + Edge Functions）；iOS 17+；Sign in with Apple + Email magic link。
-- 路線與 POI：MVP 只用 Apple Maps；算不出時顯示無法估算。韓國在地服務延後，保留 RoutingProvider 抽象（§4.3.1）。
+- 路線與 POI：MVP 只用 Apple Maps；算不出時顯示無法估算。韓國地點提供按鈕外開 Naver／Kakao 地圖（帶店名、座標、起點、交通方式），不串接其 API、不讀回分鐘數（§4.3.1）。
