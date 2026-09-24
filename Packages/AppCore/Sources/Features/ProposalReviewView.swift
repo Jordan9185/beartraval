@@ -1,4 +1,5 @@
 import AppCore
+import ShareCore
 import SwiftUI
 
 /// 加入行程前的確認（AC-08）：先顯示路程、停留與固定行程衝突，按確認才新增 Stop。

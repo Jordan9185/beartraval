@@ -7,13 +7,18 @@ struct BackendTests {
         ("PT401", BackendError.unauthenticated),
         ("PT403", .forbidden),
         ("PT404", .notFound),
-        ("PT409", .staleRevision),
+        ("PT409", .conflict("INVITE_EXPIRED")),
         ("PT410", .gone("INVITE_EXPIRED")),
         ("PT422", .invalid("INVITE_EXPIRED")),
         ("42501", .other("INVITE_EXPIRED")),
     ])
     func mapsSQLStateToError(code: String, expected: BackendError) {
         #expect(BackendError(code: code, message: "INVITE_EXPIRED") == expected)
+    }
+
+    @Test func staleRevisionIsDistinctFromOtherConflicts() {
+        #expect(BackendError(code: "PT409", message: "STALE_REVISION") == .staleRevision)
+        #expect(BackendError(code: "PT409", message: "DUPLICATE_SAVED") == .conflict("DUPLICATE_SAVED"))
     }
 
     @Test func localDateUsesTripTimeZone() {

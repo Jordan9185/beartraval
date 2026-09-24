@@ -47,6 +47,8 @@ public enum BackendError: Error, Equatable, Sendable {
     case forbidden
     case notFound
     case staleRevision
+    /// 其他 409（例如 `DUPLICATE_SAVED`、`ALREADY_COMMITTED`）。
+    case conflict(String)
     case gone(String)
     case invalid(String)
     case other(String)
@@ -56,7 +58,7 @@ public enum BackendError: Error, Equatable, Sendable {
         case "PT401": self = .unauthenticated
         case "PT403": self = .forbidden
         case "PT404": self = .notFound
-        case "PT409": self = .staleRevision
+        case "PT409": self = message == "STALE_REVISION" ? .staleRevision : .conflict(message)
         case "PT410": self = .gone(message)
         case "PT422": self = .invalid(message)
         default: self = .other(message)

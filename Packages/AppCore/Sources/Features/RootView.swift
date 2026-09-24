@@ -36,7 +36,7 @@ public struct RootView: View {
                 .tabItem { Label("Trip", systemImage: "calendar") }
             EmptyTab(title: "Map", systemImage: "map", message: "尚無已確認的地點")
                 .tabItem { Label("Map", systemImage: "map") }
-            EmptyTab(title: "Saved", systemImage: "bookmark", message: "尚未收藏地點")
+            SavedView(session: session)
                 .tabItem { Label("Saved", systemImage: "bookmark") }
             EmptyTab(title: "Shopping", systemImage: "bag", message: "尚未新增商品")
                 .tabItem { Label("Shopping", systemImage: "bag") }

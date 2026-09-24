@@ -1,4 +1,5 @@
 import AppCore
+import ShareCore
 import MapKit
 import SwiftUI
 #if canImport(UIKit)
@@ -14,6 +15,8 @@ struct RouteMatchView: View {
     let places: [UUID: Place]
     /// 成功加入行程後呼叫，讓時間軸重新載入。
     let onAdded: () -> Void
+    /// 從 Saved 開啟時預先帶入的候選地點。
+    var preset: SearchResult? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
@@ -88,6 +91,12 @@ struct RouteMatchView: View {
                 }
             }
             .navigationTitle("試算順路")
+            .task {
+                if candidate == nil, let preset {
+                    candidate = preset
+                    await compute()
+                }
+            }
             .sheet(item: $adding) { request in
                 if let candidate {
                     ProposalReviewView(session: session, tripID: tripID, dayID: request.dayID, dayTitle: dayTitle(request.dayID),
@@ -186,6 +195,10 @@ struct SearchResult: Identifiable, Equatable {
         draft = MapKitPlaceSearch.draft(from: item)
     }
 
+    init(draft: PlaceDraft) {
+        self.draft = draft
+    }
+
     var name: String { draft.name }
     var address: String? { draft.address }
     var point: RoutePoint {
@@ -194,28 +207,6 @@ struct SearchResult: Identifiable, Equatable {
 
     var mapPoint: MapPoint {
         MapPoint(name: name, latitude: point.coordinate.latitude, longitude: point.coordinate.longitude)
-    }
-}
-
-/// 三個分開的數字：路程、停留、固定行程餘裕（§4.2）。
-struct MatchNumbers: View {
-    let insertion: Insertion
-    let stopName: (UUID?) -> String?
-
-    var body: some View {
-        LabeledContent("路程", value: insertion.addedTravelMinutes.map { "+\($0) 分" } ?? "無法估算")
-        LabeledContent("停留", value: "+\(insertion.addedDwellMinutes) 分")
-        LabeledContent("固定行程") {
-            switch insertion.fixedCheck {
-            case .noFixedAfter: Text("之後沒有固定行程")
-            case .slack(let id, let m): Text("距「\(stopName(id) ?? "固定行程")」還有 \(m) 分")
-            case .conflict(let id, let m): Text("「\(stopName(id) ?? "固定行程")」會遲到 \(m) 分").foregroundStyle(.red)
-            case .unknown: Text("缺少時間，無法判斷")
-            }
-        }
-        if insertion.approximate {
-            Text("當天行程較多，只精算了部分位置。").font(.caption).foregroundStyle(.secondary)
-        }
     }
 }
 

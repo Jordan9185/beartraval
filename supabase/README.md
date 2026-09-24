@@ -16,6 +16,7 @@
 - 所有寫入都經由 RPC（`security definer`），在函式內檢查角色；直接 insert/update/delete 一律被拒。
 - 行程寫入帶 `expected_route_revision`，不符回 `STALE_REVISION`，不寫入任何資料。
 - 當日 `route_revision` 一改變（任何 RPC），觸發器就把該日未確認的 proposal 標為 `stale`。
+- 地點一進入正式行程（stops），同 Trip 同地點的 Saved 自動標為 `added_to_itinerary`，不再出現在待加入清單。
 
 ## RPC
 
@@ -31,6 +32,9 @@
 | `create_proposal(day_id, expected_route_revision, change jsonb, route_match jsonb)` | Owner／Editor | 建立加入行程的 proposal（地點須已確認）；不寫入 Stop |
 | `confirm_proposal(proposal_id)` | Owner／Editor | 插入 Stop；當日已變更時回 `{"status":"stale"}` 且不寫入 |
 | `reject_proposal(proposal_id)` | Owner／Editor | 取消 proposal |
+| `save_place(trip_id, raw_label, category, place_id?, source jsonb?)` | Owner／Editor | 收藏到共同 Saved（不改行程）；同一 `canonical_url` 或同一地點回傳既有項目並記錄想去 |
+| `set_saved_interest(saved_id, interested)` | Owner／Editor | 想去（成員集合） |
+| `resolve_saved(saved_id, place_id)` / `dismiss_saved(saved_id)` | Owner／Editor | 補填地點／移除 |
 | `create_invite(trip_id, role, expires_in, max_uses)` | Owner | 回傳一次性明文 token，DB 只存 SHA-256 |
 | `revoke_invite(invite_id)` | Owner | |
 | `accept_invite(token)` | 已登入 | 加入 Trip |
@@ -48,9 +52,9 @@ SQLSTATE `PTnnn` 會讓 PostgREST 回傳 HTTP `nnn`：
 | PT401 | `UNAUTHENTICATED` | 401 |
 | PT403 | `FORBIDDEN_ROLE` | 403 |
 | PT404 | `NOT_FOUND`、`INVITE_INVALID` | 404 |
-| PT409 | `STALE_REVISION`、`ALREADY_COMMITTED`、`PROPOSAL_CLOSED` | 409 |
+| PT409 | `STALE_REVISION`、`ALREADY_COMMITTED`、`PROPOSAL_CLOSED`、`DUPLICATE_SAVED` | 409 |
 | PT410 | `INVITE_EXPIRED`、`INVITE_REVOKED` | 410 |
-| PT422 | `PLACE_UNRESOLVED`、`EMPTY_TEXT`、`DATE_OUTSIDE_TRIP`、`INVALID_PLACE`、`INVALID_DATES`、`INVALID_TIME_ZONE`、`INVALID_STOPS`、`PLACE_NOT_FOUND`、`STOP_NOT_IN_DAY`、`INVALID_ROLE` | 422 |
+| PT422 | `INVALID_SAVED`、`PLACE_UNRESOLVED`、`EMPTY_TEXT`、`DATE_OUTSIDE_TRIP`、`INVALID_PLACE`、`INVALID_DATES`、`INVALID_TIME_ZONE`、`INVALID_STOPS`、`PLACE_NOT_FOUND`、`STOP_NOT_IN_DAY`、`INVALID_ROLE` | 422 |
 
 ## 測試
 

@@ -3,15 +3,13 @@ import ShareCore
 import SwiftUI
 import UIKit
 
-/// S2 Payload Inspector（issue #2）：記錄分享 payload 寫入 App Group，不做辨識。
-///
-/// WP6 會改成正式的最小確認卡；屆時此 inspector 只留在 Debug 設定。
+/// 分享到 BearTravel：最小閉環（WP6）。DEBUG build 可另開 Payload Inspector（S2）。
 final class ShareViewController: UIViewController {
-    private let model = InspectorModel()
+    private let model = ShareModel()
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        let host = UIHostingController(rootView: InspectorSheet(model: model, onDone: { [weak self] in
+        let host = UIHostingController(rootView: ShareRootView(model: model, finish: { [weak self] in
             self?.extensionContext?.completeRequest(returningItems: nil)
         }))
         addChild(host)
@@ -19,101 +17,104 @@ final class ShareViewController: UIViewController {
         host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(host.view)
         host.didMove(toParent: self)
-
-        let items = (extensionContext?.inputItems as? [NSExtensionItem]) ?? []
-        model.start(items)
+        model.start((extensionContext?.inputItems as? [NSExtensionItem]) ?? [])
     }
 }
 
 @MainActor
 @Observable
-final class InspectorModel {
-    enum State {
-        case loading
-        case captured(PayloadRecord)
-        case saved(PayloadRecord)
-        case failed(String)
-    }
-
-    var state: State = .loading
-    var sourceLabel = ""
-    /// 驗證 App 與 Extension 共用登入（Keychain access group = App Group）。
-    var loginStatus = "檢查中…"
+final class ShareModel {
+    var record: PayloadRecord?
+    let repository = BackendConfig.fromBundle().map { TripRepository(client: Backend.makeClient($0)) }
+    let matcher = RouteMatcher(provider: AppleMapKitProvider())
 
     func start(_ items: [NSExtensionItem]) {
-        Task {
-            state = .captured(await PayloadInspector.inspect(items))
-        }
-        Task {
-            guard let config = BackendConfig.fromBundle() else {
-                loginStatus = "後端設定缺漏"
-                return
-            }
-            do {
-                let session = try await Backend.makeClient(config).auth.session
-                loginStatus = "已登入：\(session.user.email ?? session.user.id.uuidString)"
-            } catch {
-                loginStatus = "未登入（請先開啟 App 登入）"
-            }
-        }
+        Task { record = await PayloadInspector.inspect(items) }
     }
+}
 
-    func save() {
-        guard case .captured(var record) = state else { return }
-        record.sourceLabel = sourceLabel.isEmpty ? nil : sourceLabel
-        guard let store = PayloadLogStore.shared() else {
-            state = .failed("App Group 未設定，無法寫入。")
-            return
-        }
-        do {
-            try store.save(record)
-            state = .saved(record)
-        } catch {
-            state = .failed("寫入失敗：\(error.localizedDescription)")
+struct ShareRootView: View {
+    let model: ShareModel
+    let finish: () -> Void
+    @State private var done: String?
+    @State private var showsInspector = false
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let done {
+                    ContentUnavailableView(done, systemImage: "checkmark.circle")
+                        .task { try? await Task.sleep(for: .seconds(1.2)); finish() }
+                } else if let record = model.record {
+                    let content = ShareContent(record: record)
+                    ShareFlowView(content: content, repository: model.repository, matcher: model.matcher,
+                                  placeSearch: MapKitPlaceSearch(),
+                                  saveDraft: { try ShareDraftStore.shared()?.save(ShareDraft(content: content)) }) { outcome in
+                        done = switch outcome {
+                        case .added: "已加入行程"
+                        case .saved(let duplicate): duplicate ? "已在 Saved，已標記想去" : "已收藏到 Saved"
+                        case .draftSaved: "已存成草稿，開啟 App 後繼續"
+                        }
+                    }
+                } else {
+                    ProgressView("讀取分享內容…")
+                }
+            }
+            .navigationTitle("BearTravel")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消", action: finish) }
+                #if DEBUG
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Inspector", systemImage: "ladybug") { showsInspector = true }.disabled(model.record == nil)
+                }
+                #endif
+            }
+            .sheet(isPresented: $showsInspector) {
+                if let record = model.record { InspectorSheet(record: record) }
+            }
         }
     }
 }
 
+/// S2 Payload Inspector：把這次分享的 payload 記錄到 App Group，供匯出整理矩陣。
 struct InspectorSheet: View {
-    @Bindable var model: InspectorModel
-    let onDone: () -> Void
+    @State var record: PayloadRecord
+    @State private var sourceLabel = ""
+    @State private var status: String?
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             Form {
-                switch model.state {
-                case .loading:
-                    ProgressView("讀取分享內容…")
-                case .captured(let record):
-                    Section { LabeledContent("登入狀態", value: model.loginStatus) }
-                    Section("來源標籤（整理矩陣用）") {
-                        TextField("例如：Threads 單圖", text: $model.sourceLabel)
-                    }
-                    summary(record)
-                case .saved(let record):
-                    Section { Label("已記錄，可在 App 的 Debug → Payload Inspector 匯出", systemImage: "checkmark.circle") }
-                    summary(record)
-                case .failed(let message):
-                    Text(message).foregroundStyle(.red)
+                Section("來源標籤（整理矩陣用）") {
+                    TextField("例如：Threads 單圖", text: $sourceLabel)
                 }
+                Section("內容（\(record.totalDurationMs) ms）") {
+                    ForEach(Array(record.items.flatMap(\.attachments).flatMap(\.loads).enumerated()), id: \.offset) { _, load in
+                        VStack(alignment: .leading) {
+                            Text(load.typeIdentifier).font(.caption.monospaced().bold())
+                            Text(load.preview ?? load.error ?? load.kind.rawValue).font(.caption).lineLimit(3)
+                        }
+                    }
+                }
+                if let status { Text(status) }
             }
             .navigationTitle("Payload Inspector")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("關閉", action: onDone) }
+                ToolbarItem(placement: .cancellationAction) { Button("關閉") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    if case .captured = model.state { Button("記錄") { model.save() } }
-                }
-            }
-        }
-    }
-
-    private func summary(_ record: PayloadRecord) -> some View {
-        Section("內容（\(record.totalDurationMs) ms）") {
-            ForEach(Array(record.items.flatMap(\.attachments).flatMap(\.loads).enumerated()), id: \.offset) { _, load in
-                VStack(alignment: .leading) {
-                    Text(load.typeIdentifier).font(.caption.monospaced().bold())
-                    Text(load.preview ?? load.error ?? load.kind.rawValue).font(.caption).lineLimit(3)
+                    Button("記錄") {
+                        record.sourceLabel = sourceLabel.isEmpty ? nil : sourceLabel
+                        do {
+                            guard let store = PayloadLogStore.shared() else { status = "App Group 未設定"; return }
+                            try store.save(record)
+                            status = "已記錄，可在 App 的 Debug → Payload Inspector 匯出"
+                        } catch {
+                            status = "寫入失敗：\(error.localizedDescription)"
+                        }
+                    }
                 }
             }
         }

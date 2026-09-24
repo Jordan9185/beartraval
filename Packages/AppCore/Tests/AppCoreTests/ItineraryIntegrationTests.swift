@@ -185,3 +185,46 @@ struct ProposalIntegrationTests {
         #expect(Set(labels) == ["A", "B", "X", "Y"])
     }
 }
+
+/// AC-07：Amy 新增地點進共同 Saved，正式行程不變；重複分享去重。
+@Suite(.enabled(if: IntegrationEnv.config != nil))
+struct SavedIntegrationTests {
+    @Test func friendSaveGoesToSharedSavedAndReshareDedupes() async throws {
+        let ownerClient = Backend.makeClient(IntegrationEnv.config!, storage: MemoryStorage())
+        _ = try await ownerClient.auth.signUp(email: "it-\(UUID().uuidString.prefix(8).lowercased())@example.com", password: UUID().uuidString)
+        let amyClient = Backend.makeClient(IntegrationEnv.config!, storage: MemoryStorage())
+        _ = try await amyClient.auth.signUp(email: "it-\(UUID().uuidString.prefix(8).lowercased())@example.com", password: UUID().uuidString)
+        let owner = TripRepository(client: ownerClient), amy = TripRepository(client: amyClient)
+
+        let trip = try await owner.createTrip(name: "Saved IT", startDate: "2026-10-01", endDate: "2026-10-01", timeZone: "Asia/Seoul")
+        struct InviteParams: Encodable { let p_trip_id: UUID, p_role: String }
+        struct AcceptParams: Encodable { let p_token: String }
+        let token: String = try await ownerClient.rpc("create_invite", params: InviteParams(p_trip_id: trip.id, p_role: "editor")).execute().value
+        try await amyClient.rpc("accept_invite", params: AcceptParams(p_token: token)).execute()
+
+        let url = URL(string: "https://www.threads.net/@cafe/post/ABC?igsh=1")!
+        let source = SavedSource(url: url.absoluteString, canonicalUrl: "https://threads.com/@cafe/post/ABC", summary: "성수 카페")
+        let place = try await amy.upsertPlace(PlaceDraft(providerPlaceId: "it-\(UUID().uuidString)", name: "Onion", latitude: 37.5447, longitude: 127.0584, countryCode: "KR"))
+        let (saved, dup1) = try await amy.savePlace(tripID: trip.id, label: "Onion", category: .cafe, placeID: place.id, source: source)
+        #expect(!dup1)
+
+        // Owner 從另一個網址變體再分享同一篇。
+        let (again, dup2) = try await owner.savePlace(tripID: trip.id, label: "Onion", category: .cafe, placeID: nil,
+                                                      source: SavedSource(url: "https://threads.com/@cafe/post/ABC", canonicalUrl: "https://threads.com/@cafe/post/ABC", summary: nil))
+        #expect(dup2)
+        #expect(again.id == saved.id)
+
+        let entries = try await owner.savedEntries(of: trip.id)
+        #expect(entries.count == 1)
+        #expect(entries[0].interestedUserIDs.count == 2)
+        #expect(entries[0].source?.canonicalUrl == "https://threads.com/@cafe/post/ABC")
+        #expect(entries[0].place?.name == "Onion")
+        #expect(try await owner.stops(of: trip.id).isEmpty, "saving never changes the itinerary")
+
+        // 未確認地點也能先收藏。
+        let (pending, _) = try await amy.savePlace(tripID: trip.id, label: "IG 貼文的店", category: .eat, placeID: nil,
+                                                    source: SavedSource(url: "https://instagram.com/p/X", canonicalUrl: "https://instagram.com/p/X", summary: nil))
+        #expect(pending.placeId == nil)
+        #expect(try await owner.savedEntries(of: trip.id).count == 2)
+    }
+}

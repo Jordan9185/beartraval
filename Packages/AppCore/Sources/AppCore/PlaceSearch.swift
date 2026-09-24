@@ -4,6 +4,12 @@ import MapKit
 public protocol PlaceSearching: Sendable {
     /// 回傳候選分店（最多 `limit` 筆）；找不到時回空陣列。
     func search(_ query: String, near city: String?, limit: Int) async -> [PlaceOption]
+    /// 座標附近的 POI（地圖連結只有座標時使用）。
+    func nearby(_ coordinate: Coordinate, limit: Int) async -> [PlaceOption]
+}
+
+extension PlaceSearching {
+    public func nearby(_ coordinate: Coordinate, limit: Int) async -> [PlaceOption] { [] }
 }
 
 /// Apple MapKit POI 搜尋（決策 D3）。
@@ -17,6 +23,21 @@ public struct MapKitPlaceSearch: PlaceSearching {
         request.resultTypes = [.pointOfInterest, .address]
         guard let items = try? await MKLocalSearch(request: request).start().mapItems else { return [] }
         return items.prefix(limit).map { PlaceOption(draft: Self.draft(from: $0)) }
+    }
+
+    public func nearby(_ coordinate: Coordinate, limit: Int = 5) async -> [PlaceOption] {
+        let center = CLLocationCoordinate2D(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let request = MKLocalPointsOfInterestRequest(center: center, radius: 80)
+        guard let items = try? await MKLocalSearch(request: request).start().mapItems else { return [] }
+        let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        return items
+            .sorted { Self.location($0).distance(from: origin) < Self.location($1).distance(from: origin) }
+            .prefix(limit).map { PlaceOption(draft: Self.draft(from: $0)) }
+    }
+
+    static func location(_ item: MKMapItem) -> CLLocation {
+        if #available(iOS 26, macOS 26, *) { return item.location }
+        return item.placemark.location ?? CLLocation(latitude: 0, longitude: 0)
     }
 
     public static func draft(from item: MKMapItem) -> PlaceDraft {

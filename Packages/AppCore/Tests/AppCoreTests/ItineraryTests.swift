@@ -88,3 +88,19 @@ struct DayPlanTests {
         #expect(plan.localMidnight == Date(timeIntervalSince1970: 1_790_780_400))
     }
 }
+
+struct SavedFilterTests {
+    func entry(_ category: SavedCategory, _ status: SavedPlace.Status = .saved, interested: Int = 0) -> SavedEntry {
+        SavedEntry(saved: SavedPlace(id: UUID(), tripId: UUID(), placeId: nil, rawLabel: "x", category: category, sourceId: nil, addedBy: UUID(), status: status),
+                   place: nil, source: nil, interestedUserIDs: Set((0..<interested).map { _ in UUID() }))
+    }
+
+    @Test func hidesAddedAndDismissedAndFiltersCategory() {
+        let entries = [entry(.eat, interested: 1), entry(.cafe, interested: 3), entry(.eat, .addedToItinerary), entry(.shop, .dismissed)]
+        #expect(SavedFilter.all.apply(entries).count == 2)
+        #expect(SavedFilter.all.apply(entries).first?.saved.category == .cafe, "most wanted first")
+        #expect(SavedFilter.category(.eat).apply(entries).count == 1)
+        #expect(SavedFilter.category(.eat).apply(entries, includeAdded: true).count == 2)
+        #expect(SavedFilter.category(.shop).apply(entries).isEmpty)
+    }
+}
