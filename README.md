@@ -18,11 +18,10 @@
 |---|---|
 | [docs/spec/ios-ai-travel-companion-mvp-spec.md](docs/spec/ios-ai-travel-companion-mvp-spec.md) | 產品／行為規格草案 v0.1（規則、範圍、驗收情境 AC-01～AC-14） |
 | [docs/spec/claude-ios-planning-brief.md](docs/spec/claude-ios-planning-brief.md) | 規劃任務說明 |
-| [docs/planning/mvp-technical-plan.md](docs/planning/mvp-technical-plan.md) | MVP 技術規劃 v0.1：架構、Work Packages、資料契約、Route Match、Share 驗證、待決策、驗收計畫 |
+| [docs/planning/mvp-technical-plan.md](docs/planning/mvp-technical-plan.md) | MVP 技術規劃 v0.1（決策 D1–D11 已確認）：架構、Work Packages、資料契約、Route Match、Share 驗證、驗收計畫 |
 
 參考 wireframe：<https://ai-travel-companion-mvp-wireframe.jordan8125.chatgpt.site/>（示意資料，非正式架構）
 
 ## 下一步
 
-1. 審閱 `docs/planning/mvp-technical-plan.md` 第 6 節的待決策項目。
-2. 確認後再把 Work Packages 拆成開發任務（GitHub Issues）。
+技術決策已確認（見規劃文件第 6 節）。開發任務追蹤在 GitHub Issues，從 Spike S1–S4 開始。

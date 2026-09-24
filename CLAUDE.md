@@ -17,3 +17,8 @@
 
 - 文件以繁體中文撰寫。
 - 規劃文件中每項標註：【已確認規格】／【建議】／【需實測或決策】。
+
+## 已確認技術決策（詳見 docs/planning/mvp-technical-plan.md §6）
+
+- 後端 Supabase（Postgres + RLS + Realtime + Edge Functions）；iOS 17+；Sign in with Apple + Email magic link。
+- 路線：Apple 優先，算不出旅行時間時改用韓國在地服務；同一天同一交通模式不混用供應商（§4.3.1）。
