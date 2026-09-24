@@ -1,0 +1,21 @@
+{
+  "name": "@beartravel/itinerary-parse",
+  "private": true,
+  "type": "module",
+  "description": "AI itinerary text parsing: output schema, prompt, post-validation and eval harness.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "eval": "tsx eval/run.ts",
+    "eval:dry": "tsx eval/run.ts --dry-run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

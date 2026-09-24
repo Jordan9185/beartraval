@@ -23,3 +23,7 @@ Secrets.plist
 # Supabase local
 supabase/.temp/
 supabase/.branches/
+
+# Node
+node_modules/
+ai/itinerary-parse/eval/results/

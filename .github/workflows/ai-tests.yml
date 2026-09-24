@@ -1,0 +1,29 @@
+name: AI parse tests
+
+on:
+  push:
+    paths:
+      - "ai/**"
+      - ".github/workflows/ai-tests.yml"
+  pull_request:
+    paths:
+      - "ai/**"
+      - ".github/workflows/ai-tests.yml"
+
+jobs:
+  itinerary-parse:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ai/itinerary-parse
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ai/itinerary-parse/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run eval:dry
