@@ -1,3 +1,4 @@
+import AppCore
 import ShareCore
 import SwiftUI
 import UIKit
@@ -36,10 +37,24 @@ final class InspectorModel {
 
     var state: State = .loading
     var sourceLabel = ""
+    /// 驗證 App 與 Extension 共用登入（Keychain access group = App Group）。
+    var loginStatus = "檢查中…"
 
     func start(_ items: [NSExtensionItem]) {
         Task {
             state = .captured(await PayloadInspector.inspect(items))
+        }
+        Task {
+            guard let config = BackendConfig.fromBundle() else {
+                loginStatus = "後端設定缺漏"
+                return
+            }
+            do {
+                let session = try await Backend.makeClient(config).auth.session
+                loginStatus = "已登入：\(session.user.email ?? session.user.id.uuidString)"
+            } catch {
+                loginStatus = "未登入（請先開啟 App 登入）"
+            }
         }
     }
 
@@ -70,6 +85,7 @@ struct InspectorSheet: View {
                 case .loading:
                     ProgressView("讀取分享內容…")
                 case .captured(let record):
+                    Section { LabeledContent("登入狀態", value: model.loginStatus) }
                     Section("來源標籤（整理矩陣用）") {
                         TextField("例如：Threads 單圖", text: $model.sourceLabel)
                     }

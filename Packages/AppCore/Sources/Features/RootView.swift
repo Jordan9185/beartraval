@@ -4,15 +4,35 @@ import SwiftUI
 ///
 /// WP1 階段只有空狀態；沒有資料時不顯示假的 Base Route 或示意資料。
 public struct RootView: View {
+    let session: SessionModel?
     @State private var showsDebug = false
 
-    public init() {}
+    /// `session` 為 nil 表示後端設定缺漏（Info.plist 沒有 SupabaseURL／SupabaseAnonKey）。
+    public init(session: SessionModel?) {
+        self.session = session
+    }
 
     public var body: some View {
+        if let session {
+            switch session.state {
+            case .loading:
+                ProgressView()
+            case .signedOut:
+                LoginView(session: session)
+            case .signedIn:
+                tabs(session)
+            }
+        } else {
+            ContentUnavailableView("後端設定缺漏", systemImage: "exclamationmark.triangle",
+                                   description: Text("請在 Config/Local.xcconfig.local 設定 SUPABASE_URL 與 SUPABASE_ANON_KEY。"))
+        }
+    }
+
+    private func tabs(_ session: SessionModel) -> some View {
         TabView {
             EmptyTab(title: "Today", systemImage: "sun.max", message: "尚未建立行程", onDebug: debugAction)
                 .tabItem { Label("Today", systemImage: "sun.max") }
-            EmptyTab(title: "Trip", systemImage: "calendar", message: "尚未建立行程")
+            TripListView(session: session)
                 .tabItem { Label("Trip", systemImage: "calendar") }
             EmptyTab(title: "Map", systemImage: "map", message: "尚無已確認的地點")
                 .tabItem { Label("Map", systemImage: "map") }
@@ -21,7 +41,7 @@ public struct RootView: View {
             EmptyTab(title: "Shopping", systemImage: "bag", message: "尚未新增商品")
                 .tabItem { Label("Shopping", systemImage: "bag") }
         }
-        .sheet(isPresented: $showsDebug) { DebugMenuView() }
+        .sheet(isPresented: $showsDebug) { DebugMenuView(session: session) }
     }
 
     /// Spike 工具入口只在 DEBUG build 出現，不佔用分頁。
@@ -54,5 +74,5 @@ struct EmptyTab: View {
 }
 
 #Preview {
-    RootView()
+    RootView(session: nil)
 }

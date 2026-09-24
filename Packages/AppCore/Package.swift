@@ -13,8 +13,11 @@ let package = Package(
         // Share Extension 精簡子集：payload 記錄、ShareDraft
         .library(name: "ShareCore", targets: ["ShareCore"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/supabase/supabase-swift", from: "2.55.0"),
+    ],
     targets: [
-        .target(name: "AppCore"),
+        .target(name: "AppCore", dependencies: [.product(name: "Supabase", package: "supabase-swift")]),
         .target(name: "Features", dependencies: ["AppCore", "ShareCore"]),
         .target(name: "ShareCore", dependencies: ["AppCore"]),
         .testTarget(name: "AppCoreTests", dependencies: ["AppCore", "ShareCore"]),

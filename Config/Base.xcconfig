@@ -5,4 +5,9 @@ BUNDLE_ID_PREFIX = com.jordan9185
 DEVELOPMENT_TEAM =
 APP_GROUP_ID = group.$(BUNDLE_ID_PREFIX).beartravel
 
+// 後端：預設為本機 `supabase start`（xcconfig 會把 // 當註解，所以用 $() 隔開）。
+// 本機 anon key 由 `supabase status` 取得；連雲端專案時在 Local.xcconfig.local 覆寫兩者。
+SUPABASE_URL = http:/$()/127.0.0.1:54321
+SUPABASE_ANON_KEY =
+
 #include? "Local.xcconfig.local"

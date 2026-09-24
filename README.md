@@ -31,6 +31,7 @@ xcodegen generate
 open BearTravel.xcodeproj
 ```
 
+- 後端：本機 `supabase start` 後，把 anon key 填進 `Config/Local.xcconfig.local` 的 `SUPABASE_ANON_KEY`（詳見 [supabase/README.md](supabase/README.md)）。
 - 真機簽章：建立 `Config/Local.xcconfig.local`（已 gitignore），填 `DEVELOPMENT_TEAM = <Team ID>`；bundle id 衝突時再加 `BUNDLE_ID_PREFIX = com.<你的名字>`。
 - 結構：`App/`（App target）、`ShareExtension/`、`Packages/AppCore`（`AppCore` Domain／規則、`Features` SwiftUI 頁、`ShareCore` Extension 共用子集）、`Tools/RouteSpike`（S1 macOS 實測工具）。
 - 測試：`swift test --package-path Packages/AppCore`，或在 Xcode 跑 BearTravel scheme 的 Test。

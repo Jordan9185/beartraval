@@ -53,7 +53,22 @@ supabase/tests/run.sh
 
 會建立暫時的資料庫，套用 shim 與 migration，每個 `*.test.sql` 在獨立資料庫執行，最後跑兩個連線同時提交的並發測試。CI：`.github/workflows/db-tests.yml`。
 
+## 本機開發（iOS App 連線用）
+
+需要 Docker（OrbStack 或 Docker Desktop）與 Supabase CLI（`brew install supabase/tap/supabase`）。
+
+```bash
+supabase start      # 套用 migrations，啟動 API（:54321）與 Mailpit（:54324）
+supabase status     # 取得 anon key
+```
+
+- `config.toml` 已把 `app` 加入 exposed schemas，redirect 白名單為 `beartravel://login-callback`。
+- 把 `supabase status` 的 anon key 填進 `Config/Local.xcconfig.local` 的 `SUPABASE_ANON_KEY`，模擬器即可連 `http://127.0.0.1:54321`。
+- Magic link 信件在 Mailpit（<http://127.0.0.1:54324>），在模擬器的 Safari 開啟連結即回到 App。
+- Sign in with Apple：`[auth.external.apple]` 以 bundle id 為 `client_id`（原生 ID token 流程）。需真機或已登入 Apple ID 的模擬器，且 App 以有 Sign in with Apple capability 的 team 簽章。
+
 ## 部署到 Supabase 專案時
 
 - 在專案的 API 設定把 `app` 加入 exposed schemas，用戶端以 `schema: 'app'` 呼叫 RPC。
+- Auth：Redirect URLs 加入 `beartravel://login-callback`；Apple provider 的 Client IDs 填 App 的 bundle id。
 - 不要套用 `tests/support/` 下的檔案。
