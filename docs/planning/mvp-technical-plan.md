@@ -38,8 +38,8 @@
 └──────┬──────────────────────┬──────────────────────┬────────────┘
        ▼                      ▼                      ▼
    LLM API（Claude）   地圖/POI 供應商（Apple Maps     外部來源
-   只產生草稿/proposal  Server API／MapKit／韓國在地   （OG metadata、
-                       供應商，依 Spike S1 決定）      官方店鋪頁）
+   只產生草稿/proposal  Server API／MapKit）         （OG metadata、
+                       MVP 只用 Apple）              官方店鋪頁）
 ```
 
 ### 責任邊界
@@ -63,7 +63,7 @@
 
 | WP | 範圍 | 先決條件 | 完成證據 | 對應 AC |
 |---|---|---|---|---|
-| **S1 路線/POI Spike** | 首爾、廣島的 POI 搜尋、分店、步行/大眾運輸/開車時間；先測 MapKit、Apple Maps Server API，Apple 算不出時測韓國在地服務（TMAP、ODsay、Kakao、Naver，見 §4.3.1） | 無 | 實測表（見 §4.4）、供應商建議 | AC-05, 14 |
+| **S1 路線/POI Spike** | 首爾、廣島的 POI 搜尋、分店、步行/大眾運輸/開車時間；只測 Apple（MapKit、Apple Maps Server API），記錄哪些模式／地區算不出（見 §4.3.1） | 無 | 實測表（見 §4.4）、供應商建議 | AC-05, 14 |
 | **S2 分享 payload Spike** | 除錯用 Extension 記錄 Threads/IG 各種分享的型別與內容 | 無 | payload 矩陣（見 §5） | AC-03, 04 |
 | **S3 AI 解析 Spike** | 20+ 份真實行程文字（ChatGPT/LINE/備忘錄）跑解析 schema | 無 | 欄位準確率、失敗類型、延遲、每次成本 | AC-01 |
 | **S4 後端 PoC** | 決策 D1 的候選，驗證 RLS 權限、revision RPC、Realtime | D1 | 權限自動化測試 + 兩客戶端收斂示範 | AC-12, 13 |
@@ -203,29 +203,36 @@ UI 顯示三個分開的數字：**+N 分鐘路程**、**+M 分鐘停留**、**�
 ### 4.3 供應商風險【實測】
 
 - MapKit `MKDirections` 的大眾運輸在很多地區只提供 ETA（`calculateETA`）而非完整路線；Route Match 只需要時間，ETA 可能足夠，但須實測首爾、廣島是否回傳。
-- 韓國地圖資料有出口限制，Apple/Google 在韓國的步行/開車路線可用性有疑慮，可能需要韓國在地供應商（如 Kakao / Naver / ODsay）。
+- 韓國地圖資料有出口限制：Apple 在韓國沒有大眾運輸路線，步行／開車精度有疑慮（見 §4.3.1）。
 - 服務端若要呼叫 Apple，候選是 Apple Maps Server API（ETA、搜尋），需驗證區域覆蓋與配額。
 - 裝置端 MKDirections 有節流；大量插入位置計算可能觸發。
 
-### 4.3.1 韓國在地服務退路【已決策：D3】
+### 4.3.1 MVP 只用 Apple Maps【已決策：D3，2026-09-24】
 
-Apple 算不出旅行時間時，改查韓國在地服務能否提供。候選（條款、海外 App 使用、費用、配額皆待 S1 確認）：
+MVP 的路線與 POI 只用 Apple（MapKit／Apple Maps Server API）。韓國在地服務延後，但架構保留 `RoutingProvider` 抽象，之後可接上。
 
-| 模式 | 候選在地服務 | 備註 |
+**已知的 Apple 在韓國限制（2026-09 網路資料，待 S1 實測）**
+
+| 模式 | Apple 地圖 App 現況 | MVP 行為 |
 |---|---|---|
-| 步行 | TMAP 보행자 경로 API | Kakao/Naver 公開 API 目前未知是否提供步行路線 |
-| 大眾運輸 | ODsay LAB、TMAP 대중교통 API | 需確認是否支援指定出發時間 |
-| 開車／計程車 | Kakao Mobility 길찾기、Naver Directions、TMAP | 三者擇一，看費用與配額 |
-| POI 搜尋 | Kakao Local（키워드 검색）、Naver 지역 검색 | 韓文店名與分店辨識通常較 Apple 完整，待驗證 |
+| 大眾運輸 | 不提供，轉到第三方 App | 預期回傳 unavailable → 顯示「無法估算」 |
+| 步行 | 2025 年起有，但缺斑馬線、樓梯、地下道等細節 | 可用，誤差待實測 |
+| 開車 | 有逐向導航，高精度地圖出口仍未獲准 | 可用，誤差待實測 |
 
-**退路規則【建議】**
+**MVP 規則**
 
-1. `RoutingProvider` 依序嘗試：Apple → 韓國在地服務（只在地點位於韓國時啟用）。
-2. **同一計算基準**：同一天、同一交通模式的 Base Route 與 Route Match 必須用同一供應商。只要當日任一段 Apple 回傳 unavailable，就整天改用在地服務重算 Base Route（產生新 route_revision），不混用兩家的分鐘數。
-3. 結果記錄 `provider`，UI 可在詳情中顯示資料來源。
-4. 在地服務也失敗 → `ROUTE_UNAVAILABLE`，不編造分鐘數（AC-14）。
-5. 座標：一律以 WGS84 儲存，呼叫在地服務前確認其座標系（部分 API 預設 KATEC/TM），必要時轉換。
-6. API 金鑰只放在服務端，路線查詢由 Route Service 代呼叫。
+1. 首爾若當日交通模式為大眾運輸且 Apple 算不出，該日 Route Match 為 `ROUTE_UNAVAILABLE`；UI 提示可改用步行或開車估算，不編造分鐘數（AC-14）。
+2. 同一天、同一交通模式的 Base Route 與 Route Match 使用同一供應商與同一計算基準。
+3. 結果記錄 `provider`，之後加入其他供應商時可區分。
+
+**之後的在地服務候選（未排入 MVP）**
+
+| 模式 | 候選 | 外國人申請（網路資料，未驗證） |
+|---|---|---|
+| POI | Kakao Local | 可用國外手機號碼註冊，約 3–5 天審核 |
+| 開車 | Kakao Mobility、Naver Directions | Kakao Mobility 需另外申請使用權限；Naver Cloud 個人帳號通常需韓國手機＋外國人登錄證 |
+| 步行 | TMAP | 申請入口僅韓文，外國人可否申請未知 |
+| 大眾運輸 | ODsay LAB、TMAP | 未知 |
 
 ### 4.4 首爾／廣島驗證方案
 
@@ -279,14 +286,14 @@ Apple 算不出旅行時間時，改查韓國在地服務能否提供。候選�
 
 ## 6. 決策紀錄
 
-**2026-09-24 已決策**：D1–D11 全部採用下表「我的建議」。D3 補充：Apple 算不出旅行時間時，查看並使用韓國在地服務（見 §4.3.1）；S1 需驗證在地服務的可用性與條款。
+**2026-09-24 已決策**：D1–D11 全部採用下表「我的建議」。D3 更新：MVP 先只用 Apple Maps，韓國在地服務延後（見 §4.3.1）。
 
 
 | # | 問題 | 選項 | 影響 | 我的建議 |
 |---|---|---|---|---|
 | D1 | 後端 | A. Supabase（Postgres+RLS+Realtime）B. Firebase（Firestore+Rules）C. CloudKit 共享 + 自建 AI 服務 | A 權限與 revision 交易最直觀、可 SQL 測試；B 離線同步強但交易/複雜規則較難；C 無法做 Web 邀請頁、仍需另一個後端跑 AI | **A** |
 | D2 | iOS 最低版本 | iOS 17 / iOS 18 | 17 可用 Observation、SwiftData、新 MapKit SwiftUI API；18 減少相容處理但排除部分裝置 | **iOS 17** |
-| D3 | 路線/POI 供應商 | Apple 全包 / Apple + 韓國在地供應商 / Google | 成本、韓國覆蓋、授權條款 | **Apple 優先，算不出時改用韓國在地服務**；RoutingProvider 抽象（§4.3.1） |
+| D3 | 路線/POI 供應商 | Apple 全包 / Apple + 韓國在地供應商 / Google | 成本、韓國覆蓋、授權條款 | **MVP 只用 Apple**；保留 RoutingProvider 抽象，韓國在地服務延後（§4.3.1） |
 | D4 | 免安裝 Web 邀請頁 | 不做 / 唯讀預覽+導向下載 / Web 可編輯 | 範圍與安全面擴大 | **唯讀預覽（Trip 名稱、日期、邀請者）+ Universal Link**，不顯示行程內容、不做 Web 編輯 |
 | D5 | Editor 可否邀請 | 僅 Owner / Owner+Editor（只能邀 Viewer/Editor） | 協作便利 vs 控制 | **僅 Owner**（MVP） |
 | D6 | 離線範圍 | 唯讀 / 唯讀+Saved/Shopping/購買可離線 / 全離線 | 複雜度 | **唯讀 + 非行程操作可離線**；行程修改需在線 |
@@ -343,7 +350,7 @@ Wireframe 可點擊不算任何 AC 通過；所有 AC 以 iOS App + 真實後端
 
 | 風險 | 可能性 | 影響 | 緩解 |
 |---|---|---|---|
-| 韓國路線資料不足（步行/開車） | 高 | Route Match 在首爾無法運作 | S1 優先；在地供應商備案；unknown 狀態 |
+| Apple 在首爾無大眾運輸、步行/開車精度不足 | 高 | 首爾 Route Match 常顯示無法估算 | S1 實測；unknown 狀態；改用步行／開車估算；之後接韓國在地服務 |
 | Threads/IG 只給 URL 且 OG 被登入牆擋 | 高 | 分享辨識率低 | 截圖 OCR、手動補填；不承諾自動辨識率 |
 | 大眾運輸 ETA 不穩定/不可用 | 中 | detour 數字不可信 | 標註供應商與時間；允許換交通模式 |
 | AI 解析準確率不足（時間/分店） | 中 | 確認頁負擔重 | S3 評測；所有歧義強制確認 |
