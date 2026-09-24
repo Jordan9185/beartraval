@@ -417,3 +417,7 @@ enabled = true
 # AI Gateway：解析匯入文字。驗證使用者 JWT；ANTHROPIC_API_KEY 放在 supabase/functions/.env（本機）或 `supabase secrets set`（雲端）。
 [functions.parse-import]
 verify_jwt = true
+
+# 邀請預覽頁（公開，不需登入；只顯示 Trip 名稱、日期、邀請者，決策 D4）。
+[functions.invite]
+verify_jwt = false

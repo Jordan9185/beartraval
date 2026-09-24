@@ -40,8 +40,14 @@
 | `accept_invite(token)` | 已登入 | 加入 Trip |
 | `set_member_role(trip_id, user_id, role)` / `remove_member(trip_id, user_id)` | Owner | |
 | `get_trip_changes(trip_id, since_revision)` | 成員 | 重連後補拉錯過的變更 |
+| `set_display_name(name)` | 已登入 | 顯示名稱（只有共同 Trip 的成員看得到） |
+| `invite_preview(token)` | 僅 service_role | 邀請預覽頁用：Trip 名稱、日期、邀請者、權限；不含行程 |
 
-Realtime：訂閱 `app.trip_events` 的 postgres_changes（依 `trip_id` 過濾），收到後依 revision 重新拉取。
+Realtime：訂閱 `app.trip_events` 的 postgres_changes（依 `trip_id` 過濾，UUID 用小寫字串），收到後依 revision 重新拉取；重新訂閱成功時以 `get_trip_changes` 補拉。
+
+邀請預覽頁：`GET /functions/v1/invite?token=…`（Edge Function `invite`，公開）。「在 App 開啟」目前用 `beartravel://invite?token=…`；有網域後改成 Universal Link。
+
+離線佇列：`save_place` 接受 `client_op_id`，重送時回傳第一次的結果，不會重複新增。
 
 ## 錯誤代碼
 

@@ -228,3 +228,60 @@ struct SavedIntegrationTests {
         #expect(try await owner.savedEntries(of: trip.id).count == 2)
     }
 }
+
+/// WP7：兩個客戶端同步（Realtime 推送 + 重新連線補拉），以及直接呼叫 API 越權被拒（AC-12）。
+@Suite(.enabled(if: IntegrationEnv.config != nil), .serialized)
+struct SyncIntegrationTests {
+    func signedIn() async throws -> (TripRepository, SupabaseClient) {
+        let client = Backend.makeClient(IntegrationEnv.config!, storage: MemoryStorage())
+        _ = try await client.auth.signUp(email: "it-\(UUID().uuidString.prefix(8).lowercased())@example.com", password: UUID().uuidString)
+        return (TripRepository(client: client), client)
+    }
+
+    @MainActor
+    @Test func realtimePushAndCatchUp() async throws {
+        let (owner, _) = try await signedIn()
+        let (editor, _) = try await signedIn()
+        let (viewer, _) = try await signedIn()
+        let trip = try await owner.createTrip(name: "Sync", startDate: "2026-10-01", endDate: "2026-10-01", timeZone: "Asia/Seoul")
+        _ = try await editor.acceptInvite(token: try await owner.createInvite(tripID: trip.id, role: .editor))
+        _ = try await viewer.acceptInvite(token: try await owner.createInvite(tripID: trip.id, role: .viewer))
+        #expect(try await viewer.myRole(in: trip.id) == .viewer)
+        #expect(try await owner.members(of: trip.id).count == 3)
+
+        // Owner 的裝置訂閱變更。
+        let start = try await owner.tripRevision(trip.id)
+        var received: [TripEvent] = []
+        let sync = TripSync(tripID: trip.id, repository: owner, revision: start) { received.append(contentsOf: $0) }
+        await sync.start()
+        try await Task.sleep(for: .seconds(1))
+
+        // Editor 新增 Saved → Owner 收到通知（AC-07）。
+        let (saved, _) = try await editor.savePlace(tripID: trip.id, label: "Amy 的餐廳", category: .eat, placeID: nil, source: nil)
+        for _ in 0..<50 where !received.contains(where: { $0.kind == "saved.changed" }) {
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        #expect(received.contains { $0.kind == "saved.changed" && $0.entityId == saved.id }, "owner device notified")
+        #expect(try await owner.stops(of: trip.id).isEmpty, "friend's addition does not touch the itinerary")
+        await sync.stop()
+
+        // 另一台停在舊 revision 的裝置：重新連線時補拉。
+        var caughtUp: [TripEvent] = []
+        let stale = TripSync(tripID: trip.id, repository: owner, revision: start) { caughtUp.append(contentsOf: $0) }
+        await stale.catchUp()
+        #expect(caughtUp.contains { $0.kind == "saved.changed" })
+        #expect(stale.revision == (try await owner.tripRevision(trip.id)))
+
+        // AC-12：Viewer 直接呼叫 API 寫入全部被拒。
+        await #expect(throws: BackendError.forbidden) {
+            _ = try await viewer.savePlace(tripID: trip.id, label: "x", category: .eat, placeID: nil, source: nil)
+        }
+        await #expect(throws: BackendError.forbidden) { try await viewer.setInterest(savedID: saved.id, interested: true) }
+        await #expect(throws: BackendError.forbidden) {
+            _ = try await viewer.createInvite(tripID: trip.id, role: .viewer)
+        }
+        await #expect(throws: BackendError.forbidden) {
+            _ = try await editor.createInvite(tripID: trip.id, role: .viewer)
+        }
+    }
+}

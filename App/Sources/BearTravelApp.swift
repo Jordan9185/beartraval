@@ -13,10 +13,10 @@ struct BearTravelApp: App {
             if let scenario = UserDefaults.standard.string(forKey: "UITestImport") {
                 ImportUITestRoot(scenario: scenario)
             } else {
-                RootView(session: session)
+                RootView(session: session).onOpenURL { session?.handle(url: $0) }
             }
             #else
-            RootView(session: session)
+            RootView(session: session).onOpenURL { session?.handle(url: $0) }
             #endif
         }
     }

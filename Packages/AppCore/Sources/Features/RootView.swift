@@ -21,6 +21,13 @@ public struct RootView: View {
                 LoginView(session: session)
             case .signedIn:
                 tabs(session)
+                    .sheet(isPresented: Binding(get: { session.pendingInviteToken != nil },
+                                                set: { if !$0 { session.pendingInviteToken = nil } })) {
+                        JoinTripView(session: session, initialToken: session.pendingInviteToken) { _ in
+                            session.pendingInviteToken = nil
+                        }
+                    }
+                    .task { await session.flushOfflineQueue() }
             }
         } else {
             ContentUnavailableView("後端設定缺漏", systemImage: "exclamationmark.triangle",

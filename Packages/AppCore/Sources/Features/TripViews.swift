@@ -8,6 +8,7 @@ struct TripListView: View {
     @State private var loaded = false
     @State private var errorMessage: String?
     @State private var showsCreate = false
+    @State private var showsJoin = false
 
     var body: some View {
         NavigationStack {
@@ -37,7 +38,11 @@ struct TripListView: View {
             .navigationTitle("Trip")
             .navigationDestination(for: Trip.self) { TripDetailView(session: session, trip: $0) }
             .toolbar {
+                Button("加入好友的 Trip", systemImage: "person.badge.plus") { showsJoin = true }
                 Button("建立 Trip", systemImage: "plus") { showsCreate = true }
+            }
+            .sheet(isPresented: $showsJoin) {
+                JoinTripView(session: session, initialToken: nil) { _ in Task { await reload() } }
             }
             .sheet(isPresented: $showsCreate) {
                 CreateTripView(session: session) { trip in
@@ -156,6 +161,8 @@ struct TripDetailView: View {
     @State private var baseRoutes: [UUID: BaseRoute] = [:]
     @State private var errorMessage: String?
     @State private var showsRouteMatch = false
+    @State private var myRole: TripRole?
+    @State private var sync: TripSync?
 
     var body: some View {
         List {
@@ -179,6 +186,7 @@ struct TripDetailView: View {
         }
         .navigationTitle(trip.name)
         .toolbar {
+            NavigationLink { MembersView(session: session, trip: trip, myRole: myRole) } label: { Label("成員", systemImage: "person.2") }
             Button("試算順路", systemImage: "point.topleft.down.to.point.bottomright.curvepath") { showsRouteMatch = true }
                 .disabled(timeline.isEmpty)
             #if DEBUG
@@ -188,12 +196,27 @@ struct TripDetailView: View {
             #endif
         }
         .sheet(isPresented: $showsRouteMatch) {
-            RouteMatchView(session: session, tripID: trip.id, timeline: timeline, places: places) {
+            RouteMatchView(session: session, tripID: trip.id, timeline: timeline, places: places, onAdded: {
                 Task { await reload() }
-            }
+            }, canEdit: myRole?.canEdit == true)
         }
         .refreshable { await reload() }
-        .task { await reload() }
+        .task {
+            myRole = try? await session.trips.myRole(in: trip.id)
+            await reload()
+            await startSync()
+        }
+        .onDisappear { Task { await sync?.stop() } }
+    }
+
+    /// 旅伴修改行程時自動重新載入（WP7）。
+    private func startSync() async {
+        guard sync == nil, let revision = try? await session.trips.tripRevision(trip.id) else { return }
+        let sync = TripSync(tripID: trip.id, repository: session.trips, revision: revision) { events in
+            if events.contains(where: { $0.kind.hasPrefix("day.") }) { Task { await reload() } }
+        }
+        self.sync = sync
+        await sync.start()
     }
 
     private func reload() async {

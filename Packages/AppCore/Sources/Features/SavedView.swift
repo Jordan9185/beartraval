@@ -16,6 +16,9 @@ struct SavedView: View {
     @State private var resolving: SavedEntry?
     @State private var errorMessage: String?
     @State private var loaded = false
+    @State private var myRole: TripRole?
+    @State private var sync: TripSync?
+    @State private var queued = 0
 
     var body: some View {
         NavigationStack {
@@ -47,14 +50,19 @@ struct SavedView: View {
                 Toggle("顯示已加入行程", isOn: $includeAdded)
 
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+                if queued > 0 {
+                    Label("\(queued) 項變更等待連線後送出", systemImage: "icloud.slash").font(.caption).foregroundStyle(.secondary)
+                }
 
                 ForEach(filter.apply(entries, includeAdded: includeAdded)) { entry in
-                    SavedRow(entry: entry, me: session.trips.currentUserID,
+                    SavedRow(entry: entry, me: session.trips.currentUserID, canEdit: myRole?.canEdit == true,
                              toggleInterest: { Task { await toggleInterest(entry) } },
                              showRoute: { routeFor = entry },
                              resolve: { resolving = entry })
                     .swipeActions {
-                        Button("移除", role: .destructive) { Task { await dismiss(entry) } }
+                        if myRole?.canEdit == true {
+                            Button("移除", role: .destructive) { Task { await dismiss(entry) } }
+                        }
                     }
                 }
             }
@@ -69,7 +77,7 @@ struct SavedView: View {
             .navigationTitle("Saved")
             .refreshable { await reload() }
             .task { await loadTrips() }
-            .onChange(of: tripID) { Task { await reload() } }
+            .onChange(of: tripID) { Task { await switchTrip() } }
             .sheet(item: $openDraft) { draft in
                 NavigationStack {
                     ShareFlowView(content: draft.content, repository: session.trips, matcher: session.routes,
@@ -84,7 +92,7 @@ struct SavedView: View {
             }
             .sheet(item: $routeFor) { entry in
                 if let tripID, let place = entry.place {
-                    SavedRouteSheet(session: session, tripID: tripID, place: place, category: entry.saved.category) {
+                    SavedRouteSheet(session: session, tripID: tripID, place: place, category: entry.saved.category, canEdit: myRole?.canEdit == true) {
                         Task { await reload() }
                     }
                 }
@@ -110,8 +118,26 @@ struct SavedView: View {
         await reload()
     }
 
+    /// 換 Trip 時重新取得權限並改訂閱該 Trip 的變更（WP7）。
+    private func switchTrip() async {
+        await sync?.stop()
+        sync = nil
+        guard let tripID else { return }
+        myRole = try? await session.trips.myRole(in: tripID)
+        await reload()
+        if let revision = try? await session.trips.tripRevision(tripID) {
+            let sync = TripSync(tripID: tripID, repository: session.trips, revision: revision) { events in
+                if events.contains(where: { $0.kind.hasPrefix("saved.") || $0.kind.hasPrefix("day.") }) { Task { await reload() } }
+            }
+            self.sync = sync
+            await sync.start()
+        }
+    }
+
     private func reload() async {
         drafts = ShareDraftStore.shared()?.all() ?? []
+        await session.flushOfflineQueue()
+        queued = await session.offlineQueue.items.count
         guard let tripID else { return }
         do {
             entries = try await session.trips.savedEntries(of: tripID)
@@ -121,11 +147,19 @@ struct SavedView: View {
         }
     }
 
+    /// 想去可離線（決策 D6）：連不上時先更新畫面並排入佇列。
     private func toggleInterest(_ entry: SavedEntry) async {
         guard let me = session.trips.currentUserID else { return }
+        let interested = !entry.interestedUserIDs.contains(me)
         do {
-            try await session.trips.setInterest(savedID: entry.id, interested: !entry.interestedUserIDs.contains(me))
+            try await session.trips.setInterest(savedID: entry.id, interested: interested)
             await reload()
+        } catch BackendError.other {
+            await session.offlineQueue.enqueue(.setInterest(savedID: entry.id, interested: interested))
+            if let i = entries.firstIndex(where: { $0.id == entry.id }) {
+                if interested { entries[i].interestedUserIDs.insert(me) } else { entries[i].interestedUserIDs.remove(me) }
+            }
+            queued = await session.offlineQueue.items.count
         } catch {
             errorMessage = "更新失敗：\(error.localizedDescription)"
         }
@@ -144,6 +178,7 @@ struct SavedView: View {
 struct SavedRow: View {
     let entry: SavedEntry
     let me: UUID?
+    let canEdit: Bool
     let toggleInterest: () -> Void
     let showRoute: () -> Void
     let resolve: () -> Void
@@ -172,10 +207,11 @@ struct SavedRow: View {
                     Label("\(entry.interestedUserIDs.count) 人想去",
                           systemImage: me.map(entry.interestedUserIDs.contains) == true ? "heart.fill" : "heart")
                 }
+                .disabled(!canEdit)
                 Spacer()
                 if entry.isConfirmed {
                     if entry.saved.status == .saved { Button("試算順路", action: showRoute) }
-                } else {
+                } else if canEdit {
                     Button("補填地點", action: resolve)
                 }
             }
@@ -191,6 +227,7 @@ struct SavedRouteSheet: View {
     let tripID: UUID
     let place: Place
     let category: SavedCategory
+    let canEdit: Bool
     let onAdded: () -> Void
     @State private var timeline: [DayTimeline]?
     @State private var places: [UUID: Place] = [:]
@@ -201,7 +238,8 @@ struct SavedRouteSheet: View {
                 RouteMatchView(session: session, tripID: tripID, timeline: timeline, places: places, onAdded: onAdded,
                                preset: SearchResult(draft: PlaceDraft(providerPlaceId: place.providerPlaceId, name: place.nameLocal ?? place.name,
                                                                       address: place.address, latitude: place.latitude,
-                                                                      longitude: place.longitude, countryCode: place.countryCode)))
+                                                                      longitude: place.longitude, countryCode: place.countryCode)),
+                               canEdit: canEdit)
             } else {
                 ProgressView()
             }

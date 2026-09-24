@@ -17,6 +17,8 @@ struct RouteMatchView: View {
     let onAdded: () -> Void
     /// 從 Saved 開啟時預先帶入的候選地點。
     var preset: SearchResult? = nil
+    /// Viewer 只能試算，不能加入行程（伺服器也會拒絕）。
+    var canEdit = true
 
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
@@ -83,7 +85,7 @@ struct RouteMatchView: View {
                         Section(dayTitle(match.dayID) + "（\(match.mode.displayName)）") {
                             DayMatchRow(match: match, candidate: candidate, previousStop: previousPoint(match),
                                         positionText: { positionText($0, dayID: match.dayID) }, stopName: stopName)
-                            if match.best != nil {
+                            if match.best != nil && canEdit {
                                 Button("加入這天…") { adding = AddRequest(dayID: match.dayID, mode: match.mode) }
                             }
                         }

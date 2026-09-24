@@ -14,6 +14,10 @@ public final class SessionModel {
     }
 
     public private(set) var state: State = .loading
+    /// 從 beartravel://invite 開啟時待處理的邀請。
+    public var pendingInviteToken: String?
+    /// 離線佇列（Saved 想去、收藏等）；恢復連線時送出。
+    public let offlineQueue = OfflineQueue.shared()
     public let client: SupabaseClient
     public let trips: TripRepository
     /// 同一個 matcher（與快取）供 Base Route 與 Route Match 共用，確保同一計算基準。
@@ -61,6 +65,17 @@ public final class SessionModel {
         } catch {
             throw LoginError(error)
         }
+    }
+
+    /// 處理 App 連結（目前只有邀請）。
+    public func handle(url: URL) {
+        if url.scheme == "beartravel", url.host == "invite", let token = InviteLink.token(from: url.absoluteString) {
+            pendingInviteToken = token
+        }
+    }
+
+    public func flushOfflineQueue() async {
+        _ = await offlineQueue.flush(using: trips)
     }
 
     public func signOut() async {

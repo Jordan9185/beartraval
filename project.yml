@@ -48,6 +48,10 @@ targets:
         CFBundleDisplayName: BearTravel
         SupabaseURL: $(SUPABASE_URL)
         SupabaseAnonKey: $(SUPABASE_ANON_KEY)
+        # 邀請連結 beartravel://invite?token=…（Universal Link 待有網域後補上）
+        CFBundleURLTypes:
+          - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
+            CFBundleURLSchemes: [beartravel]
         # 本機 Supabase 走 http；只放行 localhost。
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

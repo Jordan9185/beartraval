@@ -170,9 +170,11 @@ extension TripRepository {
     }
 
     /// 回傳該筆 Saved 與是否為重複（重複時只記錄想去，不新增）。
-    public func savePlace(tripID: UUID, label: String, category: SavedCategory, placeID: UUID?, source: SavedSource?) async throws -> (SavedPlace, duplicate: Bool) {
+    public func savePlace(tripID: UUID, label: String, category: SavedCategory, placeID: UUID?, source: SavedSource?,
+                          clientOpID: UUID? = nil) async throws -> (SavedPlace, duplicate: Bool) {
         struct Params: Encodable {
             let p_trip_id: UUID, p_raw_label: String, p_category: SavedCategory, p_place_id: UUID?, p_source: SavedSource?
+            let p_client_op_id: UUID?
         }
         struct Result: Decodable {
             let saved: SavedPlace, duplicate: Bool
@@ -184,7 +186,8 @@ extension TripRepository {
         }
         do {
             let r: Result = try await client.rpc("save_place", params: Params(
-                p_trip_id: tripID, p_raw_label: label, p_category: category, p_place_id: placeID, p_source: source
+                p_trip_id: tripID, p_raw_label: label, p_category: category, p_place_id: placeID, p_source: source,
+                p_client_op_id: clientOpID
             )).execute().value
             return (r.saved, r.duplicate)
         } catch {
