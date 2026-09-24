@@ -14,6 +14,7 @@ struct DebugMenuView: View {
                     Button("登出", role: .destructive) { Task { await session.signOut() } }
                 }
                 NavigationLink("Payload Inspector（#2）") { PayloadInspectorListView() }
+                NavigationLink("路線／AI 呼叫統計") { TelemetryView() }
                 NavigationLink("Naver／Kakao 外開連結（#1）") { LocalMapLinkDebugView() }
             }
             .navigationTitle("Debug")

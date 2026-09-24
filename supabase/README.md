@@ -45,6 +45,8 @@
 | `set_shopping_interest(item_id, interested)` | Owner／Editor | 想買（成員集合，與購買分開） |
 | `add_merchant_candidate(item_id, place_id, evidence_type, evidence_url?, evidence_note?)` | Owner／Editor | 可能販售店與證據（30 天過期）；庫存一律 unknown |
 | `record_purchase(item_id, purchased, client_op_id?)` | Owner／Editor | 購買／撤銷事件；撤銷限購買者或 Owner |
+| `delete_trip(trip_id)` | Owner | 刪除 Trip（含匯入原文、AI 紀錄） |
+| `prepare_account_deletion(user_id)` / `purge_tombstones()` | 僅 service_role | 刪除帳號前的轉移與匿名化；30 天墓碑清除（pg_cron 每日） |
 | `set_display_name(name)` | 已登入 | 顯示名稱（只有共同 Trip 的成員看得到） |
 | `invite_preview(token)` | 僅 service_role | 邀請預覽頁用：Trip 名稱、日期、邀請者、權限；不含行程 |
 
@@ -100,6 +102,10 @@ supabase status     # 取得 anon key
 ## Edge Function：`ask-trip`（AI 助手）
 
 以使用者 JWT 讀取 Trip（RLS），組成 Trip 範圍的上下文，用 `ai/trip-assistant` 的 `askTrip()` 回答並驗證引用。路線分鐘數只能來自 App 在裝置上算好的 `route_facts`。回傳的 `proposal` 只是建議：App 重新計算後建立 `created_by_ai = true` 的 proposal，仍需使用者確認。問答存在 `app.ai_messages`（刪 Trip 即刪，D11）；日誌只記延遲、token 數與狀態，不記 prompt。
+
+## Edge Function：`delete-account`
+
+刪除呼叫者的帳號（App Review 要求）：先 `prepare_account_deletion`（擁有的 Trip 轉給其他成員或刪除、協作紀錄的作者清為 null），再 `auth.admin.deleteUser`。
 
 ## iOS 整合測試
 

@@ -13,6 +13,7 @@ struct TodayView: View {
     @State private var computingNearby = false
     @State private var adding: SavedEntry?
     @State private var showsAssistant = false
+    @State private var showsAccount = false
 
     /// 順路門檻：加入後多花不超過此分鐘數才算「順路」。
     static let nearbyThresholdMinutes = 20
@@ -36,11 +37,13 @@ struct TodayView: View {
                         ForEach(store.trips) { Text($0.name).tag(Optional($0.id)) }
                     }
                 }
+                Button("設定", systemImage: "person.crop.circle") { showsAccount = true }
                 if store.snapshot != nil {
                     Button("AI 助手", systemImage: "sparkles") { showsAssistant = true }
                 }
                 if let onDebug { Button("Debug", systemImage: "ladybug", action: onDebug) }
             }
+            .sheet(isPresented: $showsAccount) { AccountView(session: session) }
             .sheet(isPresented: $showsAssistant) {
                 if let snapshot = store.snapshot {
                     AssistantView(session: session, snapshot: snapshot, canApply: store.myRole?.canEdit == true) {
@@ -123,6 +126,10 @@ struct TodayView: View {
             }
 
             Section {
+                if let cachedAt = store.cachedAt {
+                    Label("離線資料：\(cachedAt.formatted(date: .abbreviated, time: .shortened))", systemImage: "icloud.slash")
+                        .font(.caption).foregroundStyle(.orange)
+                }
                 Text("資料版本 r\(snapshot.revision)").font(.caption2).foregroundStyle(.tertiary)
             }
         }

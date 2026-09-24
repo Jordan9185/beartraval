@@ -425,3 +425,7 @@ verify_jwt = false
 # AI 助手：Trip 範圍問答（WP10）。
 [functions.ask-trip]
 verify_jwt = true
+
+# 刪除帳號（App Review 要求；WP11）。
+[functions.delete-account]
+verify_jwt = true

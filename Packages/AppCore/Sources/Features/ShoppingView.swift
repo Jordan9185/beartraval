@@ -181,7 +181,7 @@ struct ShoppingRow<MerchantScreen: View>: View {
                     case .unscheduled: Text("未安排").foregroundStyle(.orange)
                     case .scheduled: Text("已安排：\(entry.plannedDate ?? "") \(entry.plannedStore ?? "")")
                     case .purchased(let by, let at):
-                        Text("\(by == me ? "你" : "旅伴")已購買 · \(at.formatted(date: .abbreviated, time: .shortened))")
+                        Text("\(by == nil ? "已刪除帳號的成員" : by == me ? "你" : "旅伴")已購買 · \(at.formatted(date: .abbreviated, time: .shortened))")
                     }
                 }
                 .font(.caption)

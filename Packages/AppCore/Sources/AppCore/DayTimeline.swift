@@ -1,7 +1,7 @@
 import Foundation
 
 /// 一天的唯讀時間軸（WP2）。路線在 WP4 才計算，這裡不產生任何分鐘數。
-public struct DayTimeline: Identifiable, Equatable, Sendable {
+public struct DayTimeline: Identifiable, Codable, Equatable, Sendable {
     public var day: TripDay
     /// 依 sort_order 排序。
     public var stops: [Stop]

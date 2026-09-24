@@ -14,6 +14,8 @@ public final class TripStore {
     public private(set) var myRole: TripRole?
     public private(set) var errorMessage: String?
     public private(set) var loaded = false
+    /// 離線時顯示的快取資料時間；nil 表示資料是最新的。
+    public private(set) var cachedAt: Date?
 
     private let repository: TripRepository
     private var sync: TripSync?
@@ -25,11 +27,20 @@ public final class TripStore {
     public func start() async {
         do {
             trips = try await repository.myTrips()
+            try? JSONEncoder().encode(trips).write(to: Self.tripsCacheURL ?? URL(fileURLWithPath: "/dev/null"))
         } catch {
-            errorMessage = "讀取失敗：\(error.localizedDescription)"
+            // 離線：用上次的 Trip 清單。
+            if let url = Self.tripsCacheURL, let data = try? Data(contentsOf: url) {
+                trips = (try? JSONDecoder().decode([Trip].self, from: data)) ?? []
+            }
+            errorMessage = (error as? BackendError)?.userMessage ?? "讀取失敗"
         }
         loaded = true
         if selectedTripID == nil { selectedTripID = defaultTrip(trips)?.id } else { await reload(resubscribe: true) }
+    }
+
+    static var tripsCacheURL: URL? {
+        AppGroup.containerURL?.appending(path: "trips-cache.json")
     }
 
     private func defaultTrip(_ trips: [Trip]) -> Trip? {
@@ -40,10 +51,18 @@ public final class TripStore {
     public func reload(resubscribe: Bool = false) async {
         guard let id = selectedTripID, let trip = trips.first(where: { $0.id == id }) else { snapshot = nil; return }
         do {
-            snapshot = try await repository.snapshot(of: trip)
+            let fresh = try await repository.snapshot(of: trip)
+            snapshot = fresh
+            cachedAt = nil
             errorMessage = nil
+            SnapshotCache.shared()?.save(fresh)
         } catch {
-            errorMessage = "讀取失敗：\(error.localizedDescription)"
+            // 離線唯讀：顯示最近一次的資料並標示時間（D6）。
+            if let entry = SnapshotCache.shared()?.load(tripID: trip.id) {
+                snapshot = entry.snapshot
+                cachedAt = entry.savedAt
+            }
+            errorMessage = (error as? BackendError)?.userMessage ?? "讀取失敗"
         }
         if resubscribe { await subscribe(tripID: id) }
     }

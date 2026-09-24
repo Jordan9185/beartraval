@@ -65,6 +65,7 @@ targets:
     platform: iOS
     sources:
       - ShareExtension/Sources
+      - ShareExtension/Resources
     dependencies:
       - package: AppCore
         product: AppCore

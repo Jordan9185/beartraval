@@ -7,10 +7,11 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
     public var name: String
     public var note: String?
     public var url: String?
-    public var addedBy: UUID
+    /// nil = 新增者已刪除帳號（匿名化）。
+    public var addedBy: UUID?
     public var plannedStopId: UUID?
 
-    public init(id: UUID, tripId: UUID, name: String, note: String? = nil, url: String? = nil, addedBy: UUID, plannedStopId: UUID? = nil) {
+    public init(id: UUID, tripId: UUID, name: String, note: String? = nil, url: String? = nil, addedBy: UUID?, plannedStopId: UUID? = nil) {
         self.id = id
         self.tripId = tripId
         self.name = name
@@ -71,11 +72,12 @@ public struct PurchaseEvent: Codable, Hashable, Sendable {
     public enum Kind: String, Codable, Sendable { case purchased, undone }
     public var id: Int
     public var itemId: UUID
-    public var actorId: UUID
+    /// nil = 購買者已刪除帳號（匿名化）。
+    public var actorId: UUID?
     public var type: Kind
     public var createdAt: Date
 
-    public init(id: Int, itemId: UUID, actorId: UUID, type: Kind, createdAt: Date) {
+    public init(id: Int, itemId: UUID, actorId: UUID?, type: Kind, createdAt: Date) {
         self.id = id
         self.itemId = itemId
         self.actorId = actorId
@@ -92,7 +94,7 @@ public struct PurchaseEvent: Codable, Hashable, Sendable {
 }
 
 /// 一個商品與顯示所需的資料；狀態由事件推導（§3.4）。
-public struct ShoppingEntry: Identifiable, Hashable, Sendable {
+public struct ShoppingEntry: Identifiable, Codable, Hashable, Sendable {
     public var item: ShoppingItem
     public var interestedUserIDs: Set<UUID>
     public var events: [PurchaseEvent]
@@ -105,7 +107,7 @@ public struct ShoppingEntry: Identifiable, Hashable, Sendable {
     public enum Status: Equatable, Sendable {
         case unscheduled
         case scheduled
-        case purchased(by: UUID, at: Date)
+        case purchased(by: UUID?, at: Date)
     }
 
     public var status: Status {

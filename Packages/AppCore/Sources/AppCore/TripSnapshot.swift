@@ -2,7 +2,7 @@ import Foundation
 
 /// 一個 Trip 在某個 revision 的完整資料。Today、Trip、Map 共用同一份，
 /// 確保三頁看到的是同一份正式行程與同一版本（AC-02）。
-public struct TripSnapshot: Equatable, Sendable {
+public struct TripSnapshot: Codable, Equatable, Sendable {
     public var trip: Trip
     public var revision: Int
     public var timeline: [DayTimeline]

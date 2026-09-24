@@ -391,3 +391,31 @@ struct AssistantIntegrationTests {
         }
     }
 }
+
+/// WP11：刪除帳號（Edge Function）後，共同 Trip 轉給旅伴，旅伴仍看得到內容。
+@Suite(.enabled(if: IntegrationEnv.config != nil))
+struct DeletionIntegrationTests {
+    @Test func deleteAccountTransfersSharedTrip() async throws {
+        func signedIn() async throws -> TripRepository {
+            let client = Backend.makeClient(IntegrationEnv.config!, storage: MemoryStorage())
+            _ = try await client.auth.signUp(email: "it-\(UUID().uuidString.prefix(8).lowercased())@example.com", password: UUID().uuidString)
+            return TripRepository(client: client)
+        }
+        let leaving = try await signedIn(), friend = try await signedIn()
+        let shared = try await leaving.createTrip(name: "Shared", startDate: "2026-10-01", endDate: "2026-10-01", timeZone: "Asia/Seoul")
+        let solo = try await leaving.createTrip(name: "Solo", startDate: "2026-10-01", endDate: "2026-10-01", timeZone: "Asia/Seoul")
+        _ = try await friend.acceptInvite(token: try await leaving.createInvite(tripID: shared.id, role: .editor))
+        _ = try await leaving.savePlace(tripID: shared.id, label: "Leaving's cafe", category: .cafe, placeID: nil, source: nil)
+
+        try await leaving.deleteAccount()
+
+        #expect(try await friend.myRole(in: shared.id) == .owner)
+        let saved = try await friend.savedEntries(of: shared.id)
+        #expect(saved.map(\.saved.rawLabel) == ["Leaving's cafe"], "shared content stays")
+        #expect(try await friend.myTrips().contains { $0.id == solo.id } == false)
+
+        // 刪除 Trip：只有 Owner 可以，刪除後旅伴也看不到。
+        try await friend.deleteTrip(shared.id)
+        #expect(try await friend.myTrips().isEmpty)
+    }
+}

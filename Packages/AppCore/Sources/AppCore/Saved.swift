@@ -38,10 +38,11 @@ public struct SavedPlace: Codable, Identifiable, Hashable, Sendable {
     public var rawLabel: String
     public var category: SavedCategory
     public var sourceId: UUID?
-    public var addedBy: UUID
+    /// nil = 新增者已刪除帳號（匿名化）。
+    public var addedBy: UUID?
     public var status: Status
 
-    public init(id: UUID, tripId: UUID, placeId: UUID?, rawLabel: String, category: SavedCategory, sourceId: UUID?, addedBy: UUID, status: Status) {
+    public init(id: UUID, tripId: UUID, placeId: UUID?, rawLabel: String, category: SavedCategory, sourceId: UUID?, addedBy: UUID?, status: Status) {
         self.id = id
         self.tripId = tripId
         self.placeId = placeId
@@ -96,7 +97,7 @@ public struct SavedSource: Codable, Equatable, Sendable {
 }
 
 /// 一筆 Saved 加上顯示所需資料。
-public struct SavedEntry: Identifiable, Hashable, Sendable {
+public struct SavedEntry: Identifiable, Codable, Hashable, Sendable {
     public var saved: SavedPlace
     public var place: Place?
     public var source: SourceReference?

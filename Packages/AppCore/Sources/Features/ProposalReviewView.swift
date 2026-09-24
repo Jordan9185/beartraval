@@ -122,6 +122,8 @@ struct ProposalReviewView: View {
                 notice = "行程剛被其他人修改。"
                 phase = .unavailable
             }
+        } catch let error as BackendError {
+            phase = .failed(error.userMessage)
         } catch {
             phase = .failed("加入失敗：\(error.localizedDescription)")
         }

@@ -37,6 +37,22 @@ public struct RootView: View {
     }
 
     private func tabs(_ session: SessionModel) -> some View {
+        tabView(session)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if !session.network.isOnline {
+                    Label("離線中：顯示最近一次的資料；行程修改需要連線，收藏與購買會在連線後送出。", systemImage: "wifi.slash")
+                        .font(.caption)
+                        .frame(maxWidth: .infinity)
+                        .padding(8)
+                        .background(.yellow.opacity(0.25))
+                }
+            }
+            .onChange(of: session.network.isOnline) { _, online in
+                if online { Task { await session.flushOfflineQueue(); await store?.reload() } }
+            }
+    }
+
+    private func tabView(_ session: SessionModel) -> some View {
         TabView {
             TodayView(session: session, store: tripStore(session), onDebug: debugAction)
                 .tabItem { Label("Today", systemImage: "sun.max") }

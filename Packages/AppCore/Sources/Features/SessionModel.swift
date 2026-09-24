@@ -25,7 +25,9 @@ public final class SessionModel {
     public let imports: any ImportService
     public let placeSearch: any PlaceSearching
 
-    public init(client: SupabaseClient, routingProvider: any RoutingProvider = AppleMapKitProvider()) {
+    public let network = NetworkMonitor()
+
+    public init(client: SupabaseClient, routingProvider: any RoutingProvider = InstrumentedProvider(AppleMapKitProvider())) {
         self.client = client
         self.trips = TripRepository(client: client)
         self.routes = RouteMatcher(provider: routingProvider)

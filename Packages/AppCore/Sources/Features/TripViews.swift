@@ -165,6 +165,8 @@ struct TripDetailView: View {
     @State private var sync: TripSync?
     @State private var selectedStop: Stop?
     @State private var revision: Int?
+    @State private var confirmDelete = false
+    @Environment(\.dismiss) private var dismissView
 
     var body: some View {
         List {
@@ -192,6 +194,17 @@ struct TripDetailView: View {
         .safeAreaInset(edge: .bottom) {
             if let revision { Text("資料版本 r\(revision)").font(.caption2).foregroundStyle(.secondary).padding(4) }
         }
+        .confirmationDialog("刪除「\(trip.name)」？所有旅伴都會失去這個 Trip，匯入原文與 AI 紀錄也會刪除。", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("刪除 Trip", role: .destructive) {
+                Task {
+                    do {
+                        try await session.trips.deleteTrip(trip.id)
+                        SnapshotCache.shared()?.remove(tripID: trip.id)
+                        dismissView()
+                    } catch let e as BackendError { errorMessage = e.userMessage } catch {}
+                }
+            }
+        }
         .sheet(item: $selectedStop) { stop in
             StopDetailView(stop: stop, place: stop.placeId.flatMap { places[$0] },
                            mode: timeline.first { $0.id == stop.dayId }?.day.transportMode ?? .transit,
@@ -201,6 +214,11 @@ struct TripDetailView: View {
         .navigationTitle(trip.name)
         .toolbar {
             NavigationLink { MembersView(session: session, trip: trip, myRole: myRole) } label: { Label("成員", systemImage: "person.2") }
+            if myRole == .owner {
+                Menu("更多", systemImage: "ellipsis.circle") {
+                    Button("刪除 Trip", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                }
+            }
             Button("試算順路", systemImage: "point.topleft.down.to.point.bottomright.curvepath") { showsRouteMatch = true }
                 .disabled(timeline.isEmpty)
             #if DEBUG

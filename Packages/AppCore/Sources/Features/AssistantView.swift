@@ -114,10 +114,16 @@ struct AssistantView: View {
         let index = turns.count - 1
         let facts = await routeFacts()
         let today = snapshot.timeline[safe: snapshot.todayIndex()]?.day.localDate
+        let started = ContinuousClock.now
         do {
-            turns[index].result = try await session.trips.ask(tripID: snapshot.trip.id, question: text, today: today, routeFacts: facts)
+            let result = try await session.trips.ask(tripID: snapshot.trip.id, question: text, today: today, routeFacts: facts)
+            turns[index].result = result
+            var failure: String?
+            if case .failed(let reason) = result { failure = reason }
+            await Telemetry.shared.record("ai.ask", latencyMs: Int((ContinuousClock.now - started).components.seconds * 1000), failure: failure)
         } catch {
             turns[index].result = .failed(reason: "network")
+            await Telemetry.shared.record("ai.ask", latencyMs: Int((ContinuousClock.now - started).components.seconds * 1000), failure: "network")
         }
     }
 

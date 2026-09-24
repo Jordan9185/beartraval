@@ -1,0 +1,101 @@
+import AppCore
+import Network
+import Observation
+import SwiftUI
+
+/// 網路狀態：離線時顯示提示，並改用唯讀快取（決策 D6）。
+@MainActor
+@Observable
+public final class NetworkMonitor {
+    public private(set) var isOnline = true
+    private let monitor = NWPathMonitor()
+
+    public init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor in self?.isOnline = path.status == .satisfied }
+        }
+        monitor.start(queue: DispatchQueue(label: "beartravel.network"))
+    }
+}
+
+/// 帳號設定：顯示名稱、登出、刪除帳號（App Review 要求 App 內可刪除帳號）。
+struct AccountView: View {
+    let session: SessionModel
+    @State private var name = ""
+    @State private var confirmDelete = false
+    @State private var deleting = false
+    @State private var errorMessage: String?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if case .signedIn(let email) = session.state {
+                    Section("帳號") { LabeledContent("Email", value: email ?? "") }
+                }
+                Section("顯示名稱") {
+                    HStack {
+                        TextField("旅伴看到的名稱", text: $name)
+                        Button("儲存") { Task { await saveName() } }.disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+                Section {
+                    Button("登出") { Task { await session.signOut(); dismiss() } }
+                }
+                Section {
+                    Button(deleting ? "刪除中…" : "刪除帳號", role: .destructive) { confirmDelete = true }.disabled(deleting)
+                } footer: {
+                    Text("你擁有的 Trip 會轉給其他成員；沒有其他成員的 Trip 會一併刪除。你在共同 Trip 新增的內容會保留給旅伴，但不再顯示你的名字。")
+                }
+                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            }
+            .navigationTitle("設定")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("關閉") { dismiss() } } }
+            .confirmationDialog("確定要刪除帳號？此動作無法復原。", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("刪除帳號", role: .destructive) { Task { await deleteAccount() } }
+            }
+        }
+    }
+
+    private func saveName() async {
+        do { try await session.trips.setDisplayName(name) } catch let e as BackendError { errorMessage = e.userMessage } catch {}
+    }
+
+    private func deleteAccount() async {
+        deleting = true
+        defer { deleting = false }
+        do {
+            try await session.trips.deleteAccount()
+            await session.signOut()
+            dismiss()
+        } catch let e as BackendError {
+            errorMessage = e == .other("DELETE_FAILED") ? "刪除失敗，請稍後再試。" : e.userMessage
+        } catch {
+            errorMessage = "刪除失敗，請稍後再試。"
+        }
+    }
+}
+
+/// Debug：路線與 AI 呼叫的延遲、錯誤統計（WP11 可觀測性）。
+struct TelemetryView: View {
+    @State private var stats: [String: Telemetry.Stats] = [:]
+
+    var body: some View {
+        List {
+            if stats.isEmpty { Text("尚無資料").foregroundStyle(.secondary) }
+            ForEach(stats.keys.sorted(), id: \.self) { key in
+                let s = stats[key]!
+                Section(key) {
+                    LabeledContent("次數", value: "\(s.count)")
+                    LabeledContent("延遲 p50／p95", value: "\(s.p50.map { "\($0)" } ?? "-")／\(s.p95.map { "\($0)" } ?? "-") ms")
+                    ForEach(s.failures.keys.sorted(), id: \.self) { reason in
+                        LabeledContent("失敗：\(reason)", value: "\(s.failures[reason]!)")
+                    }
+                }
+            }
+        }
+        .navigationTitle("呼叫統計")
+        .toolbar { Button("清除") { Task { await Telemetry.shared.reset(); stats = [:] } } }
+        .task { stats = await Telemetry.shared.stats }
+    }
+}

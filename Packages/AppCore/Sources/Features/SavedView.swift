@@ -200,7 +200,7 @@ struct SavedRow: View {
                 Link(url.host ?? url.absoluteString, destination: url).font(.caption)
             }
             HStack(spacing: 16) {
-                Text(entry.saved.addedBy == me ? "你新增" : "旅伴新增").font(.caption).foregroundStyle(.secondary)
+                Text(entry.saved.addedBy == nil ? "已刪除帳號的成員新增" : entry.saved.addedBy == me ? "你新增" : "旅伴新增").font(.caption).foregroundStyle(.secondary)
                 Button {
                     toggleInterest()
                 } label: {
