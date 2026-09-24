@@ -42,18 +42,12 @@ targets:
       properties:
         com.apple.security.application-groups:
           - $(APP_GROUP_ID)
-        com.apple.developer.applesignin:
-          - Default
     info:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: BearTravel
         SupabaseURL: $(SUPABASE_URL)
         SupabaseAnonKey: $(SUPABASE_ANON_KEY)
-        # Magic link 回到 App（beartravel://login-callback）
-        CFBundleURLTypes:
-          - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
-            CFBundleURLSchemes: [beartravel]
         # 本機 Supabase 走 http；只放行 localhost。
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

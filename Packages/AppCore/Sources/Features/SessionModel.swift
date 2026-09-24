@@ -34,20 +34,80 @@ public final class SessionModel {
         }
     }
 
-    /// Magic link 開回 App。
-    public func handle(url: URL) async throws {
-        _ = try await client.auth.session(from: url)
+    /// Email＋密碼註冊。後端需關閉 Email 確認，註冊後直接登入。
+    public func signUp(email: String, password: String) async throws(LoginError) {
+        do {
+            let response = try await client.auth.signUp(email: email, password: password)
+            if case .user = response {
+                throw LoginError.confirmationRequired
+            }
+        } catch let error as LoginError {
+            throw error
+        } catch {
+            throw LoginError(error)
+        }
     }
 
-    public func sendMagicLink(email: String) async throws {
-        try await client.auth.signInWithOTP(email: email, redirectTo: Backend.loginCallbackURL)
-    }
-
-    public func signInWithApple(idToken: String, nonce: String) async throws {
-        _ = try await client.auth.signInWithIdToken(credentials: .init(provider: .apple, idToken: idToken, nonce: nonce))
+    public func signIn(email: String, password: String) async throws(LoginError) {
+        do {
+            _ = try await client.auth.signIn(email: email, password: password)
+        } catch {
+            throw LoginError(error)
+        }
     }
 
     public func signOut() async {
         try? await client.auth.signOut()
+    }
+}
+
+public enum LoginError: Error, Equatable {
+    case invalidCredentials
+    case emailTaken
+    case weakPassword
+    /// 後端開著 Email 確認；MVP 設定應關閉（supabase/README.md）。
+    case confirmationRequired
+    case other(String)
+
+    init(_ error: any Error) {
+        guard let auth = error as? AuthError else {
+            self = .other(error.localizedDescription)
+            return
+        }
+        switch auth.errorCode {
+        case .invalidCredentials: self = .invalidCredentials
+        case .userAlreadyExists, .emailExists: self = .emailTaken
+        case .weakPassword: self = .weakPassword
+        default:
+            if case .weakPassword = auth { self = .weakPassword } else { self = .other(auth.localizedDescription) }
+        }
+    }
+
+    public var message: String {
+        switch self {
+        case .invalidCredentials: "Email 或密碼錯誤。"
+        case .emailTaken: "這個 Email 已經註冊過，請直接登入。"
+        case .weakPassword: "密碼強度不足，請至少 \(LoginRules.minimumPasswordLength) 個字元。"
+        case .confirmationRequired: "帳號已建立，但後端要求 Email 確認；請聯絡管理者關閉 Email 確認。"
+        case .other(let message): "登入失敗：\(message)"
+        }
+    }
+}
+
+/// 送出前的本機檢查；最終以後端規則為準。
+public enum LoginRules {
+    /// 與 supabase/config.toml 的 `minimum_password_length` 一致。
+    public static let minimumPasswordLength = 8
+
+    public static func isValidEmail(_ email: String) -> Bool {
+        let parts = email.split(separator: "@", omittingEmptySubsequences: false)
+        return parts.count == 2 && !parts[0].isEmpty && parts[1].contains(".") && !email.contains(" ")
+    }
+
+    public static func signUpProblem(email: String, password: String, confirmation: String) -> String? {
+        if !isValidEmail(email) { return "請輸入有效的 Email。" }
+        if password.count < minimumPasswordLength { return "密碼至少 \(minimumPasswordLength) 個字元。" }
+        if password != confirmation { return "兩次輸入的密碼不一致。" }
+        return nil
     }
 }

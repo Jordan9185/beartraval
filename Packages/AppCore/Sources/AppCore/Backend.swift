@@ -22,9 +22,6 @@ public struct BackendConfig: Sendable {
 }
 
 public enum Backend {
-    /// Magic link 開回 App 的網址；需同時列在 Supabase 的 redirect 白名單。
-    public static let loginCallbackURL = URL(string: "beartravel://login-callback")!
-
     /// App 與 Share Extension 用同一個 Keychain access group（= App Group）共用登入。
     public static func makeClient(_ config: BackendConfig) -> SupabaseClient {
         SupabaseClient(
@@ -34,7 +31,6 @@ public enum Backend {
                 db: .init(schema: "app"),
                 auth: .init(
                     storage: KeychainLocalStorage(accessGroup: AppGroup.identifier),
-                    redirectToURL: loginCallbackURL,
                     emitLocalSessionAsInitialSession: true
                 )
             )

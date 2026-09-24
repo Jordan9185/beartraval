@@ -9,9 +9,6 @@ struct BearTravelApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(session: session)
-                .onOpenURL { url in
-                    Task { try? await session?.handle(url: url) }
-                }
         }
     }
 }

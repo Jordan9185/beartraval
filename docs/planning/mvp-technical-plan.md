@@ -67,7 +67,7 @@
 | **S2 分享 payload Spike** | 除錯用 Extension 記錄 Threads/IG 各種分享的型別與內容 | 無 | payload 矩陣（見 §5） | AC-03, 04 |
 | **S3 AI 解析 Spike** | 20+ 份真實行程文字（ChatGPT/LINE/備忘錄）跑解析 schema | 無 | 欄位準確率、失敗類型、延遲、每次成本 | AC-01 |
 | **S4 後端 PoC** | 決策 D1 的候選，驗證 RLS 權限、revision RPC、Realtime | D1 | 權限自動化測試 + 兩客戶端收斂示範 | AC-12, 13 |
-| **WP1 基礎建設** | Xcode 專案、SPM 模組（AppCore/Features/ShareExt）、App Group、Sign in with Apple、CI（build+unit test）、DB schema v0 + RLS | S4、D1、D2 | CI 綠燈；模擬器登入並建立空 Trip | — |
+| **WP1 基礎建設** | Xcode 專案、SPM 模組（AppCore/Features/ShareExt）、App Group、Email＋密碼登入、CI（build+unit test）、DB schema v0 + RLS | S4、D1、D2 | CI 綠燈；模擬器登入並建立空 Trip | — |
 | **WP2 正式行程核心** | Trip/TripDay/Stop/Place 模型、`commit_itinerary` RPC（revision 檢查）、Trip 時間軸（唯讀）、空狀態 | WP1 | RPC 整合測試；Trip 頁顯示 DB 資料 | AC-02（部分） |
 | **WP3 文字匯入管線** | Import→Parsing→Confirm Places→Create；保留原文；候選分店；待確認文字 Stop | WP2、S3、S1（POI） | XCUITest：歧義分店未選不能提交；失敗重試不丟原文 | AC-01, 02 |
 | **WP4 Base Route + Route Match** | RoutingProvider 抽象、旅行時間快取、Base Route 版本、Route Match 演算法、可行性、unknown 狀態 | WP2、S1 | 演算法單元測試（固定假資料）；首爾/廣島實測報告 | AC-05, 06, 14 |
@@ -325,7 +325,7 @@ App 不串接韓國在地服務的 API，改為提供店名、地點等資訊，
 | D4 | 免安裝 Web 邀請頁 | 不做 / 唯讀預覽+導向下載 / Web 可編輯 | 範圍與安全面擴大 | **唯讀預覽（Trip 名稱、日期、邀請者）+ Universal Link**，不顯示行程內容、不做 Web 編輯 |
 | D5 | Editor 可否邀請 | 僅 Owner / Owner+Editor（只能邀 Viewer/Editor） | 協作便利 vs 控制 | **僅 Owner**（MVP） |
 | D6 | 離線範圍 | 唯讀 / 唯讀+Saved/Shopping/購買可離線 / 全離線 | 複雜度 | **唯讀 + 非行程操作可離線**；行程修改需在線 |
-| D7 | 登入方式 | Sign in with Apple / + Email magic link / + Google | 好友邀請門檻 | **Sign in with Apple + Email magic link** |
+| D7 | 登入方式 | Sign in with Apple / + Email magic link / + Google / Email＋密碼 | 好友邀請門檻 | **Email＋密碼**（2026-09-24 改定，原為 Sign in with Apple + Email magic link）。不需 Apple 簽章與寄信即可註冊；關閉 Email 確認；忘記密碼流程延後（需寄信服務） |
 | D8 | 商品販售證據來源 | 官方店鋪查詢頁 / POI 類別 / 使用者提供 | 準確度與維護 | **官方店鋪頁（附連結）優先，其次使用者提供；證據 30 天過期**，一律「可能販售、庫存未知」 |
 | D9 | 每日起訖點 | 無 / 每日可設住宿為起訖 | Route Match 頭尾插入是否合理 | **可設住宿**；未設時允許頭尾插入 |
 | D10 | 預設交通方式 | 步行+大眾運輸 / 開車 / 每日設定 | 路線供應商需求 | **每日可設，預設大眾運輸（含步行）**，但依 S1 結果可能需改預設 |
@@ -386,7 +386,7 @@ Wireframe 可點擊不算任何 AC 通過；所有 AC 以 iOS App + 真實後端
 | 路線 API 成本/節流 | 中 | 成本上升、延遲 | 快取、剪枝、base legs 重用 |
 | 同步衝突邊界情況 | 中 | 靜默覆蓋 | revision RPC + 並發測試 |
 | 商品販售證據過期或錯誤 | 中 | 使用者白跑 | 顯示證據時間、庫存未知、到期重查 |
-| App Review（帳號刪除、Sign in with Apple、隱私標籤） | 中 | 上架延遲 | WP11 納入檢查清單 |
+| App Review（帳號刪除、隱私標籤；若之後加第三方登入須一併提供 Sign in with Apple） | 中 | 上架延遲 | WP11 納入檢查清單 |
 | 範圍過大 | 高 | 延期 | 依里程碑交付，M1–M3 優先 |
 
 ---

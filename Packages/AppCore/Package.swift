@@ -20,6 +20,6 @@ let package = Package(
         .target(name: "AppCore", dependencies: [.product(name: "Supabase", package: "supabase-swift")]),
         .target(name: "Features", dependencies: ["AppCore", "ShareCore"]),
         .target(name: "ShareCore", dependencies: ["AppCore"]),
-        .testTarget(name: "AppCoreTests", dependencies: ["AppCore", "ShareCore"]),
+        .testTarget(name: "AppCoreTests", dependencies: ["AppCore", "ShareCore", "Features"]),
     ]
 )

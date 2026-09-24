@@ -62,13 +62,12 @@ supabase start      # 套用 migrations，啟動 API（:54321）與 Mailpit（:5
 supabase status     # 取得 anon key
 ```
 
-- `config.toml` 已把 `app` 加入 exposed schemas，redirect 白名單為 `beartravel://login-callback`。
+- `config.toml` 已把 `app` 加入 exposed schemas。
 - 把 `supabase status` 的 anon key 填進 `Config/Local.xcconfig.local` 的 `SUPABASE_ANON_KEY`，模擬器即可連 `http://127.0.0.1:54321`。
-- Magic link 信件在 Mailpit（<http://127.0.0.1:54324>），在模擬器的 Safari 開啟連結即回到 App。
-- Sign in with Apple：`[auth.external.apple]` 以 bundle id 為 `client_id`（原生 ID token 流程）。需真機或已登入 Apple ID 的模擬器，且 App 以有 Sign in with Apple capability 的 team 簽章。
+- 登入：Email＋密碼（決策 D7）。Email 確認關閉（註冊後直接登入），密碼至少 8 字元（`minimum_password_length`）。
 
 ## 部署到 Supabase 專案時
 
 - 在專案的 API 設定把 `app` 加入 exposed schemas，用戶端以 `schema: 'app'` 呼叫 RPC。
-- Auth：Redirect URLs 加入 `beartravel://login-callback`；Apple provider 的 Client IDs 填 App 的 bundle id。
+- Auth → Providers → Email：關閉 **Confirm email**，密碼最短長度設 8（與 App 檢查一致）。
 - 不要套用 `tests/support/` 下的檔案。
