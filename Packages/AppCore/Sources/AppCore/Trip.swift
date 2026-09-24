@@ -25,11 +25,14 @@ public struct TripDay: Codable, Identifiable, Hashable, Sendable {
     public var transportMode: TravelMode
     public var displayOrder: Int
     public var routeRevision: Int
+    /// 當日時區（預設繼承 Trip，跨時區行程可不同）。
+    public var timeZone: String = "UTC"
 
     enum CodingKeys: String, CodingKey {
         case id
         case tripId = "trip_id"
         case localDate = "local_date"
+        case timeZone = "time_zone"
         case transportMode = "transport_mode"
         case displayOrder = "display_order"
         case routeRevision = "route_revision"

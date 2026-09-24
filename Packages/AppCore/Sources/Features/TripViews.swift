@@ -129,7 +129,9 @@ struct TripDetailView: View {
     let trip: Trip
     @State private var timeline: [DayTimeline] = []
     @State private var places: [UUID: Place] = [:]
+    @State private var baseRoutes: [UUID: BaseRoute] = [:]
     @State private var errorMessage: String?
+    @State private var showsRouteMatch = false
 
     var body: some View {
         List {
@@ -145,7 +147,7 @@ struct TripDetailView: View {
                     ForEach(day.stops) { stop in
                         StopRow(stop: stop, place: stop.placeId.flatMap { places[$0] })
                     }
-                    RouteStatusRow(day: day)
+                    RouteStatusRow(day: day, base: baseRoutes[day.id])
                 } header: {
                     Text("Day \(day.day.displayOrder + 1) · \(day.day.localDate)")
                 }
@@ -153,11 +155,16 @@ struct TripDetailView: View {
         }
         .navigationTitle(trip.name)
         .toolbar {
+            Button("試算順路", systemImage: "point.topleft.down.to.point.bottomright.curvepath") { showsRouteMatch = true }
+                .disabled(timeline.isEmpty)
             #if DEBUG
             Menu("Debug", systemImage: "ladybug") {
                 Button("寫入範例 Stop 到 Day 1") { Task { await seedSample() } }
             }
             #endif
+        }
+        .sheet(isPresented: $showsRouteMatch) {
+            RouteMatchView(session: session, timeline: timeline, places: places)
         }
         .refreshable { await reload() }
         .task { await reload() }
@@ -174,6 +181,15 @@ struct TripDetailView: View {
             errorMessage = nil
         } catch {
             errorMessage = "讀取失敗：\(error.localizedDescription)"
+            return
+        }
+        // Base Route 綁定當日 route_revision 與交通方式；revision 改變時重算。
+        for day in timeline {
+            guard let plan = DayPlan.from(day, places: places) else { continue }
+            if let existing = baseRoutes[day.id], existing.routeRevision == plan.routeRevision, existing.mode == day.day.transportMode {
+                continue
+            }
+            baseRoutes[day.id] = await session.routes.baseRoute(for: plan, mode: day.day.transportMode)
         }
     }
 
@@ -242,14 +258,30 @@ struct StopRow: View {
 
 struct RouteStatusRow: View {
     let day: DayTimeline
+    let base: BaseRoute?
 
     var body: some View {
-        LabeledContent("路線") {
-            switch day.routeStatus {
-            case .notEnoughPlaces: Text("尚未建立")
-            case .notCalculated: Text("尚未計算")
+        VStack(alignment: .leading, spacing: 2) {
+            LabeledContent("路線（\(day.day.transportMode.displayName)）") {
+                Text(summary)
+            }
+            if day.pendingCount > 0 {
+                Text("\(day.pendingCount) 個待確認地點未計入").font(.caption)
             }
         }
         .foregroundStyle(.secondary)
+    }
+
+    private var summary: String {
+        guard let base else {
+            return day.routeStatus == .notEnoughPlaces ? "尚未建立" : "計算中…"
+        }
+        return switch base.status {
+        case .noRoute: "尚未建立"
+        case .complete(let total): "約 \(total) 分"
+        case .partial(let n): "\(n) 段無法估算"
+        case .unavailable(.notSupportedInRegion): "無法估算（此地區不提供）"
+        case .unavailable: "無法估算"
+        }
     }
 }

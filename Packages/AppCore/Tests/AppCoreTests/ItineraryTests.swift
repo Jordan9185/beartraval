@@ -62,3 +62,29 @@ struct ItineraryTests {
         #expect(stop.startTime == "14:00:00")
     }
 }
+
+struct DayPlanTests {
+    @Test func buildsPlanFromTimelineExcludingPendingStops() throws {
+        let tripID = UUID(), dayID = UUID(), placeID = UUID()
+        let day = TripDay(id: dayID, tripId: tripID, localDate: "2026-10-01", transportMode: .walking, displayOrder: 0, routeRevision: 4)
+        func stop(_ order: Int, place: UUID?) -> Stop {
+            Stop(id: UUID(), tripId: tripID, dayId: dayID, placeId: place, rawLabel: "S\(order)",
+                 resolutionStatus: place == nil ? .pendingText : .resolved, startTime: order == 0 ? "09:30:00" : nil,
+                 endTime: nil, dwellMinutes: 20, fixed: order == 0, kind: .standard, sortOrder: order, revision: 0)
+        }
+        let place = Place(id: placeID, provider: "apple_mapkit", providerPlaceId: "x", name: "Gwangjang Market", nameLocal: "광장시장",
+                          address: nil, latitude: 37.57, longitude: 126.99, countryCode: "KR")
+        let timeline = DayTimeline(day: TripDay(id: dayID, tripId: tripID, localDate: "2026-10-01", transportMode: .walking, displayOrder: 0, routeRevision: 4, timeZone: "Asia/Seoul"),
+                                   stops: [stop(0, place: placeID), stop(1, place: nil)])
+        _ = day
+        let plan = try #require(DayPlan.from(timeline, places: [placeID: place]))
+        #expect(plan.stops.count == 1)
+        #expect(plan.excludedPendingCount == 1)
+        #expect(plan.stops[0].startMinutes == 570)
+        #expect(plan.stops[0].label == "광장시장")
+        #expect(plan.stops[0].point.isInKorea)
+        #expect(plan.routeRevision == 4)
+        // 首爾 2026-10-01 00:00 = UTC 09-30 15:00
+        #expect(plan.localMidnight == Date(timeIntervalSince1970: 1_790_780_400))
+    }
+}

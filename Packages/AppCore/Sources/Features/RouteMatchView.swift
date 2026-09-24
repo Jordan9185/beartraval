@@ -1,0 +1,260 @@
+import AppCore
+import MapKit
+import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
+
+/// 試算順路（WP4）：搜尋候選地點，計算加到各日會多花幾分鐘。
+/// 只試算、不寫入；加入行程走 proposal（WP5）。
+struct RouteMatchView: View {
+    let session: SessionModel
+    let timeline: [DayTimeline]
+    let places: [UUID: Place]
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var results: [SearchResult] = []
+    @State private var candidate: SearchResult?
+    @State private var dwellMinutes = 45
+    @State private var modeOverride: TravelMode?
+    @State private var matches: [DayMatch] = []
+    @State private var isWorking = false
+    @State private var message: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("候選地點") {
+                    if let candidate {
+                        LabeledContent(candidate.name, value: candidate.address ?? "")
+                        Button("換一個") { self.candidate = nil; matches = [] }
+                    } else {
+                        TextField("搜尋店名或地點", text: $query)
+                            .onSubmit { Task { await search() } }
+                        ForEach(results) { result in
+                            Button {
+                                candidate = result
+                                Task { await compute() }
+                            } label: {
+                                VStack(alignment: .leading) {
+                                    Text(result.name)
+                                    if let address = result.address { Text(address).font(.caption).foregroundStyle(.secondary) }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Section("條件") {
+                    Stepper("停留 \(dwellMinutes) 分", value: $dwellMinutes, in: 0...240, step: 15)
+                    Picker("交通方式", selection: $modeOverride) {
+                        Text("依各日設定").tag(TravelMode?.none)
+                        ForEach(TravelMode.allCases, id: \.self) { Text($0.displayName).tag(Optional($0)) }
+                    }
+                }
+                .onChange(of: dwellMinutes) { Task { await compute() } }
+                .onChange(of: modeOverride) { Task { await compute() } }
+
+                if isWorking { ProgressView("計算中…") }
+                if let message { Text(message).foregroundStyle(.secondary) }
+
+                if let candidate, !matches.isEmpty {
+                    if let best = RouteMatcher.bestDay(matches), let insertion = best.best {
+                        Section("建議") {
+                            Text("\(dayTitle(best.dayID))，\(positionText(insertion, dayID: best.dayID))")
+                            MatchNumbers(insertion: insertion, stopName: stopName)
+                        }
+                    }
+                    ForEach(matches, id: \.dayID) { match in
+                        Section(dayTitle(match.dayID) + "（\(match.mode.displayName)）") {
+                            DayMatchRow(match: match, candidate: candidate, previousStop: previousPoint(match),
+                                        positionText: { positionText($0, dayID: match.dayID) }, stopName: stopName)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("試算順路")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("關閉") { dismiss() } }
+            }
+        }
+    }
+
+    // MARK: 搜尋
+
+    private func search() async {
+        let text = query.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = text
+        request.resultTypes = [.pointOfInterest, .address]
+        if let region = searchRegion { request.region = region }
+        do {
+            let items = try await MKLocalSearch(request: request).start().mapItems
+            results = items.prefix(10).map(SearchResult.init)
+            message = results.isEmpty ? "找不到符合的地點" : nil
+        } catch {
+            results = []
+            message = "找不到符合的地點"
+        }
+    }
+
+    /// 以行程中已確認地點的範圍搜尋；沒有地點時不限範圍。
+    private var searchRegion: MKCoordinateRegion? {
+        let lat = places.values.map(\.latitude), lng = places.values.map(\.longitude)
+        guard let minLat = lat.min(), let maxLat = lat.max(), let minLng = lng.min(), let maxLng = lng.max() else { return nil }
+        let center = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2, longitude: (minLng + maxLng) / 2)
+        return MKCoordinateRegion(center: center, latitudinalMeters: 30_000, longitudinalMeters: 30_000)
+    }
+
+    // MARK: 計算
+
+    private func compute() async {
+        guard let candidate else { return }
+        isWorking = true
+        defer { isWorking = false }
+        let routeCandidate = RouteCandidate(point: candidate.point, dwellMinutes: dwellMinutes)
+        var output: [DayMatch] = []
+        for day in timeline {
+            guard let plan = DayPlan.from(day, places: places) else { continue }
+            output.append(await session.routes.match(routeCandidate, into: plan, mode: modeOverride ?? day.day.transportMode))
+        }
+        matches = output
+    }
+
+    // MARK: 顯示
+
+    private func dayTitle(_ id: UUID) -> String {
+        guard let day = timeline.first(where: { $0.id == id })?.day else { return "" }
+        return "Day \(day.displayOrder + 1) · \(day.localDate)"
+    }
+
+    private func stopName(_ id: UUID?) -> String? {
+        guard let id, let stop = timeline.lazy.flatMap(\.stops).first(where: { $0.id == id }) else { return nil }
+        if let placeID = stop.placeId, let place = places[placeID] { return place.nameLocal ?? place.name }
+        return stop.rawLabel
+    }
+
+    private func positionText(_ insertion: Insertion, dayID: UUID) -> String {
+        switch (stopName(insertion.previousStopID), stopName(insertion.nextStopID)) {
+        case let (p?, n?): "插在「\(p)」和「\(n)」之間"
+        case let (p?, nil): "排在「\(p)」之後"
+        case let (nil, n?): "排在「\(n)」之前"
+        default: "當天第一站"
+        }
+    }
+
+    /// 外開在地地圖的起點：無法估算時沒有插入位置，依 §4.3.1 不帶起點。
+    private func previousPoint(_ match: DayMatch) -> MapPoint? {
+        guard let id = match.best?.previousStopID,
+              let stop = timeline.lazy.flatMap(\.stops).first(where: { $0.id == id }),
+              let placeID = stop.placeId, let place = places[placeID] else { return nil }
+        return MapPoint(name: place.nameLocal ?? place.name, latitude: place.latitude, longitude: place.longitude)
+    }
+}
+
+struct SearchResult: Identifiable, Equatable {
+    let id = UUID()
+    let name: String
+    let address: String?
+    let point: RoutePoint
+
+    init(_ item: MKMapItem) {
+        name = item.name ?? "（未命名）"
+        let coordinate: CLLocationCoordinate2D
+        var country: String?
+        if #available(iOS 26, macOS 26, *) {
+            coordinate = item.location.coordinate
+            address = item.address?.shortAddress ?? item.address?.fullAddress
+        } else {
+            coordinate = item.placemark.coordinate
+            address = item.placemark.title
+        }
+        country = item.placemark.countryCode
+        point = RoutePoint(coordinate: Coordinate(latitude: coordinate.latitude, longitude: coordinate.longitude), countryCode: country)
+    }
+
+    var mapPoint: MapPoint {
+        MapPoint(name: name, latitude: point.coordinate.latitude, longitude: point.coordinate.longitude)
+    }
+}
+
+/// 三個分開的數字：路程、停留、固定行程餘裕（§4.2）。
+struct MatchNumbers: View {
+    let insertion: Insertion
+    let stopName: (UUID?) -> String?
+
+    var body: some View {
+        LabeledContent("路程", value: insertion.addedTravelMinutes.map { "+\($0) 分" } ?? "無法估算")
+        LabeledContent("停留", value: "+\(insertion.addedDwellMinutes) 分")
+        LabeledContent("固定行程") {
+            switch insertion.fixedCheck {
+            case .noFixedAfter: Text("之後沒有固定行程")
+            case .slack(let id, let m): Text("距「\(stopName(id) ?? "固定行程")」還有 \(m) 分")
+            case .conflict(let id, let m): Text("「\(stopName(id) ?? "固定行程")」會遲到 \(m) 分").foregroundStyle(.red)
+            case .unknown: Text("缺少時間，無法判斷")
+            }
+        }
+        if insertion.approximate {
+            Text("當天行程較多，只精算了部分位置。").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct DayMatchRow: View {
+    let match: DayMatch
+    let candidate: SearchResult
+    let previousStop: MapPoint?
+    let positionText: (Insertion) -> String
+    let stopName: (UUID?) -> String?
+
+    var body: some View {
+        switch match.result {
+        case .matched(let best, _):
+            Text(positionText(best))
+            MatchNumbers(insertion: best, stopName: stopName)
+        case .unavailable(let reason):
+            Text(reason == .notSupportedInRegion
+                 ? "無法估算：Apple 地圖在這個地區不提供\(match.mode.displayName)路線。可改用步行或開車試算。"
+                 : "無法估算這段路線。")
+                .foregroundStyle(.secondary)
+        }
+        if match.excludedPendingCount > 0 {
+            Text("\(match.excludedPendingCount) 個待確認地點未計入").font(.caption).foregroundStyle(.secondary)
+        }
+        if match.best == nil && candidate.point.isInKorea {
+            LocalMapButtons(destination: candidate.mapPoint, origin: previousStop, mode: match.mode, address: candidate.address)
+        }
+    }
+}
+
+/// 韓國地點算不出時，外開 Naver／Kakao 自行查路線（§4.3.1）。不讀回分鐘數。
+struct LocalMapButtons: View {
+    let destination: MapPoint
+    let origin: MapPoint?
+    let mode: TravelMode
+    let address: String?
+    @Environment(\.openURL) private var openURL
+
+    private var link: LocalMapLink { LocalMapLink(appName: Bundle.main.bundleIdentifier ?? "beartravel") }
+
+    var body: some View {
+        Button("在 Naver 地圖查看") { open(.naver) }
+        Button("在 Kakao 地圖查看") { open(.kakao) }
+        Button("複製店名／地址") {
+            #if canImport(UIKit)
+            UIPasteboard.general.string = [destination.name, address].compactMap { $0 }.joined(separator: "\n")
+            #endif
+        }
+    }
+
+    private func open(_ app: LocalMapApp) {
+        #if canImport(UIKit)
+        let installed = UIApplication.shared.canOpenURL(URL(string: "\(app.scheme)://")!)
+        #else
+        let installed = false
+        #endif
+        openURL(installed ? link.routeURL(app, from: origin, to: destination, mode: mode) : link.webFallbackURL(app, destination: destination))
+    }
+}

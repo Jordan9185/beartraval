@@ -5,6 +5,14 @@ public enum TravelMode: String, Codable, CaseIterable, Sendable {
     case walking
     case transit
     case driving
+
+    public var displayName: String {
+        switch self {
+        case .walking: "步行"
+        case .transit: "大眾運輸"
+        case .driving: "開車"
+        }
+    }
 }
 
 /// 一段路的旅行時間估算結果。

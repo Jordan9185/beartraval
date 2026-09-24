@@ -126,3 +126,13 @@ localizedDescription = "Directions are not available."
 | 롯데월드타워 | | | | | |
 
 每格記錄：是否開啟、起點／終點／交通方式是否正確帶入（三種模式各一次）。
+
+## 6. WP4 Route Match 實測（2026-09-24）
+
+以 `MapKitRouteMatchTests`（`BEARTRAVEL_TEST_MAPKIT=1 swift test --package-path Packages/AppCore`）對真 MapKit 跑演算法：
+
+| 案例 | 模式 | Base Route | 最佳插入 | 路程 | 停留 | 固定行程 |
+|---|---|---|---|---|---|---|
+| 広島駅（10:00）→ 原爆ドーム（固定 13:00），候選 お好み村 | 步行 | 約 41 分 | 兩站之間 | +2 分 | +60 分 | 餘裕 78 分 |
+| 명동역 → DDP，候選 광장시장 | 大眾運輸 | — | — | 無法估算（不送請求，`notSupportedInRegion`） | — | — |
+| 同上 | 步行 | — | 兩站之間 | +15 分 | +60 分 | 之後沒有固定行程 |
