@@ -1,0 +1,20 @@
+name: DB tests
+
+on:
+  push:
+    paths:
+      - "supabase/**"
+      - ".github/workflows/db-tests.yml"
+  pull_request:
+    paths:
+      - "supabase/**"
+      - ".github/workflows/db-tests.yml"
+
+jobs:
+  db-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # ubuntu-24.04 ships PostgreSQL 16 binaries under /usr/lib/postgresql/16/bin.
+      - name: Run database tests
+        run: PG_BIN=/usr/lib/postgresql/16/bin supabase/tests/run.sh
