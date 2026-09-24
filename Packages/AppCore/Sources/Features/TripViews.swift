@@ -127,8 +127,8 @@ struct CreateTripView: View {
 struct TripDetailView: View {
     let session: SessionModel
     let trip: Trip
-    @State private var days: [TripDay] = []
-    @State private var stopCounts: [UUID: Int] = [:]
+    @State private var timeline: [DayTimeline] = []
+    @State private var places: [UUID: Place] = [:]
     @State private var errorMessage: String?
 
     var body: some View {
@@ -136,29 +136,120 @@ struct TripDetailView: View {
             if let errorMessage {
                 Text(errorMessage).foregroundStyle(.red)
             }
-            ForEach(days) { day in
-                Section("Day \(day.displayOrder + 1) · \(day.localDate)") {
-                    let count = stopCounts[day.id, default: 0]
-                    if count == 0 {
+            ForEach(timeline) { day in
+                Section {
+                    if day.stops.isEmpty {
                         Label("尚無行程", systemImage: "calendar.badge.plus")
                             .foregroundStyle(.secondary)
-                    } else {
-                        Text("\(count) 個 Stop")
                     }
-                    LabeledContent("路線", value: count < 2 ? "尚未建立" : "待計算")
-                        .foregroundStyle(.secondary)
+                    ForEach(day.stops) { stop in
+                        StopRow(stop: stop, place: stop.placeId.flatMap { places[$0] })
+                    }
+                    RouteStatusRow(day: day)
+                } header: {
+                    Text("Day \(day.day.displayOrder + 1) · \(day.day.localDate)")
                 }
             }
         }
         .navigationTitle(trip.name)
-        .task {
-            do {
-                async let d = session.trips.days(of: trip.id)
-                async let c = session.trips.stopCounts(of: trip.id)
-                (days, stopCounts) = try await (d, c)
-            } catch {
-                errorMessage = "讀取失敗：\(error.localizedDescription)"
+        .toolbar {
+            #if DEBUG
+            Menu("Debug", systemImage: "ladybug") {
+                Button("寫入範例 Stop 到 Day 1") { Task { await seedSample() } }
+            }
+            #endif
+        }
+        .refreshable { await reload() }
+        .task { await reload() }
+    }
+
+    private func reload() async {
+        do {
+            async let d = session.trips.days(of: trip.id)
+            async let s = session.trips.stops(of: trip.id)
+            let (days, stops) = try await (d, s)
+            let placeList = try await session.trips.places(ids: Array(Set(stops.compactMap(\.placeId))))
+            places = Dictionary(uniqueKeysWithValues: placeList.map { ($0.id, $0) })
+            timeline = DayTimeline.build(days: days, stops: stops)
+            errorMessage = nil
+        } catch {
+            errorMessage = "讀取失敗：\(error.localizedDescription)"
+        }
+    }
+
+    #if DEBUG
+    /// 走正式 RPC（upsert_place + commit_itinerary）寫入一組首爾範例，驗證時間軸顯示 DB 資料。
+    private func seedSample() async {
+        guard let day = timeline.first?.day else { return }
+        do {
+            let hotel = try await session.trips.upsertPlace(PlaceDraft(
+                providerPlaceId: "debug-seed-hotel-myeongdong", name: "Nine Tree Hotel Myeongdong",
+                nameLocal: "나인트리 호텔 명동", latitude: 37.5634, longitude: 126.9837, countryCode: "KR"))
+            let market = try await session.trips.upsertPlace(PlaceDraft(
+                providerPlaceId: "debug-seed-gwangjang", name: "Gwangjang Market", nameLocal: "광장시장",
+                address: "서울특별시 종로구 창경궁로 88", latitude: 37.5700, longitude: 126.9996, countryCode: "KR"))
+            let existing = timeline.first?.stops.map(StopDraft.init) ?? []
+            _ = try await session.trips.commitItinerary(dayID: day.id, expectedRouteRevision: day.routeRevision, stops: existing + [
+                StopDraft(placeId: hotel.id, rawLabel: "나인트리 호텔 명동 출발", startTime: "09:00", fixed: true),
+                StopDraft(placeId: market.id, rawLabel: "광장시장", startTime: "10:30", dwellMinutes: 60),
+                // 分店未確認：不帶 place，不參與路線。
+                StopDraft(rawLabel: "聖水洞的咖啡廳（分店未定）"),
+            ])
+            await reload()
+        } catch BackendError.staleRevision {
+            errorMessage = "行程已被其他人修改，已重新載入。"
+            await reload()
+        } catch {
+            errorMessage = "寫入失敗：\(error.localizedDescription)"
+        }
+    }
+    #endif
+}
+
+struct StopRow: View {
+    let stop: Stop
+    let place: Place?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(stop.startTime.map(LocalTime.hourMinute) ?? "--:--")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(stop.startTime == nil ? .tertiary : .primary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(place?.nameLocal ?? place?.name ?? stop.rawLabel)
+                    if stop.fixed {
+                        Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.orange)
+                            .accessibilityLabel("固定")
+                    }
+                    if stop.kind == .purchase {
+                        Image(systemName: "bag").font(.caption2).accessibilityLabel("購買")
+                    }
+                }
+                if !stop.isRoutable {
+                    Label("地點待確認，不參與路線", systemImage: "questionmark.circle")
+                        .font(.caption).foregroundStyle(.orange)
+                } else if let address = place?.address {
+                    Text(address).font(.caption).foregroundStyle(.secondary)
+                }
+                if let dwell = stop.dwellMinutes {
+                    Text("停留 \(dwell) 分").font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
+    }
+}
+
+struct RouteStatusRow: View {
+    let day: DayTimeline
+
+    var body: some View {
+        LabeledContent("路線") {
+            switch day.routeStatus {
+            case .notEnoughPlaces: Text("尚未建立")
+            case .notCalculated: Text("尚未計算")
+            }
+        }
+        .foregroundStyle(.secondary)
     }
 }

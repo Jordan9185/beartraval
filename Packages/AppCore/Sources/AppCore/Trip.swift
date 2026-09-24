@@ -74,15 +74,64 @@ public struct TripRepository: Sendable {
         }
     }
 
-    /// 各日（未刪除）Stop 數量。
-    public func stopCounts(of tripID: UUID) async throws -> [UUID: Int] {
-        struct Row: Decodable { let day_id: UUID }
+    /// 整趟 Trip 未刪除的 Stop，依日、排序。
+    public func stops(of tripID: UUID) async throws -> [Stop] {
         do {
-            let rows: [Row] = try await client.from("stops").select("day_id")
+            return try await client.from("stops").select()
                 .eq("trip_id", value: tripID)
                 .is("deleted_at", value: nil)
+                .order("sort_order")
                 .execute().value
-            return rows.reduce(into: [:]) { $0[$1.day_id, default: 0] += 1 }
+        } catch {
+            throw BackendError.from(error)
+        }
+    }
+
+    public func places(ids: [UUID]) async throws -> [Place] {
+        guard !ids.isEmpty else { return [] }
+        do {
+            return try await client.from("places").select()
+                .in("id", values: ids.map(\.uuidString))
+                .execute().value
+        } catch {
+            throw BackendError.from(error)
+        }
+    }
+
+    /// 以整批清單取代當日行程。`expectedRouteRevision` 與伺服器不符時丟 `.staleRevision`，且不寫入任何資料。
+    /// 回傳新的 route_revision。
+    public func commitItinerary(dayID: UUID, expectedRouteRevision: Int, stops: [StopDraft]) async throws -> Int {
+        struct Params: Encodable {
+            let p_day_id: UUID
+            let p_expected_route_revision: Int
+            let p_stops: [StopDraft]
+        }
+        do {
+            return try await client.rpc("commit_itinerary", params: Params(
+                p_day_id: dayID, p_expected_route_revision: expectedRouteRevision, p_stops: stops
+            )).execute().value
+        } catch {
+            throw BackendError.from(error)
+        }
+    }
+
+    public func upsertPlace(_ draft: PlaceDraft) async throws -> Place {
+        struct Params: Encodable {
+            let p_provider: String
+            let p_provider_place_id: String
+            let p_name: String
+            let p_latitude: Double
+            let p_longitude: Double
+            let p_name_local: String?
+            let p_address: String?
+            let p_country_code: String?
+        }
+        do {
+            return try await client.rpc("upsert_place", params: Params(
+                p_provider: draft.provider.rawValue, p_provider_place_id: draft.providerPlaceId, p_name: draft.name,
+                p_latitude: draft.latitude, p_longitude: draft.longitude, p_name_local: draft.nameLocal,
+                p_address: draft.address, p_country_code: draft.countryCode
+            )).execute().value
         } catch {
             throw BackendError.from(error)
         }

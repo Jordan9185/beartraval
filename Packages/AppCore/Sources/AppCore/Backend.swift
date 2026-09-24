@@ -23,14 +23,17 @@ public struct BackendConfig: Sendable {
 
 public enum Backend {
     /// App 與 Share Extension 用同一個 Keychain access group（= App Group）共用登入。
-    public static func makeClient(_ config: BackendConfig) -> SupabaseClient {
+    public static func makeClient(
+        _ config: BackendConfig,
+        storage: any AuthLocalStorage = KeychainLocalStorage(accessGroup: AppGroup.identifier)
+    ) -> SupabaseClient {
         SupabaseClient(
             supabaseURL: config.url,
             supabaseKey: config.anonKey,
             options: SupabaseClientOptions(
                 db: .init(schema: "app"),
                 auth: .init(
-                    storage: KeychainLocalStorage(accessGroup: AppGroup.identifier),
+                    storage: storage,
                     emitLocalSessionAsInitialSession: true
                 )
             )
