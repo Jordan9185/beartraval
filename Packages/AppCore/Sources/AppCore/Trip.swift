@@ -10,6 +10,15 @@ public struct Trip: Codable, Identifiable, Hashable, Sendable {
     public var timeZone: String
     public var revision: Int
 
+    public init(id: UUID, name: String, startDate: String, endDate: String, timeZone: String, revision: Int) {
+        self.id = id
+        self.name = name
+        self.startDate = startDate
+        self.endDate = endDate
+        self.timeZone = timeZone
+        self.revision = revision
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, name, revision
         case startDate = "start_date"

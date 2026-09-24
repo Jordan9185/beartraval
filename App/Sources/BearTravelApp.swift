@@ -8,7 +8,16 @@ struct BearTravelApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if DEBUG
+            // XCUITest：`-UITestImport <scenario>` 直接進匯入流程（假服務，不連後端）。
+            if let scenario = UserDefaults.standard.string(forKey: "UITestImport") {
+                ImportUITestRoot(scenario: scenario)
+            } else {
+                RootView(session: session)
+            }
+            #else
             RootView(session: session)
+            #endif
         }
     }
 }

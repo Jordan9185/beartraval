@@ -91,6 +91,19 @@ targets:
           NSExtensionAttributes:
             # S2 Payload Inspector：接受所有型別以記錄 payload。正式版（WP6）要收斂成明確規則。
             NSExtensionActivationRule: TRUEPREDICATE
+  BearTravelUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+    dependencies:
+      - target: BearTravel
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).beartravel.uitests
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.0"
 schemes:
   BearTravel:
     build:
@@ -99,3 +112,4 @@ schemes:
     test:
       targets:
         - package: AppCore/AppCoreTests
+        - BearTravelUITests

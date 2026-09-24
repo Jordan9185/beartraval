@@ -68,6 +68,8 @@ struct CreateTripView: View {
     @State private var start = Date()
     @State private var end = Date()
     @State private var timeZoneID = "Asia/Seoul"
+    @State private var rawText = ""
+    @State private var importSession: ImportSession?
     @State private var errorMessage: String?
     @State private var isSaving = false
 
@@ -76,25 +78,44 @@ struct CreateTripView: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("名稱（例如：首爾 5 天）", text: $name)
-                DatePicker("開始", selection: $start, displayedComponents: .date)
-                DatePicker("結束", selection: $end, in: start..., displayedComponents: .date)
-                Picker("旅行地時區", selection: $timeZoneID) {
-                    ForEach(Self.timeZones, id: \.self) { Text($0) }
+                Section {
+                    TextField("名稱（例如：首爾 5 天）", text: $name)
+                    DatePicker("開始", selection: $start, displayedComponents: .date)
+                    DatePicker("結束", selection: $end, in: start..., displayedComponents: .date)
+                    Picker("旅行地時區", selection: $timeZoneID) {
+                        ForEach(Self.timeZones, id: \.self) { Text($0) }
+                    }
+                }
+                Section {
+                    TextEditor(text: $rawText).frame(minHeight: 160)
+                } header: {
+                    Text("匯入行程文字（可略過）")
+                } footer: {
+                    Text("貼上 ChatGPT、LINE 或備忘錄的行程。解析後逐一確認地點，才會建立正式行程；原文會保留。")
                 }
                 if let errorMessage {
                     Text(errorMessage).foregroundStyle(.red)
                 }
             }
             .navigationTitle("建立 Trip")
+            .navigationDestination(item: $importSession) { importSession in
+                ImportFlowView(session: importSession, service: session.imports, placeSearch: session.placeSearch) { trip in
+                    onCreated(trip)
+                    dismiss()
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("建立") { Task { await save() } }
+                    Button(hasText ? "下一步" : "建立") { Task { await save() } }
                         .disabled(isSaving || name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
+    }
+
+    private var hasText: Bool {
+        !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func save() async {
@@ -102,15 +123,18 @@ struct CreateTripView: View {
         defer { isSaving = false }
         // 日期選擇器的日期以裝置時區解讀，再原樣當作旅行地的當地日期。
         let device = TimeZone.current
+        let tripName = name.trimmingCharacters(in: .whitespaces)
+        let startDate = LocalDate.string(from: start, timeZone: device)
+        let endDate = LocalDate.string(from: max(start, end), timeZone: device)
         do {
-            let trip = try await session.trips.createTrip(
-                name: name.trimmingCharacters(in: .whitespaces),
-                startDate: LocalDate.string(from: start, timeZone: device),
-                endDate: LocalDate.string(from: max(start, end), timeZone: device),
-                timeZone: timeZoneID
-            )
-            onCreated(trip)
-            dismiss()
+            if hasText {
+                importSession = try await session.imports.createImport(
+                    tripName: tripName, startDate: startDate, endDate: endDate, timeZone: timeZoneID, rawText: rawText)
+            } else {
+                onCreated(try await session.trips.createTrip(name: tripName, startDate: startDate, endDate: endDate, timeZone: timeZoneID))
+                dismiss()
+            }
+            errorMessage = nil
         } catch let error as BackendError {
             errorMessage = switch error {
             case .unauthenticated: "登入已失效，請重新登入。"

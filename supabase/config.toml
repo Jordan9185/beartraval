@@ -413,3 +413,7 @@ enabled = true
 # formatted with uppercase keywords, indent 2, max width 180, trailing commas,
 # and column/key alignment. Set to "null" to emit raw, unformatted SQL.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":180,\"commaStyle\":\"trailing\"}"
+
+# AI Gateway：解析匯入文字。驗證使用者 JWT；ANTHROPIC_API_KEY 放在 supabase/functions/.env（本機）或 `supabase secrets set`（雲端）。
+[functions.parse-import]
+verify_jwt = true

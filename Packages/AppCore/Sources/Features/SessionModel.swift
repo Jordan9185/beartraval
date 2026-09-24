@@ -18,11 +18,15 @@ public final class SessionModel {
     public let trips: TripRepository
     /// 同一個 matcher（與快取）供 Base Route 與 Route Match 共用，確保同一計算基準。
     public let routes: RouteMatcher
+    public let imports: any ImportService
+    public let placeSearch: any PlaceSearching
 
     public init(client: SupabaseClient, routingProvider: any RoutingProvider = AppleMapKitProvider()) {
         self.client = client
         self.trips = TripRepository(client: client)
         self.routes = RouteMatcher(provider: routingProvider)
+        self.imports = SupabaseImportService(client: client)
+        self.placeSearch = MapKitPlaceSearch()
         Task { await observe() }
     }
 

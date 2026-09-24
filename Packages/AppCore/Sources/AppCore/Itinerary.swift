@@ -23,6 +23,19 @@ public struct Place: Codable, Identifiable, Hashable, Sendable {
     public var longitude: Double
     public var countryCode: String?
 
+    public init(id: UUID, provider: String, providerPlaceId: String, name: String, nameLocal: String?, address: String?,
+                latitude: Double, longitude: Double, countryCode: String?) {
+        self.id = id
+        self.provider = provider
+        self.providerPlaceId = providerPlaceId
+        self.name = name
+        self.nameLocal = nameLocal
+        self.address = address
+        self.latitude = latitude
+        self.longitude = longitude
+        self.countryCode = countryCode
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, provider, name, address, latitude, longitude
         case providerPlaceId = "provider_place_id"

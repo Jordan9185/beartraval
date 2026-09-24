@@ -82,3 +82,46 @@ final class MemoryStorage: AuthLocalStorage, @unchecked Sendable {
     func retrieve(key: String) throws -> Data? { lock.withLock { values[key] } }
     func remove(key: String) throws { _ = lock.withLock { values.removeValue(forKey: key) } }
 }
+
+@Suite(.enabled(if: IntegrationEnv.config != nil))
+struct ImportIntegrationTests {
+    @Test func importKeepsTextThroughFailedParseAndCommits() async throws {
+        let client = Backend.makeClient(IntegrationEnv.config!, storage: MemoryStorage())
+        _ = try await client.auth.signUp(email: "it-\(UUID().uuidString.prefix(8).lowercased())@example.com", password: UUID().uuidString)
+        let service = SupabaseImportService(client: client)
+        let text = "Day 1 10:00 광장시장\nXXX Shoes"
+
+        let created = try await service.createImport(tripName: "Import IT", startDate: "2026-10-01", endDate: "2026-10-02",
+                                                     timeZone: "Asia/Seoul", rawText: text)
+        #expect(created.parseStatus == .pending)
+
+        // 本機沒有 ANTHROPIC_API_KEY：解析失敗，但原文還在。有 key 時則應解析成功。
+        let parsed = try await service.parse(importID: created.id)
+        if parsed.parseStatus == .failed {
+            #expect(parsed.parseError == "missing_api_key")
+        } else {
+            #expect(parsed.parseStatus == .parsed)
+            #expect(parsed.parseResult?.draft.days.isEmpty == false)
+        }
+        #expect(parsed.rawText == text)
+
+        let edited = try await service.updateText(importID: created.id, rawText: text + "\nDay 2 N서울타워")
+        #expect(edited.parseStatus == .pending)
+        #expect(edited.rawText.hasSuffix("N서울타워"))
+
+        let place = try await service.registerPlace(PlaceDraft(providerPlaceId: "it-\(UUID().uuidString)", name: "Gwangjang Market",
+                                                               latitude: 37.57, longitude: 126.9996, countryCode: "KR"))
+        let trip = try await service.commit(importID: created.id, days: [
+            ImportDayCommit(date: "2026-10-01", stops: [
+                StopDraft(placeId: place.id, rawLabel: "광장시장", startTime: "10:00"),
+                StopDraft(rawLabel: "XXX Shoes"),
+            ]),
+        ])
+        let stops = try await TripRepository(client: client).stops(of: trip.id)
+        #expect(stops.map(\.resolutionStatus) == [.resolved, .pendingText])
+
+        await #expect(throws: BackendError.self) {
+            _ = try await service.commit(importID: created.id, days: [])
+        }
+    }
+}

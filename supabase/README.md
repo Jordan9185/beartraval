@@ -22,6 +22,10 @@
 |---|---|---|
 | `create_trip(name, start_date, end_date, time_zone)` | 已登入 | 建 Trip、每日 TripDay、Owner 成員 |
 | `upsert_place(provider, provider_place_id, name, latitude, longitude, name_local?, address?, country_code?)` | 已登入 | 註冊已確認的 POI；同一 provider id 已存在時回傳既有資料、不覆寫 |
+| `create_import(trip_name, start_date, end_date, time_zone, raw_text)` | 已登入 | 建 ImportSession，保留原文 |
+| `update_import_text(import_id, raw_text)` | 建立者 | 回到原文編輯；清除舊草稿 |
+| `commit_import(import_id, days jsonb)` | 建立者 | 在同一交易建 Trip、各日 Stop；Place 須先 `upsert_place` |
+| `record_parse_result(...)` | 僅 service_role | 由 `parse-import` Edge Function 寫入解析結果 |
 | `commit_itinerary(day_id, expected_route_revision, stops jsonb)` | Owner／Editor | 以有序清單取代當日行程；回傳新 route_revision |
 | `create_invite(trip_id, role, expires_in, max_uses)` | Owner | 回傳一次性明文 token，DB 只存 SHA-256 |
 | `revoke_invite(invite_id)` | Owner | |
@@ -40,9 +44,9 @@ SQLSTATE `PTnnn` 會讓 PostgREST 回傳 HTTP `nnn`：
 | PT401 | `UNAUTHENTICATED` | 401 |
 | PT403 | `FORBIDDEN_ROLE` | 403 |
 | PT404 | `NOT_FOUND`、`INVITE_INVALID` | 404 |
-| PT409 | `STALE_REVISION` | 409 |
+| PT409 | `STALE_REVISION`、`ALREADY_COMMITTED` | 409 |
 | PT410 | `INVITE_EXPIRED`、`INVITE_REVOKED` | 410 |
-| PT422 | `INVALID_PLACE`、`INVALID_DATES`、`INVALID_TIME_ZONE`、`INVALID_STOPS`、`PLACE_NOT_FOUND`、`STOP_NOT_IN_DAY`、`INVALID_ROLE` | 422 |
+| PT422 | `EMPTY_TEXT`、`DATE_OUTSIDE_TRIP`、`INVALID_PLACE`、`INVALID_DATES`、`INVALID_TIME_ZONE`、`INVALID_STOPS`、`PLACE_NOT_FOUND`、`STOP_NOT_IN_DAY`、`INVALID_ROLE` | 422 |
 
 ## 測試
 
@@ -66,6 +70,13 @@ supabase status     # 取得 anon key
 - `config.toml` 已把 `app` 加入 exposed schemas。
 - 把 `supabase status` 的 anon key 填進 `Config/Local.xcconfig.local` 的 `SUPABASE_ANON_KEY`，模擬器即可連 `http://127.0.0.1:54321`。
 - 登入：Email＋密碼（決策 D7）。Email 確認關閉（註冊後直接登入），密碼至少 8 字元（`minimum_password_length`）。
+
+## Edge Function：`parse-import`（AI Gateway）
+
+`functions/parse-import` 以使用者 JWT 讀取 ImportSession（RLS），用 `ai/itinerary-parse` 的 `parseItinerary()` 呼叫 Claude，把草稿寫回 `parse_result`（service role）。草稿不是正式行程，使用者在 App 逐一確認後才由 `commit_import` 寫入。
+
+- API key：本機放 `supabase/functions/.env`（`ANTHROPIC_API_KEY=...`，已 gitignore），雲端用 `supabase secrets set ANTHROPIC_API_KEY=...`。
+- 沒有 key 時回 `missing_api_key`，session 標為 failed，原文保留。
 
 ## iOS 整合測試
 
