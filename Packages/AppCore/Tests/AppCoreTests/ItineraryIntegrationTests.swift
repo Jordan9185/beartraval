@@ -335,3 +335,30 @@ struct ShoppingIntegrationTests {
         #expect(try await amy.shoppingEntries(of: trip.id).first?.status == .scheduled)
     }
 }
+
+/// WP9：Today／Map 共用的 snapshot 與伺服器 revision 一致（AC-02）。
+@Suite(.enabled(if: IntegrationEnv.config != nil))
+struct SnapshotIntegrationTests {
+    @Test func snapshotMatchesServerRevision() async throws {
+        let client = Backend.makeClient(IntegrationEnv.config!, storage: MemoryStorage())
+        _ = try await client.auth.signUp(email: "it-\(UUID().uuidString.prefix(8).lowercased())@example.com", password: UUID().uuidString)
+        let repo = TripRepository(client: client)
+        let trip = try await repo.createTrip(name: "Snap", startDate: "2026-10-01", endDate: "2026-10-02", timeZone: "Asia/Seoul")
+        let place = try await repo.upsertPlace(PlaceDraft(providerPlaceId: "it-\(UUID().uuidString)", name: "A", latitude: 37.5, longitude: 127, countryCode: "KR"))
+        let day = try #require(try await repo.days(of: trip.id).first)
+        _ = try await repo.commitItinerary(dayID: day.id, expectedRouteRevision: 0, stops: [StopDraft(placeId: place.id, rawLabel: "A", fixed: true)])
+        _ = try await repo.savePlace(tripID: trip.id, label: "Cafe", category: .cafe, placeID: nil, source: nil)
+        _ = try await repo.addShoppingItem(tripID: trip.id, name: "ReFa", note: nil, url: nil, clientOpID: nil)
+
+        let snap = try await repo.snapshot(of: trip)
+        #expect(snap.revision == (try await repo.tripRevision(trip.id)))
+        #expect(snap.timeline.count == 2)
+        #expect(snap.pins(dayIndex: 0, layers: [.todayRoute]).count == 1)
+        #expect(snap.saved.count == 1 && snap.shopping.count == 1)
+
+        _ = try await repo.addShoppingItem(tripID: trip.id, name: "Momiji", note: nil, url: nil, clientOpID: nil)
+        let next = try await repo.snapshot(of: trip)
+        #expect(next.revision > snap.revision)
+        #expect(next.shopping.count == 2)
+    }
+}

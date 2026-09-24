@@ -163,6 +163,8 @@ struct TripDetailView: View {
     @State private var showsRouteMatch = false
     @State private var myRole: TripRole?
     @State private var sync: TripSync?
+    @State private var selectedStop: Stop?
+    @State private var revision: Int?
 
     var body: some View {
         List {
@@ -176,13 +178,25 @@ struct TripDetailView: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(day.stops) { stop in
-                        StopRow(stop: stop, place: stop.placeId.flatMap { places[$0] })
+                        Button { selectedStop = stop } label: {
+                            StopRow(stop: stop, place: stop.placeId.flatMap { places[$0] })
+                        }
+                        .buttonStyle(.plain)
                     }
                     RouteStatusRow(day: day, base: baseRoutes[day.id])
                 } header: {
                     Text("Day \(day.day.displayOrder + 1) · \(day.day.localDate)")
                 }
             }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let revision { Text("資料版本 r\(revision)").font(.caption2).foregroundStyle(.secondary).padding(4) }
+        }
+        .sheet(item: $selectedStop) { stop in
+            StopDetailView(stop: stop, place: stop.placeId.flatMap { places[$0] },
+                           mode: timeline.first { $0.id == stop.dayId }?.day.transportMode ?? .transit,
+                           previous: previousPlace(before: stop))
+                .presentationDetents([.medium])
         }
         .navigationTitle(trip.name)
         .toolbar {
@@ -209,6 +223,12 @@ struct TripDetailView: View {
         .onDisappear { Task { await sync?.stop() } }
     }
 
+    /// 外開在地地圖時的起點：同一天前一個已確認地點的 Stop（§4.3.1）。
+    private func previousPlace(before stop: Stop) -> Place? {
+        guard let day = timeline.first(where: { $0.id == stop.dayId }), let i = day.stops.firstIndex(where: { $0.id == stop.id }) else { return nil }
+        return day.stops[..<i].last(where: \.isRoutable)?.placeId.flatMap { places[$0] }
+    }
+
     /// 旅伴修改行程時自動重新載入（WP7）。
     private func startSync() async {
         guard sync == nil, let revision = try? await session.trips.tripRevision(trip.id) else { return }
@@ -227,6 +247,7 @@ struct TripDetailView: View {
             let placeList = try await session.trips.places(ids: Array(Set(stops.compactMap(\.placeId))))
             places = Dictionary(uniqueKeysWithValues: placeList.map { ($0.id, $0) })
             timeline = DayTimeline.build(days: days, stops: stops)
+            revision = try? await session.trips.tripRevision(trip.id)
             errorMessage = nil
         } catch {
             errorMessage = "讀取失敗：\(error.localizedDescription)"
@@ -269,6 +290,36 @@ struct TripDetailView: View {
         }
     }
     #endif
+}
+
+/// Stop 詳情；韓國地點提供外開 Naver／Kakao（§4.3.1）。
+struct StopDetailView: View {
+    let stop: Stop
+    let place: Place?
+    let mode: TravelMode
+    let previous: Place?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(place.map { $0.nameLocal ?? $0.name } ?? stop.rawLabel).font(.headline)
+                    if let address = place?.address { Text(address).font(.caption).foregroundStyle(.secondary) }
+                    if let start = stop.startTime { LabeledContent("時間", value: LocalTime.hourMinute(start)) }
+                    if let dwell = stop.dwellMinutes { LabeledContent("停留", value: "\(dwell) 分") }
+                    LabeledContent("類型", value: stop.fixed ? "固定" : "彈性")
+                    if place == nil { Text("地點待確認，不參與路線").foregroundStyle(.orange) }
+                }
+                if let place, place.isInKorea {
+                    Section("在地地圖") {
+                        LocalMapButtons(destination: place.mapPoint, origin: previous?.mapPoint, mode: mode, address: place.address)
+                    }
+                }
+            }
+            .navigationTitle("Stop")
+            .navigationBarTitleDisplayModeInline()
+        }
+    }
 }
 
 struct StopRow: View {

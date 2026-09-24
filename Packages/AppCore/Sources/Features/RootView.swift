@@ -6,6 +6,7 @@ import SwiftUI
 public struct RootView: View {
     let session: SessionModel?
     @State private var showsDebug = false
+    @State private var store: TripStore?
 
     /// `session` 為 nil 表示後端設定缺漏（Info.plist 沒有 SupabaseURL／SupabaseAnonKey）。
     public init(session: SessionModel?) {
@@ -37,11 +38,11 @@ public struct RootView: View {
 
     private func tabs(_ session: SessionModel) -> some View {
         TabView {
-            EmptyTab(title: "Today", systemImage: "sun.max", message: "尚未建立行程", onDebug: debugAction)
+            TodayView(session: session, store: tripStore(session), onDebug: debugAction)
                 .tabItem { Label("Today", systemImage: "sun.max") }
             TripListView(session: session)
                 .tabItem { Label("Trip", systemImage: "calendar") }
-            EmptyTab(title: "Map", systemImage: "map", message: "尚無已確認的地點")
+            TripMapView(session: session, store: tripStore(session))
                 .tabItem { Label("Map", systemImage: "map") }
             SavedView(session: session)
                 .tabItem { Label("Saved", systemImage: "bookmark") }
@@ -49,6 +50,14 @@ public struct RootView: View {
                 .tabItem { Label("Shopping", systemImage: "bag") }
         }
         .sheet(isPresented: $showsDebug) { DebugMenuView(session: session) }
+        .task {
+            if store == nil { store = TripStore(repository: session.trips) }
+            await store?.start()
+        }
+    }
+
+    private func tripStore(_ session: SessionModel) -> TripStore {
+        store ?? TripStore(repository: session.trips)
     }
 
     /// Spike 工具入口只在 DEBUG build 出現，不佔用分頁。
