@@ -125,6 +125,7 @@ struct JoinTripView: View {
                     .disabled(joining || InviteLink.token(from: text) == nil)
                 if let errorMessage { ErrorText(errorMessage) }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("加入旅程")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
             .onAppear { if let initialToken { text = initialToken } }

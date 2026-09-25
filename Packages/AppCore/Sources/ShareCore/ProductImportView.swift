@@ -22,6 +22,12 @@ public struct ProductImportView: View {
     @State private var extracted = false
     @State private var saving = false
     @State private var errorMessage: String?
+    @FocusState private var focus: Field?
+
+    enum Field: Hashable {
+        case text
+        case draft(UUID)
+    }
 
     struct Draft: Identifiable, Equatable {
         let id = UUID()
@@ -29,6 +35,8 @@ public struct ProductImportView: View {
         var note: String?
         var selected: Bool
         var confidence: String
+        /// 使用者自己加的項目；重新辨識時保留。
+        var manual = false
     }
 
     public init(content: ShareContent, repository: TripRepository?, onFinish: @escaping (Int) -> Void) {
@@ -53,6 +61,7 @@ public struct ProductImportView: View {
                     Label(imageJPEG == nil ? "選擇截圖或照片" : "換一張", systemImage: "photo")
                 }
                 TextField("貼文文字、商品名稱或連結", text: $text, axis: .vertical).lineLimit(3...8)
+                    .focused($focus, equals: .text)
                     .accessibilityIdentifier("productText")
                 if let sourceURL { Text(sourceURL.absoluteString).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             } header: {
@@ -62,7 +71,7 @@ public struct ProductImportView: View {
             }
 
             Section {
-                Button(extracting ? "辨識中…" : "用 AI 辨識商品", systemImage: "sparkles") { Task { await extract() } }
+                Button(extracting ? "辨識中…" : extracted ? "重新辨識" : "用 AI 辨識商品", systemImage: "sparkles") { Task { await extract() } }
                     .disabled(!hasInput || extracting || repository == nil || tripID == nil)
                 if extracting { ProgressView() }
                 if extracted && drafts.isEmpty {
@@ -76,6 +85,7 @@ public struct ProductImportView: View {
                         .buttonStyle(.borderless)
                         VStack(alignment: .leading, spacing: 2) {
                             TextField("商品名稱", text: $draft.name)
+                                .focused($focus, equals: .draft(draft.id))
                             if draft.confidence == "low" {
                                 Text("AI 不太確定，請核對名稱").font(.caption).foregroundStyle(.orange)
                             }
@@ -83,7 +93,9 @@ public struct ProductImportView: View {
                     }
                 }
                 Button("手動新增一項", systemImage: "plus") {
-                    drafts.append(Draft(name: "", note: nil, selected: true, confidence: "high"))
+                    let draft = Draft(name: "", note: nil, selected: true, confidence: "high", manual: true)
+                    drafts.append(draft)
+                    focus = .draft(draft.id)
                 }
                 ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in
                     Text(verbatim: warning).font(.caption).foregroundStyle(.secondary)
@@ -109,38 +121,48 @@ public struct ProductImportView: View {
                 if let errorMessage { ErrorText(errorMessage) }
             }
         }
+        // 多行輸入框按 return 是換行，所以另外提供收鍵盤的方式。
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完成") { focus = nil }
+            }
+        }
         .task {
             guard let repository else { return }
             trips = (try? await repository.editableTrips()) ?? []
             tripsLoaded = true
             if tripID == nil { tripID = ShareFlowView.defaultTrip(trips)?.id }
+            // 分享進來就帶著截圖或貼文時，直接辨識，不必再按一次。
+            if hasInput && !extracted { await extract() }
         }
         .onChange(of: photo) {
             Task {
                 guard let data = try? await photo?.loadTransferable(type: Data.self) else { return }
                 imageJPEG = ImageDownscale.jpeg(from: data)
+                // 選了新照片就自動辨識。
+                await extract()
             }
         }
     }
 
     private func extract() async {
-        guard let repository, let tripID else { return }
+        guard let repository, let tripID, !extracting, hasInput else { return }
+        focus = nil
         extracting = true
         defer { extracting = false }
         do {
             let result = try await repository.extractProducts(tripID: tripID, text: text, url: sourceURL?.absoluteString, imageJPEG: imageJPEG)
+            // 重新辨識時換掉上次 AI 的結果，保留自己加的項目。
             drafts = result.products.map {
                 Draft(name: $0.listName, note: $0.searchQuery, selected: $0.confidence != "low", confidence: $0.confidence)
-            } + drafts.filter { !$0.name.isEmpty }
+            } + drafts.filter { $0.manual && !$0.name.isEmpty }
             warnings = result.warnings
             extracted = true
             errorMessage = nil
-        } catch ProductExtractionError.failed(let reason) {
-            errorMessage = switch reason {
-            case "missing_api_key": "AI 服務尚未設定。"
-            case "rate_limited": "AI 辨識次數已達上限，請稍後再試，或直接手動輸入。"
-            default: "辨識失敗，可以直接手動輸入。"
-            }
+        } catch let error as ProductExtractionError {
+            errorMessage = error.userMessage
         } catch let error as BackendError {
             errorMessage = error.userMessage
         } catch {

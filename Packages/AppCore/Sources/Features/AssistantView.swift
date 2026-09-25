@@ -68,6 +68,7 @@ struct AssistantView: View {
                     }
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom) {
                 HStack {
                     TextField("問這趟旅行的問題", text: $question, axis: .vertical)

@@ -21,7 +21,10 @@ public struct ShareFlowView: View {
     /// 分享進來的截圖（有的話在裝置上辨識文字，找出店名與地址）。
     @State private var screenshot: Data?
     @State private var screenshotLines: [String] = []
-    @State private var screenshotAddress: String?
+    /// 截圖裡的地址（可修改）；原文地址會存成地點的當地文字地址，給計程車卡片用。
+    @State private var screenshotAddress = ""
+    /// 截圖內容看起來是哪個國家（可修改）。
+    @State private var country: String?
     @State private var readingScreenshot = false
     @State private var query: String
     @State private var category: SavedCategory = .place
@@ -129,16 +132,20 @@ public struct ShareFlowView: View {
             Section {
                 ForEach(screenshotLines, id: \.self) { line in
                     Button {
-                        query = line
-                        Task { await search() }
+                        if ScreenshotText.isAddress(line) {
+                            screenshotAddress = line
+                        } else {
+                            query = line
+                            Task { await search() }
+                        }
                     } label: {
-                        Label(line, systemImage: line == screenshotAddress ? "mappin" : "text.quote")
+                        Label(line, systemImage: ScreenshotText.isAddress(line) ? "mappin" : "text.quote")
                     }
                 }
             } header: {
                 Text("截圖中的文字")
             } footer: {
-                Text("在手機上辨識，不會上傳。點一行就用它搜尋；地點仍由你從候選中選定。")
+                Text("在手機上辨識，不會上傳。點店名會用它搜尋、點地址會填進地址欄；地點仍由你從候選中選定。")
             }
         }
     }
@@ -165,32 +172,89 @@ public struct ShareFlowView: View {
 
     // MARK: 地點
 
+    static let countries: [(code: String, name: String)] = [("KR", "韓國"), ("JP", "日本"), ("TW", "台灣"), ("HK", "香港")]
+
+    @ViewBuilder
     private var placeSection: some View {
         Section {
-            PlaceSearchField(text: $query) { Task { await search() } }
+            if screenshot != nil {
+                // 截圖辨識出來的店名、地址都可以改。
+                LabeledContent("店名") { PlaceSearchField(text: $query) { Task { await search() } } }
+                LabeledContent("地址") {
+                    TextField("截圖中的地址（選填）", text: $screenshotAddress, axis: .vertical)
+                        .autocorrectionDisabled()
+                }
+                Picker("國家／地區", selection: $country) {
+                    Text("看不出來").tag(String?.none)
+                    ForEach(Self.countries, id: \.code) { Text($0.name).tag(Optional($0.code)) }
+                }
+            } else {
+                PlaceSearchField(text: $query) { Task { await search() } }
+            }
             Picker("類別", selection: Binding(get: { category }, set: { category = $0; categoryChosen = true })) {
                 ForEach(SavedCategory.allCases, id: \.self) { Text($0.displayName).tag($0) }
             }
+        } header: {
+            Text("地點")
+        } footer: {
+            if screenshot != nil { Text("辨識有錯可以直接改；店名改完按「搜尋」重找。") }
+        }
+        Section {
             ForEach(candidates) { option in
-                Button {
-                    selected = option
-                    if !categoryChosen, let kind = option.category { category = kind }
-                    Task { await computeMatches() }
-                } label: {
+                // 再點一次同一個候選就取消選取（誤觸時用）。
+                Button { toggle(option) } label: {
                     PlaceOptionRow(title: option.displayTitle, address: option.address, selected: selected == option)
                 }
             }
             if searched && candidates.isEmpty {
                 Text("Apple 地圖找不到；仍可先收藏名稱，之後再定位。").font(.caption).foregroundStyle(.secondary)
                 if !query.isEmpty {
-                    LocalMapSearchButtons(name: query, countryCode: LocalMapCountry.guess(name: query + (screenshotAddress ?? ""), timeZone: nil))
+                    LocalMapSearchButtons(name: query, countryCode: country ?? LocalMapCountry.guess(name: query + screenshotAddress, timeZone: nil))
                 }
             }
+            if let selected {
+                Button("取消選取「\(selected.displayTitle)」", role: .cancel) { toggle(selected) }
+            }
         } header: {
-            Text("地點")
+            if searched { Text("Apple 地圖候選") }
         } footer: {
-            if selected == nil && !candidates.isEmpty { Text("請選擇正確的店家或分店。") }
+            if selected == nil && !candidates.isEmpty { Text("請選擇正確的店家或分店；再點一次可以取消。") }
         }
+    }
+
+    private func toggle(_ option: PlaceOption) {
+        if selected == option {
+            selected = nil
+            matches = []
+            withdrawPending()
+        } else {
+            selected = option
+            if !categoryChosen, let kind = option.category { category = kind }
+            Task { await computeMatches() }
+        }
+    }
+
+    /// 還沒確認的加入要求撤回，不留在伺服器上。
+    private func withdrawPending() {
+        if let id = pending?.proposal.id, let repository { Task { try? await repository.reject(proposalID: id) } }
+        pending = nil
+    }
+
+    /// 選定的地點，加上使用者確認過的原文店名與地址（截圖辨識、可修改）。
+    private func confirmedDraft(_ option: PlaceOption) -> PlaceDraft {
+        var draft = option.draft
+        let country = draft.countryCode ?? country
+        let name = query.trimmingCharacters(in: .whitespaces)
+        if draft.nameLocal == nil, !name.isEmpty,
+           (country == "KR" && PlaceNaming.hasHangul(name)) || (country == "JP" && PlaceNaming.hasKana(name)) {
+            draft.nameLocal = name
+        }
+        if draft.nameZh == nil, PlaceNaming.looksChinese(name) { draft.nameZh = name }
+        let address = screenshotAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !address.isEmpty, LocalAddress.locale(for: country) != nil, LocalAddress.isLocal(address, countryCode: country) {
+            draft.addressLocal = address
+        }
+        return draft
     }
 
     // MARK: Trip 與順路
@@ -216,7 +280,7 @@ public struct ShareFlowView: View {
                 MatchNumbers(insertion: pending.insertion) { $0.flatMap { pending.stopLabels[$0] } }
                 if let notice { Label(notice, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
                 Button(busy ? "加入中…" : "確認加入") { Task { await confirm() } }.disabled(busy)
-                Button("不加入") { self.pending = nil }
+                Button("不加入") { withdrawPending() }
             } else if let best = RouteMatcher.bestDay(matches), let insertion = best.best {
                 Text("最適合：\(dayTitles[best.dayID] ?? "")")
                 MatchNumbers(insertion: insertion) { _ in nil }
@@ -270,7 +334,8 @@ public struct ShareFlowView: View {
             let lines = await ScreenshotText.recognize(jpeg: screenshot)
             let guess = ScreenshotText.guess(from: lines)
             if !categoryChosen, let kind = guess.category { category = kind }
-            screenshotAddress = guess.address
+            screenshotAddress = guess.address ?? ""
+            country = guess.country
             screenshotLines = ([guess.name, guess.address].compactMap { $0 } + guess.otherLines)
                 .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
             if let best = guess.name ?? guess.address { query = best }
@@ -284,7 +349,8 @@ public struct ShareFlowView: View {
         } else if !query.isEmpty {
             await search()
             // 用店名找不到時，改用截圖裡的地址找；韓文地址 Apple 地圖找不到，改用拼音地址找到那條路，再列出那附近的店家。
-            if candidates.isEmpty, let address = screenshotAddress {
+            if candidates.isEmpty, !screenshotAddress.isEmpty {
+                let address = screenshotAddress
                 if address != query {
                     query = address
                     await search()
@@ -312,7 +378,7 @@ public struct ShareFlowView: View {
         guard !text.isEmpty else { return }
         selected = nil
         matches = []
-        pending = nil
+        withdrawPending()
         let areas: SearchAreas = if let repository, let tripID { await repository.searchAreas(of: tripID) } else { .none }
         candidates = await placeSearch.search(text, in: areas, limit: 6)
         searched = true
@@ -347,7 +413,7 @@ public struct ShareFlowView: View {
         busy = true
         defer { busy = false }
         do {
-            let place = try await repository.upsertPlace(selected.draft)
+            let place = try await repository.upsertPlace(confirmedDraft(selected))
             let flow = AddToDayFlow(service: repository, matcher: matcher)
             point = routePoint(selected)
             let (fresh, _) = try await flow.propose(placeID: place.id, label: place.displayTitle, point: point!,
@@ -388,7 +454,7 @@ public struct ShareFlowView: View {
             var placeID: UUID?
             var label = query.trimmingCharacters(in: .whitespaces)
             if let selected {
-                let place = try await repository.upsertPlace(selected.draft)
+                let place = try await repository.upsertPlace(confirmedDraft(selected))
                 placeID = place.id
                 label = place.displayTitle
             }

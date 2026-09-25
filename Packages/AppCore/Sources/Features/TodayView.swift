@@ -228,7 +228,7 @@ struct TodayView: View {
 extension Place {
     var asDraft: PlaceDraft {
         PlaceDraft(providerPlaceId: providerPlaceId, name: name, nameLocal: nameLocal, address: address,
-                   latitude: latitude, longitude: longitude, countryCode: countryCode, nameZh: nameZh)
+                   latitude: latitude, longitude: longitude, countryCode: countryCode, nameZh: nameZh, addressLocal: addressLocal)
     }
 
     var mapPoint: MapPoint {

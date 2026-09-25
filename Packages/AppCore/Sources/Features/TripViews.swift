@@ -504,7 +504,7 @@ struct StopDetailView: View {
                 }
                 if let place, place.isInKorea {
                     Section("在地地圖") {
-                        LocalMapButtons(destination: place.mapPoint, origin: previous?.mapPoint, mode: mode, address: place.address)
+                        LocalMapButtons(destination: place.mapPoint, origin: previous?.mapPoint, mode: mode, address: place.localAddress)
                     }
                 }
                 if let place, let session {

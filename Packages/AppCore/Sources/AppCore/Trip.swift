@@ -154,12 +154,19 @@ public struct TripRepository: Sendable {
             let p_address: String?
             let p_country_code: String?
             let p_name_zh: String?
+            let p_address_local: String?
+        }
+        var draft = draft
+        if draft.addressLocal == nil {
+            draft.addressLocal = await LocalAddress.lookup(latitude: draft.latitude, longitude: draft.longitude,
+                                                           countryCode: draft.countryCode, knownAddress: draft.address)
         }
         do {
             return try await client.rpc("upsert_place", params: Params(
                 p_provider: draft.provider.rawValue, p_provider_place_id: draft.providerPlaceId, p_name: draft.name,
                 p_latitude: draft.latitude, p_longitude: draft.longitude, p_name_local: draft.nameLocal,
-                p_address: draft.address, p_country_code: draft.countryCode, p_name_zh: draft.nameZh
+                p_address: draft.address, p_country_code: draft.countryCode, p_name_zh: draft.nameZh,
+                p_address_local: draft.addressLocal
             )).execute().value
         } catch {
             throw BackendError.from(error)

@@ -52,6 +52,14 @@ public struct ProductExtraction: Sendable, Equatable {
 
 public enum ProductExtractionError: Error, Equatable {
     case failed(reason: String)
+
+    public var userMessage: String {
+        switch self {
+        case .failed("missing_api_key"): "AI 服務尚未設定。"
+        case .failed("rate_limited"): "AI 辨識次數已達上限，請稍後再試，或直接手動輸入。"
+        case .failed(let reason): "辨識失敗（\(reason)），可以直接手動輸入。"
+        }
+    }
 }
 
 extension TripRepository {

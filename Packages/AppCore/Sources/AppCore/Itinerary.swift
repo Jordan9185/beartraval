@@ -24,9 +24,12 @@ public struct Place: Codable, Identifiable, Hashable, Sendable {
     public var countryCode: String?
     /// 繁體中文名稱（顯示在原文旁）。
     public var nameZh: String?
+    /// 當地文字的地址（韓文、日文）：Apple 依手機語言回傳地址，中文手機會拿到「南韓首爾特別市…」，
+    /// 司機看不懂，所以另外存一份。
+    public var addressLocal: String?
 
     public init(id: UUID, provider: String, providerPlaceId: String, name: String, nameLocal: String?, address: String?,
-                latitude: Double, longitude: Double, countryCode: String?, nameZh: String? = nil) {
+                latitude: Double, longitude: Double, countryCode: String?, nameZh: String? = nil, addressLocal: String? = nil) {
         self.id = id
         self.provider = provider
         self.providerPlaceId = providerPlaceId
@@ -37,7 +40,11 @@ public struct Place: Codable, Identifiable, Hashable, Sendable {
         self.longitude = longitude
         self.countryCode = countryCode
         self.nameZh = nameZh
+        self.addressLocal = addressLocal
     }
+
+    /// 外開當地地圖、給司機看時用的地址：有當地文字的就用它。
+    public var localAddress: String? { addressLocal ?? address }
 
     enum CodingKeys: String, CodingKey {
         case id, provider, name, address, latitude, longitude
@@ -45,6 +52,7 @@ public struct Place: Codable, Identifiable, Hashable, Sendable {
         case nameLocal = "name_local"
         case countryCode = "country_code"
         case nameZh = "name_zh"
+        case addressLocal = "address_local"
     }
 }
 
@@ -134,9 +142,12 @@ public struct PlaceDraft: Equatable, Sendable {
     public var longitude: Double
     public var countryCode: String?
     public var nameZh: String?
+    /// 當地文字的地址；沒有時存檔前會用當地語言反查。
+    public var addressLocal: String?
 
     public init(provider: RouteProvider = .appleMapKit, providerPlaceId: String, name: String, nameLocal: String? = nil,
-                address: String? = nil, latitude: Double, longitude: Double, countryCode: String? = nil, nameZh: String? = nil) {
+                address: String? = nil, latitude: Double, longitude: Double, countryCode: String? = nil, nameZh: String? = nil,
+                addressLocal: String? = nil) {
         self.provider = provider
         self.providerPlaceId = providerPlaceId
         self.name = name
@@ -146,6 +157,7 @@ public struct PlaceDraft: Equatable, Sendable {
         self.longitude = longitude
         self.countryCode = countryCode
         self.nameZh = nameZh
+        self.addressLocal = addressLocal
     }
 }
 

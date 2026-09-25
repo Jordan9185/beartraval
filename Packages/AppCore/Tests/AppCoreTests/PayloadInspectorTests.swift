@@ -103,6 +103,20 @@ struct ScreenshotTextTests {
         #expect(ScreenshotText.guess(from: ["12:03", "Follow", "Cafe Layered 연남", "1.2k"]).name == "Cafe Layered 연남")
     }
 
+    @Test func guessesCountryFromAddressAndText() {
+        #expect(ScreenshotText.guess(from: ["명동교자 본점", "서울특별시 중구 명동10길 29"]).country == "KR")
+        // 中文寫的韓國地址：地址也要認得、國家要判斷成韓國。
+        let chinese = ScreenshotText.guess(from: ["明洞餃子本店", "首爾特別市中區明洞10街29", "#明洞美食"])
+        #expect(chinese.address == "首爾特別市中區明洞10街29")
+        #expect(chinese.name == "明洞餃子本店")
+        #expect(chinese.country == "KR")
+        #expect(ScreenshotText.guess(from: ["一蘭 新宿中央東口店", "東京都新宿區新宿3-34-11"]).country == "JP")
+        #expect(ScreenshotText.guess(from: ["鼎泰豐 信義店", "台北市大安區信義路二段194號"]).country == "TW")
+        // 台灣貼文常用「の」當「的」，不能因此判成日本。
+        #expect(ScreenshotText.guess(from: ["台中の早午餐", "好吃"]).country == "TW")
+        #expect(ScreenshotText.guess(from: ["我の最愛", "好吃"]).country == nil)
+    }
+
     @Test func guessesCategoryFromKeywordsAndHashtags() {
         #expect(ScreenshotText.guess(from: ["明洞必吃！排隊也值得", "명동교자 본점", "#明洞美食 #刀削麵"]).category == .eat)
         #expect(ScreenshotText.guess(from: ["MAKMADE 성수", "#성수카페 #맛집"]).category == .cafe)
@@ -164,5 +178,14 @@ struct KoreanAddressTests {
         #expect(ScreenshotText.isNoise("營業中 · 10:30–21:00"))
         #expect(ScreenshotText.isNoise("#• 10:30-21:00"))
         #expect(!ScreenshotText.isNoise("명동교자 본점"))
+    }
+}
+
+import SwiftUI
+
+struct ErrorTextTests {
+    /// 2026-09-25：body 誤寫成 ErrorText 自己，任何錯誤訊息一出現就無限遞迴閃退。
+    @MainActor @Test func bodyIsNotItself() {
+        #expect(type(of: ErrorText("x").body) != ErrorText.self)
     }
 }

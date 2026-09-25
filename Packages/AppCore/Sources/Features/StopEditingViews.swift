@@ -229,7 +229,7 @@ struct LegModesView: View {
                 }
                 if leg.from.isInKorea || leg.to.isInKorea {
                     Section("大眾運輸在韓國請用當地地圖查") {
-                        LocalMapButtons(destination: leg.to.mapPoint, origin: leg.from.mapPoint, mode: .transit, address: leg.to.address)
+                        LocalMapButtons(destination: leg.to.mapPoint, origin: leg.from.mapPoint, mode: .transit, address: leg.to.localAddress)
                     }
                 }
                 if canEdit {

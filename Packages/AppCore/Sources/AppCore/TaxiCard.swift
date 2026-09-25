@@ -25,6 +25,23 @@ public struct TaxiCard: Equatable, Sendable {
     public var extras: [(local: String, zh: String)]
     /// 給使用者的提醒（中文），例如缺地址。
     public var warnings: [String]
+    /// 地址不是當地文字時，用座標以當地語言反查（見 `LocalAddress`）。
+    public var latitude: Double?
+    public var longitude: Double?
+    public var countryCode: String?
+
+    /// 地址還不是司機看得懂的當地文字。
+    public var needsLocalAddress: Bool {
+        LocalAddress.locale(for: countryCode) != nil && latitude != nil && !(address.map { LocalAddress.isLocal($0, countryCode: countryCode) } ?? false)
+    }
+
+    static let foreignAddressWarning = "地址不是當地文字，司機可能看不懂；請以店名或地圖為主。"
+
+    /// 換上反查到的當地文字地址，並拿掉相關提醒。
+    public mutating func useLocalAddress(_ local: String) {
+        address = local
+        warnings.removeAll { $0 == Self.foreignAddressWarning || $0.hasPrefix("這個地點沒有地址") }
+    }
 
     public static func == (a: TaxiCard, b: TaxiCard) -> Bool {
         a.language == b.language && a.request == b.request && a.requestZh == b.requestZh && a.name == b.name
@@ -69,12 +86,18 @@ public struct TaxiCard: Equatable, Sendable {
         self.name = place.originalName
         let zh = place.chineseName ?? fallbackChineseLabel.flatMap { PlaceNaming.looksChinese($0) ? $0 : nil }
         self.nameZh = zh == place.originalName ? nil : zh
-        self.address = place.address.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+        // 優先用當地文字地址（Apple 回傳的地址會依手機語言變成中文）。
+        self.address = [place.addressLocal, place.address].compactMap { $0?.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty }
         self.extras = extras
+        self.latitude = place.latitude
+        self.longitude = place.longitude
+        self.countryCode = place.countryCode
 
         var warnings: [String] = []
         if address == nil {
             warnings.append("這個地點沒有地址，司機可能找不到；建議同時出示地圖。")
+        } else if let address, !LocalAddress.isLocal(address, countryCode: place.countryCode) {
+            warnings.append(Self.foreignAddressWarning)
         }
         if lang == .korean && !PlaceNaming.hasHangul(name) {
             warnings.append("店名不是韓文原文，司機可能看不懂；請以地址為主。")
@@ -96,6 +119,7 @@ public struct TaxiCard: Equatable, Sendable {
         self.nameZh = nil
         self.address = nil
         self.extras = extras
+        self.countryCode = countryCode
         var warnings = ["這個地點還沒定位，卡片上沒有地址；建議先用當地地圖查到位置，再給司機看地圖。"]
         if lang == .korean && !PlaceNaming.hasHangul(name) {
             warnings.append("店名不是韓文，司機可能看不懂。")

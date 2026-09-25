@@ -18,7 +18,10 @@ struct ShoppingTab: View {
             Group {
                 if let tripID {
                     ShoppingListView(service: session.trips, tripID: tripID, canEdit: myRole?.canEdit == true,
-                                     queue: session.offlineQueue, reloadToken: reloadToken) { entry in
+                                     queue: session.offlineQueue, reloadToken: reloadToken,
+                                     recognizeName: { [trips = session.trips] jpeg in
+                                         try await trips.extractProducts(tripID: tripID, text: "", url: nil, imageJPEG: jpeg).products.first?.listName
+                                     }) { entry in
                         MerchantSearchView(session: session, tripID: tripID, entry: entry) { reloadToken += 1 }
                     }
                 } else {
@@ -84,21 +87,27 @@ public struct ShoppingListView: View {
     let queue: OfflineQueue?
     let reloadToken: Int
     let merchantScreen: (ShoppingEntry) -> AnyView
+    /// 從商品照片讀出名稱（AI）；nil 表示不辨識。
+    let recognizeName: (@Sendable (Data) async throws -> String?)?
 
     @State private var entries: [ShoppingEntry] = []
     @State private var newName = ""
     @State private var newPhoto: PhotosPickerItem?
     @State private var newImage: Data?
+    @State private var recognizing = false
     @State private var errorMessage: String?
     @State private var loaded = false
+    @FocusState private var nameFocused: Bool
 
     public init<MerchantScreen: View>(service: any ShoppingService, tripID: UUID, canEdit: Bool, queue: OfflineQueue?, reloadToken: Int,
+                                      recognizeName: (@Sendable (Data) async throws -> String?)? = nil,
                                       @ViewBuilder merchantScreen: @escaping (ShoppingEntry) -> MerchantScreen) {
         self.service = service
         self.tripID = tripID
         self.canEdit = canEdit
         self.queue = queue
         self.reloadToken = reloadToken
+        self.recognizeName = recognizeName
         self.merchantScreen = { AnyView(merchantScreen($0)) }
     }
 
@@ -126,13 +135,18 @@ public struct ShoppingListView: View {
                         }
                         .buttonStyle(.borderless)
                         .accessibilityLabel(newImage == nil ? "附上照片" : "已附照片")
-                        TextField("新增想買的商品", text: $newName).onSubmit { Task { await add() } }
+                        TextField(recognizing ? "辨識照片中的商品…" : "新增想買的商品", text: $newName).onSubmit { Task { await add() } }
+                            .focused($nameFocused)
+                            .submitLabel(.done)
                             .accessibilityIdentifier("newItemField")
+                        if recognizing { ProgressView() }
                         Button("新增") { Task { await add() } }
                             .buttonStyle(.borderless)
                             .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
                             .accessibilityIdentifier("addItem")
                     }
+                } footer: {
+                    if recognizeName != nil { Text("先拍照或選照片，會自動帶入商品名稱，可以再修改。") }
                 }
             }
             if let errorMessage { ErrorText(errorMessage) }
@@ -146,12 +160,20 @@ public struct ShoppingListView: View {
                 ContentUnavailableView("還沒有想買的東西", systemImage: "bag", description: canEdit ? Text("在上方輸入，或從貼文、截圖加入。") : nil)
             }
         }
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完成") { nameFocused = false }
+            }
+        }
         .refreshable { await reload() }
         .task(id: "\(tripID)-\(reloadToken)") { await reload() }
         .onChange(of: newPhoto) {
             Task {
                 guard let data = try? await newPhoto?.loadTransferable(type: Data.self) else { return }
                 newImage = ImageDownscale.jpeg(from: data)
+                await recognizePhoto()
             }
         }
     }
@@ -165,6 +187,28 @@ public struct ShoppingListView: View {
             errorMessage = "讀取失敗：\(userMessage(for: error))"
         }
         loaded = true
+    }
+
+    /// 還沒輸入名稱時，用照片辨識出的商品名稱帶入（使用者仍可修改，按新增才加入）。
+    private func recognizePhoto() async {
+        guard let recognizeName, let newImage, newName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        nameFocused = false
+        recognizing = true
+        defer { recognizing = false }
+        do {
+            if let name = try await recognizeName(newImage), !name.isEmpty {
+                if newName.trimmingCharacters(in: .whitespaces).isEmpty { newName = name }
+                errorMessage = nil
+            } else {
+                errorMessage = "照片裡辨識不出商品名稱，請手動輸入。"
+            }
+        } catch let error as ProductExtractionError {
+            errorMessage = error.userMessage
+        } catch let error as BackendError {
+            errorMessage = "辨識失敗：\(error.userMessage)"
+        } catch {
+            errorMessage = "辨識失敗：\(userMessage(for: error))"
+        }
     }
 
     private func add() async {

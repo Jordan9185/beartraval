@@ -45,6 +45,29 @@ public enum ScreenshotText {
         public var otherLines: [String]
         /// 從關鍵字（含 hashtag）猜的收藏類別；看不出來時為 nil。
         public var category: SavedCategory?
+        /// 地址（或截圖內容）看起來是哪個國家（ISO 代碼）；看不出來時為 nil。
+        public var country: String?
+    }
+
+    /// 中文寫的地名也要認得：台灣人分享的韓國店常寫「首爾明洞…」。
+    static let countryHints: [(String, [String])] = [
+        ("KR", ["首爾", "首尔", "釜山", "仁川", "大邱", "大田", "光州", "蔚山", "濟州", "济州", "京畿", "江原道", "南韓", "韓國", "韩国",
+                "明洞", "弘大", "江南區", "聖水", "東大門", "梨泰院", "Seoul", "Busan", "Jeju", "South Korea"]),
+        ("JP", ["東京", "大阪", "京都", "北海道", "沖繩", "沖縄", "福岡", "名古屋", "橫濱", "横浜", "神戶", "神戸", "奈良", "日本",
+                "Tokyo", "Osaka", "Kyoto", "Japan"]),
+        ("TW", ["台北", "臺北", "新北", "桃園", "台中", "臺中", "台南", "臺南", "高雄", "Taipei", "Taiwan"]),
+        ("HK", ["香港", "九龍", "新界", "Hong Kong"]),
+    ]
+
+    /// 先看地址（最準），再看整張截圖：韓文就是韓國；再來是城市名；最後才看假名
+    /// （台灣貼文常用「の」當「的」，單看假名會誤判成日本）。
+    public static func country(from lines: [String], address: String?) -> String? {
+        for text in [address, lines.joined(separator: " ")].compactMap({ $0 }) {
+            if PlaceNaming.hasHangul(text) { return "KR" }
+            if let hit = countryHints.first(where: { $0.1.contains { text.localizedCaseInsensitiveContains($0) } }) { return hit.0 }
+            if PlaceNaming.hasKana(text.replacingOccurrences(of: "の", with: "")) { return "JP" }
+        }
+        return nil
     }
 
     /// 咖啡要排在美食前面：「咖啡廳美食」這類貼文通常是咖啡廳。
@@ -69,7 +92,7 @@ public enum ScreenshotText {
         }
         name = name ?? candidates.first
         return Guess(name: name, address: address, otherLines: Array(candidates.filter { $0 != name }.prefix(8)),
-                     category: category(from: lines))
+                     category: category(from: lines), country: country(from: lines, address: address))
     }
 
     static func isAddress(_ line: String) -> Bool {
@@ -77,7 +100,8 @@ public enum ScreenshotText {
             #"(특별시|광역시|[가-힣]+도|[가-힣]+[시군구])\s*.*[가-힣0-9]+(로|길)\s*\d+"#,  // 韓國道路名地址
             #"[가-힣]+(동|읍|면)\s*\d+(-\d+)?"#,                                          // 韓國地號地址
             #"〒?\s*\d{3}-\d{4}"#,                                                         // 日本郵遞區號
-            #"(東京都|北海道|大阪府|京都府|.{1,3}県).*(市|区|町|村)"#,                         // 日本都道府縣
+            #"(東京都|北海道|大阪府|京都府|.{1,3}[県縣]).*(市|区|區|町|村)"#,                  // 日本都道府縣（含中文寫法）
+            #"(首爾|首尔|釜山|仁川|大邱|大田|光州|蔚山|濟州|济州).{0,20}(路|街|洞|里|길|로)\s*\d+"#,  // 中文寫的韓國地址
             #"(市|縣|區).*(路|街|道|巷).*\d+\s*號"#,                                        // 台灣
             #"\d+\s+[A-Za-z .]+(Street|St\.?|Road|Rd\.?|Avenue|Ave\.?|-ro|-gil)\b"#,         // 英文
         ]

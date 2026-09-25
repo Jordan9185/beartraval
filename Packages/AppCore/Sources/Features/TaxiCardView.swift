@@ -6,7 +6,7 @@ import UIKit
 
 /// 「給司機看」全螢幕卡片：上半部大字給司機（當地語言），下半部中文對照給使用者確認。
 struct TaxiCardView: View {
-    let card: TaxiCard
+    @State var card: TaxiCard
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -61,6 +61,13 @@ struct TaxiCardView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .padding()
+        }
+        // 舊資料的地址可能是中文：打開時用當地語言反查一次（離線時維持原本的地址與提醒）。
+        .task {
+            guard card.needsLocalAddress, let latitude = card.latitude, let longitude = card.longitude,
+                  let local = await LocalAddress.lookup(latitude: latitude, longitude: longitude, countryCode: card.countryCode, knownAddress: nil)
+            else { return }
+            card.useLocalAddress(local)
         }
         #if canImport(UIKit)
         // 出示給司機時螢幕不要自動變暗。

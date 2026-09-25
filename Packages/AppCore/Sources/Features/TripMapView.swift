@@ -179,7 +179,7 @@ struct PinDetailView: View {
                 if pin.place.isInKorea {
                     Section("在地地圖") {
                         LocalMapButtons(destination: pin.place.mapPoint, origin: nil,
-                                        mode: snapshot.timeline[safe: dayIndex]?.day.transportMode ?? .transit, address: pin.place.address)
+                                        mode: snapshot.timeline[safe: dayIndex]?.day.transportMode ?? .transit, address: pin.place.localAddress)
                     }
                 }
             }

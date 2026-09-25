@@ -57,4 +57,31 @@ struct TaxiCardTests {
         #expect(TaxiCard.language(for: "TW") == .chinese)
         #expect(TaxiCard.language(for: nil) == .english)
     }
+
+    @Test func prefersLocalAddressOverChineseOne() {
+        var p = place("明洞餃子", local: "명동교자 본점", zh: nil, address: "南韓首爾特別市明洞명동10길", country: "KR")
+        let chinese = TaxiCard(place: p)
+        #expect(chinese.address == "南韓首爾特別市明洞명동10길")
+        #expect(chinese.needsLocalAddress)
+        #expect(chinese.warnings.contains(TaxiCard.foreignAddressWarning))
+
+        var fixed = chinese
+        fixed.useLocalAddress("서울특별시 중구 명동10길 29")
+        #expect(fixed.address == "서울특별시 중구 명동10길 29" && !fixed.warnings.contains(TaxiCard.foreignAddressWarning))
+
+        p.addressLocal = "서울특별시 중구 명동10길 29"
+        let local = TaxiCard(place: p)
+        #expect(local.address == "서울특별시 중구 명동10길 29")
+        #expect(!local.needsLocalAddress && local.warnings.isEmpty)
+    }
+
+    @Test func localAddressDetection() {
+        #expect(LocalAddress.isLocal("서울특별시 중구 명동10길 29", countryCode: "KR"))
+        #expect(!LocalAddress.isLocal("南韓首爾特別市明洞명동10길", countryCode: "KR"))
+        #expect(!LocalAddress.isLocal("Myeongdong 10-gil, Seoul", countryCode: "KR"))
+        #expect(LocalAddress.isLocal("〒160-0023 東京都新宿区西新宿1-1", countryCode: "JP"))
+        #expect(!LocalAddress.isLocal("日本東京都新宿區西新宿1-1", countryCode: "JP"))
+        #expect(LocalAddress.isLocal("台北市信義區松仁路 58 號", countryCode: "TW"))
+        #expect(LocalAddress.stripCountry("대한민국 서울특별시 명동 명동10길") == "서울특별시 명동 명동10길")
+    }
 }

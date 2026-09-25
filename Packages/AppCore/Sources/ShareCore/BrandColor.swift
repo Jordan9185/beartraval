@@ -26,7 +26,7 @@ public struct ErrorText: View {
     }
 
     public var body: some View {
-        ErrorText(message)
+        Text(message).foregroundStyle(.red)
     }
 }
 

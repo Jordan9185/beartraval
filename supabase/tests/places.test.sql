@@ -68,3 +68,14 @@ select app.upsert_place('apple_mapkit', 'tower', 'N Seoul Tower', 37.5512, 126.9
 reset role;
 select tests.ok((select name_zh is null and name_local is null from app.places where id = :'tower_id'),
                 'stranger cannot rename a place other trips use');
+
+-- The local-language address follows the same rules: set on insert, a missing
+-- one can be filled in, an existing one is never overwritten.
+set role authenticated;
+select tests.login(:'owner');
+select app.upsert_place('apple_mapkit', 'kyoja2', 'Myeongdong Kyoja', 37.5625, 126.9856, null, '南韓首爾特別市明洞명동10길', 'KR');
+select app.upsert_place('apple_mapkit', 'kyoja2', 'Myeongdong Kyoja', 37.5625, 126.9856, null, null, 'KR', null, '서울특별시 중구 명동10길 29');
+select app.upsert_place('apple_mapkit', 'kyoja2', 'Myeongdong Kyoja', 37.5625, 126.9856, null, null, 'KR', null, '다른 주소');
+reset role;
+select tests.ok((select address = '南韓首爾特別市明洞명동10길' and address_local = '서울특별시 중구 명동10길 29'
+                   from app.places where provider_place_id = 'kyoja2'), 'local address filled once, not overwritten');

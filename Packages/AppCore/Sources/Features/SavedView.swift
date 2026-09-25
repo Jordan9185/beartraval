@@ -283,7 +283,7 @@ struct SavedDetailView: View {
                 }
                 if let place = entry.place, place.isInKorea {
                     Section("在地地圖") {
-                        LocalMapButtons(destination: place.mapPoint, origin: nil, mode: .walking, address: place.address)
+                        LocalMapButtons(destination: place.mapPoint, origin: nil, mode: .walking, address: place.localAddress)
                     }
                 }
             }
