@@ -232,7 +232,7 @@ struct DayMatchRow: View {
                 .foregroundStyle(.secondary)
         }
         if match.excludedPendingCount > 0 {
-            Text("\(match.excludedPendingCount) 個待確認地點未計入").font(.caption).foregroundStyle(.secondary)
+            Text("\(match.excludedPendingCount) 個未定位的地點未計入").font(.caption).foregroundStyle(.secondary)
         }
         if match.best == nil && candidate.point.isInKorea {
             LocalMapButtons(destination: candidate.mapPoint, origin: previousStop, mode: match.mode, address: candidate.address)
@@ -267,5 +267,38 @@ struct LocalMapButtons: View {
         let installed = false
         #endif
         openURL(installed ? link.routeURL(app, from: origin, to: destination, mode: mode) : link.webFallbackURL(app, destination: destination))
+    }
+}
+
+/// Apple 地圖沒收錄的地點：用當地常用的地圖以名稱搜尋（韓國 Naver／Kakao，其他 Google 地圖）。
+/// 只負責開啟，不讀回座標或分鐘數。
+struct LocalMapSearchButtons: View {
+    let name: String
+    let countryCode: String?
+    @Environment(\.openURL) private var openURL
+
+    private var link: LocalMapLink { LocalMapLink(appName: Bundle.main.bundleIdentifier ?? "beartravel") }
+
+    var body: some View {
+        if countryCode == "KR" {
+            Button("在 Naver 地圖查看", systemImage: "map") { open(.naver) }
+            Button("在 Kakao 地圖查看", systemImage: "map") { open(.kakao) }
+        } else {
+            Button("在 Google 地圖查看", systemImage: "map") {
+                openURL(LocalMapLink.googleSearchURL(query: name, appInstalled: installed("comgooglemaps")))
+            }
+        }
+    }
+
+    private func open(_ app: LocalMapApp) {
+        openURL(installed(app.scheme) ? link.searchURL(app, query: name) : link.webSearchURL(app, query: name))
+    }
+
+    private func installed(_ scheme: String) -> Bool {
+        #if canImport(UIKit)
+        UIApplication.shared.canOpenURL(URL(string: "\(scheme)://")!)
+        #else
+        false
+        #endif
     }
 }

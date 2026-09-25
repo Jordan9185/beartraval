@@ -237,7 +237,8 @@ struct TripDetailView: View {
             StopDetailView(stop: stop, place: stop.placeId.flatMap { places[$0] },
                            mode: timeline.first { $0.id == stop.dayId }?.day.transportMode ?? .transit,
                            previous: previousPlace(before: stop),
-                           editing: editingContext(for: stop))
+                           editing: editingContext(for: stop),
+                           timeZone: timeline.first { $0.id == stop.dayId }?.day.timeZone)
                 .presentationDetents([.medium])
         }
         .navigationTitle(trip.name)
@@ -358,8 +359,10 @@ struct StopDetailView: View {
     let place: Place?
     let mode: TravelMode
     let previous: Place?
-    /// Owner／Editor 才有；待確認的地點可以在這裡確認、改字或移除。
+    /// Owner／Editor 才有；未定位的地點可以在這裡定位、改字或移除。
     var editing: StopEditingContext? = nil
+    /// 當天時區，用來推測未定位地點在哪個國家、該開哪個當地地圖。
+    var timeZone: String? = nil
     @Environment(\.dismiss) private var dismissDetail
 
     var body: some View {
@@ -371,7 +374,16 @@ struct StopDetailView: View {
                     if let start = stop.startTime { LabeledContent("時間", value: LocalTime.hourMinute(start)) }
                     if let dwell = stop.dwellMinutes { LabeledContent("停留", value: "\(dwell) 分") }
                     LabeledContent("類型", value: stop.fixed ? "固定" : "彈性")
-                    if place == nil { Text("地點待確認，不參與路線").foregroundStyle(.orange) }
+                    if place == nil { Text("未定位，不計入路線").font(.caption).foregroundStyle(.secondary) }
+                }
+                if place == nil {
+                    Section {
+                        LocalMapSearchButtons(name: stop.rawLabel, countryCode: LocalMapCountry.guess(name: stop.rawLabel, timeZone: timeZone))
+                    } header: {
+                        Text("當地地圖")
+                    } footer: {
+                        Text("Apple 地圖沒收錄時，可以用當地地圖查看位置與營業資訊。")
+                    }
                 }
                 if place == nil, let editing {
                     PendingStopActions(context: editing, stop: stop) { dismissDetail() }
@@ -412,8 +424,8 @@ struct StopRow: View {
                     }
                 }
                 if !stop.isRoutable {
-                    Label("地點待確認，不參與路線", systemImage: "questionmark.circle")
-                        .font(.caption).foregroundStyle(.orange)
+                    Label("未定位，不計入路線", systemImage: "mappin.slash")
+                        .font(.caption).foregroundStyle(.secondary)
                 } else if let address = place?.address {
                     Text(address).font(.caption).foregroundStyle(.secondary)
                 }
@@ -435,7 +447,7 @@ struct RouteStatusRow: View {
                 Text(summary)
             }
             if day.pendingCount > 0 {
-                Text("\(day.pendingCount) 個待確認地點未計入").font(.caption)
+                Text("\(day.pendingCount) 個未定位的地點未計入").font(.caption)
             }
         }
         .foregroundStyle(.secondary)

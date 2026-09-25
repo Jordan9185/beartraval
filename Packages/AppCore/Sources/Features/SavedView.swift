@@ -192,7 +192,7 @@ struct SavedRow: View {
                     .background(.quaternary, in: Capsule())
             }
             if !entry.isConfirmed {
-                Label("地點待確認，不參與路線", systemImage: "questionmark.circle").font(.caption).foregroundStyle(.orange)
+                Label("未定位，不計入路線", systemImage: "mappin.slash").font(.caption).foregroundStyle(.secondary)
             } else if entry.saved.status == .addedToItinerary {
                 Label("已加入行程", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.secondary)
             }

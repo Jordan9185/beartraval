@@ -50,6 +50,8 @@ public struct ParsedStop: Codable, Hashable, Sendable {
     public var branchHint: String?
     /// 地點所在城市（英文，例如 "Onomichi"），用來把地圖搜尋限定在那一帶。
     public var city: String?
+    /// 地點所在國家（ISO 3166-1 alpha-2），決定找不到時開哪個當地地圖。
+    public var countryCode: String?
     public var searchQuery: String?
     public var category: String
     public var startTime: String?
@@ -80,6 +82,7 @@ public struct ParsedStop: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case category, confidence, city
+        case countryCode = "country_code"
         case sourceExcerpt = "source_excerpt"
         case placeName = "place_name"
         case branchHint = "branch_hint"

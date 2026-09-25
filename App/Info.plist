@@ -41,6 +41,7 @@
 	<array>
 		<string>nmap</string>
 		<string>kakaomap</string>
+		<string>comgooglemaps</string>
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>

@@ -154,7 +154,8 @@ struct TodayView: View {
                                                                                        searchCenter: Coordinate.center(of: Array(snapshot.places.values))) {
                                selectedStop = nil
                                Task { await store.reload() }
-                           } : nil)
+                           } : nil,
+                           timeZone: day.day.timeZone)
                 .presentationDetents([.medium, .large])
         }
         .sheet(item: $adding) { entry in

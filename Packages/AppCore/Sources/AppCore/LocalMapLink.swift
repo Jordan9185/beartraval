@@ -135,3 +135,42 @@ public struct LocalMapLink: Sendable {
         return components.url!
     }
 }
+
+// MARK: - 找不到的地點：用當地地圖搜尋
+
+/// 推測地點所在國家（ISO 3166-1 alpha-2），決定要提供哪個當地地圖。
+public enum LocalMapCountry {
+    /// 名稱有韓文就是韓國、有假名就是日本；否則看當天時區。
+    public static func guess(name: String, timeZone: String?) -> String? {
+        let scalars = name.unicodeScalars
+        if scalars.contains(where: { (0xAC00...0xD7A3).contains($0.value) || (0x1100...0x11FF).contains($0.value) }) { return "KR" }
+        if scalars.contains(where: { (0x3040...0x30FF).contains($0.value) }) { return "JP" }
+        guard let timeZone else { return nil }
+        return TripTimeZones.byCountry.first { $0.value == timeZone }?.key
+    }
+}
+
+extension LocalMapLink {
+    /// 在地 App 沒安裝時的網頁版搜尋。
+    public func webSearchURL(_ app: LocalMapApp, query: String) -> URL {
+        switch app {
+        case .naver:
+            var components = URLComponents(string: "https://map.naver.com")!
+            components.path = "/p/search/" + query
+            return components.url!
+        case .kakao:
+            var components = URLComponents(string: "https://map.kakao.com/")!
+            components.queryItems = [URLQueryItem(name: "q", value: query)]
+            return components.url!
+        }
+    }
+
+    /// Google 地圖搜尋（日本等韓國以外的地方最常用）。有裝 App 就開 App。
+    public static func googleSearchURL(query: String, appInstalled: Bool) -> URL {
+        var components = URLComponents(string: appInstalled ? "comgooglemaps://" : "https://www.google.com/maps/search/")!
+        components.queryItems = appInstalled
+            ? [URLQueryItem(name: "q", value: query)]
+            : [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "query", value: query)]
+        return components.url!
+    }
+}

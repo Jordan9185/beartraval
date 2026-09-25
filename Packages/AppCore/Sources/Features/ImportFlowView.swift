@@ -45,6 +45,7 @@ public struct ImportFlowView: View {
                     ConfirmPlacesView(state: confirm, rawText: session.rawText, placeSearch: placeSearch,
                                       city: session.parseResult?.draft.cityCandidates.first,
                                       warnings: session.parseResult?.draft.warnings ?? [],
+                                      timeZone: session.timeZone,
                                       isCommitting: phase == .committing, errorMessage: errorMessage) {
                         Task { await commit() }
                     }
@@ -178,6 +179,7 @@ struct ConfirmPlacesView: View {
     let placeSearch: any PlaceSearching
     let city: String?
     let warnings: [String]
+    var timeZone: String? = nil
     let isCommitting: Bool
     let errorMessage: String?
     let onSubmit: () -> Void
@@ -192,14 +194,14 @@ struct ConfirmPlacesView: View {
                     }
                 }
                 if state.undecidedCount > 0 {
-                    Button("其餘 \(state.undecidedCount) 項先保留為文字，之後再確認") { state.keepUndecidedAsText() }
+                    Button("其餘 \(state.undecidedCount) 項先只保留名稱") { state.keepUndecidedAsText() }
                         .accessibilityIdentifier("keepUndecided")
                 }
                 if state.unconfirmedFixedCount > 0 {
                     Button("疑似固定的 \(state.unconfirmedFixedCount) 項都設為固定") { state.confirmSuspectedFixed() }
                 }
             } footer: {
-                Text("只有名稱明確相符才會自動選定。其他地點由你選，或先保留為文字（不參與路線），之後在行程裡再確認。")
+                Text("只有名稱明確相符才會自動選定。其他地點由你選，或只保留名稱（不計入路線，可用當地地圖查看）。")
             }
             if !warnings.isEmpty {
                 Section {
@@ -218,7 +220,7 @@ struct ConfirmPlacesView: View {
             // 只把需要使用者決定的項目攤開；App 代為處理的收在下面，可點開檢查或修改。
             ForEach(attention, id: \.self) { index in
                 Section {
-                    ConfirmItemView(item: $state.items[index], tripDates: state.tripDates)
+                    ConfirmItemView(item: $state.items[index], tripDates: state.tripDates, timeZone: timeZone)
                 } header: {
                     Text(state.items[index].date ?? "日期未定")
                 }
@@ -233,12 +235,12 @@ struct ConfirmPlacesView: View {
                 Section {
                     DisclosureGroup("已自動處理 \(handled.count) 項") {
                         ForEach(handled, id: \.self) { index in
-                            ConfirmItemView(item: $state.items[index], tripDates: state.tripDates)
+                            ConfirmItemView(item: $state.items[index], tripDates: state.tripDates, timeZone: timeZone)
                         }
                     }
                     .accessibilityIdentifier("autoHandled")
                 } footer: {
-                    Text("名稱相符的地點已自動選定；Apple 地圖找不到的、航班等先保留為文字。點開可以修改。")
+                    Text("名稱相符的地點已自動選定；Apple 地圖找不到的、航班等只保留名稱。點開可以修改。")
                 }
             }
             Section {
@@ -323,6 +325,7 @@ struct ConfirmPlacesView: View {
 struct ConfirmItemView: View {
     @Binding var item: ConfirmItem
     let tripDates: [String]
+    var timeZone: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -376,14 +379,19 @@ struct ConfirmItemView: View {
             .accessibilityIdentifier("candidate-\(item.id)-\(option.name)")
         }
         if item.searched && item.candidates.isEmpty && item.needsSearch {
-            Text("Apple 地圖找不到這個地點，可以先保留為文字，之後在行程裡再確認。").font(.caption).foregroundStyle(.secondary)
+            Text("Apple 地圖沒收錄這個地點。").font(.caption).foregroundStyle(.secondary)
+        }
+        if item.searched && item.needsSearch && (item.candidates.isEmpty || item.decision == .pendingText) {
+            LocalMapSearchButtons(name: item.label, countryCode: item.stop.countryCode
+                                  ?? LocalMapCountry.guess(name: (item.stop.searchQuery ?? "") + item.label, timeZone: timeZone))
+                .font(.callout)
         }
 
         HStack {
             Button {
                 item.decision = .pendingText
             } label: {
-                Label("保留為待確認文字", systemImage: item.decision == .pendingText ? "checkmark.circle.fill" : "text.bubble")
+                Label("只保留名稱", systemImage: item.decision == .pendingText ? "checkmark.circle.fill" : "text.bubble")
             }
             .accessibilityIdentifier("pending-\(item.id)")
             Spacer()
@@ -401,7 +409,7 @@ struct ConfirmItemView: View {
     private var autoNote: String? {
         switch item.decision {
         case .place(let option): "名稱相符，已自動選定：\(option.displayTitle)"
-        case .pendingText: item.needsSearch ? "Apple 地圖找不到，已保留為文字" : "不是地點（航班、交通等），保留為文字"
+        case .pendingText: item.needsSearch ? "Apple 地圖沒收錄，已保留名稱，可用當地地圖查看" : "航班、交通等，保留名稱"
         default: nil
         }
     }

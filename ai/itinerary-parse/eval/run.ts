@@ -36,6 +36,7 @@ function draftFromExpectations(c: EvalCase): ParseResult {
       place_name: e.aliases[0]!,
       branch_hint: null,
       city: null,
+      country_code: null,
       search_query: null,
       category: "place",
       start_time: e.start_time ?? null,

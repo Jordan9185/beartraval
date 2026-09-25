@@ -136,7 +136,7 @@ public struct ShareFlowView: View {
                 }
             }
             if searched && candidates.isEmpty {
-                Text("找不到符合的地點；仍可先收藏為「地點待確認」。").font(.caption).foregroundStyle(.secondary)
+                Text("Apple 地圖找不到；仍可先收藏名稱，之後再定位。").font(.caption).foregroundStyle(.secondary)
             }
         } header: {
             Text("地點")
@@ -191,7 +191,7 @@ public struct ShareFlowView: View {
             Button(busy ? "處理中…" : "先收藏") { Task { await save() } }
                 .disabled(busy || tripID == nil || (selected == nil && query.trimmingCharacters(in: .whitespaces).isEmpty))
         } footer: {
-            Text(selected == nil ? "未選地點時會收藏為「地點待確認」，之後可補填，不會參與路線計算。" : "收藏到共同的收藏清單，不會改動正式行程。")
+            Text(selected == nil ? "未選地點時只收藏名稱，之後可補定位；未定位前不計入路線。" : "收藏到共同的收藏清單，不會改動正式行程。")
         }
     }
 

@@ -36,6 +36,9 @@ export const ParsedStop = z.object({
   branch_hint: z.string().nullable(),
   // City, town or island in English ("Seoul", "Onomichi"); scopes the map search.
   city: z.string().nullable(),
+  // ISO 3166-1 alpha-2 ("KR", "JP") of the place; picks the local map app when
+  // Apple Maps can't find it.
+  country_code: z.string().nullable(),
   // Query for the place lookup in the place's local language, e.g. "마뗑킴 성수";
   // null for transport legs.
   search_query: z.string().nullable(),

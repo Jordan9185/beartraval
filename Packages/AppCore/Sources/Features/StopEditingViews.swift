@@ -57,7 +57,7 @@ struct PendingStopActions: View {
     var body: some View {
         Section {
             NavigationLink { ResolveStopSheet(context: context, stop: stop, onDone: close) } label: {
-                Label("確認地點", systemImage: "mappin.and.ellipse")
+                Label("在 Apple 地圖定位", systemImage: "mappin.and.ellipse")
             }
             NavigationLink { RenameStopView(context: context, stop: stop, onDone: close) } label: {
                 Label("修改文字", systemImage: "pencil")
@@ -68,9 +68,9 @@ struct PendingStopActions: View {
                 }
             if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
         } header: {
-            Text("這個地點還沒確認")
+            Text("編輯")
         } footer: {
-            Text("確認地點後才會參與路線計算。")
+            Text("在 Apple 地圖定位後，才會計入路線時間。")
         }
     }
 

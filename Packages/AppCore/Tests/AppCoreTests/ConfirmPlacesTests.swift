@@ -165,3 +165,22 @@ struct ConfirmPlacesTests {
         #expect(state.needsAttention == [1, 2, 3])  // 3 還沒有日期（10/9 不在旅程內）
     }
 }
+
+struct LocalMapSearchTests {
+    @Test func countryFromScriptThenTimeZone() {
+        #expect(LocalMapCountry.guess(name: "마뗑킴 성수", timeZone: "Asia/Tokyo") == "KR")
+        #expect(LocalMapCountry.guess(name: "ホテル広島空港", timeZone: "Asia/Seoul") == "JP")
+        #expect(LocalMapCountry.guess(name: "MAKMADE", timeZone: "Asia/Seoul") == "KR")
+        #expect(LocalMapCountry.guess(name: "大三島", timeZone: "Asia/Tokyo") == "JP")
+        #expect(LocalMapCountry.guess(name: "MAKMADE", timeZone: nil) == nil)
+    }
+
+    @Test func searchLinks() {
+        let link = LocalMapLink(appName: "com.example")
+        #expect(link.webSearchURL(.kakao, query: "The Barnnet").absoluteString == "https://map.kakao.com/?q=The%20Barnnet")
+        #expect(link.webSearchURL(.naver, query: "계루").absoluteString == "https://map.naver.com/p/search/%EA%B3%84%EB%A3%A8")
+        #expect(LocalMapLink.googleSearchURL(query: "Azumi Setoda", appInstalled: false).absoluteString
+                == "https://www.google.com/maps/search/?api=1&query=Azumi%20Setoda")
+        #expect(LocalMapLink.googleSearchURL(query: "尾道", appInstalled: true).absoluteString.hasPrefix("comgooglemaps://?q="))
+    }
+}

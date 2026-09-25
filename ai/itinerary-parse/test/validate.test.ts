@@ -20,6 +20,7 @@ function stop(overrides: Partial<ParsedStop> = {}): ParsedStop {
     place_name: "XXX Shoes",
     branch_hint: null,
     city: "Seoul",
+    country_code: "KR",
     search_query: "XXX Shoes Seoul",
     category: "shop",
     start_time: "14:00",
