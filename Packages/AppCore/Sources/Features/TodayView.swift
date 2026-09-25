@@ -14,6 +14,7 @@ struct TodayView: View {
     @State private var adding: SavedEntry?
     @State private var showsAssistant = false
     @State private var showsAccount = false
+    @State private var selectedStop: Stop?
 
     /// 順路門檻：加入後多花不超過此分鐘數才算「順路」。
     static let nearbyThresholdMinutes = 20
@@ -78,12 +79,13 @@ struct TodayView: View {
                     Text("今天沒有行程").foregroundStyle(.secondary)
                 }
                 ForEach(day.stops) { stop in
-                    HStack {
+                    Button { selectedStop = stop } label: { HStack {
                         Text(stop.startTime.map(LocalTime.hourMinute) ?? "--:--").monospacedDigit().foregroundStyle(.secondary)
                         Text(stop.placeId.flatMap { snapshot.places[$0] }.map { $0.displayTitle(fallbackChinese: stop.rawLabel) } ?? stop.rawLabel)
                         if stop.fixed { Image(systemName: "lock.fill").font(.caption).foregroundStyle(.orange).accessibilityLabel("固定") }
                         if stop.kind == .purchase { Image(systemName: "bag").font(.caption) }
-                    }
+                    } }
+                    .buttonStyle(.plain)
                 }
                 NavigationLink("完整行程") { TripDetailView(session: session, trip: snapshot.trip) }
             } header: {
@@ -134,6 +136,11 @@ struct TodayView: View {
             }
         }
         .task(id: "\(snapshot.revision)-\(index)") { await computeNearby(snapshot, index) }
+        .sheet(item: $selectedStop) { stop in
+            StopDetailView(stop: stop, place: stop.placeId.flatMap { snapshot.places[$0] }, mode: day.day.transportMode,
+                           previous: day.stops.prefix { $0.id != stop.id }.last(where: \.isRoutable)?.placeId.flatMap { snapshot.places[$0] })
+                .presentationDetents([.medium, .large])
+        }
         .sheet(item: $adding) { entry in
             if let place = entry.place {
                 ProposalReviewView(session: session, tripID: snapshot.trip.id, dayID: day.day.id, dayTitle: "第 \(index + 1) 天",

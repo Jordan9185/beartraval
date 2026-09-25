@@ -328,6 +328,9 @@ struct StopDetailView: View {
                     LabeledContent("類型", value: stop.fixed ? "固定" : "彈性")
                     if place == nil { Text("地點待確認，不參與路線").foregroundStyle(.orange) }
                 }
+                if let place {
+                    Section { TaxiCardButton(place: place, fallbackChineseLabel: stop.rawLabel) }
+                }
                 if let place, place.isInKorea {
                     Section("在地地圖") {
                         LocalMapButtons(destination: place.mapPoint, origin: previous?.mapPoint, mode: mode, address: place.address)

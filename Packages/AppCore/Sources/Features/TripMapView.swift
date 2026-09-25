@@ -133,8 +133,9 @@ struct PinDetailView: View {
                         if pin.dimmed { Text("這個商品已購買").font(.caption).foregroundStyle(.secondary) }
                     }
                 }
-                if case .stop = pin.kind {} else {
-                    Section { Button("試算順路") { showsRoute = true } }
+                Section {
+                    TaxiCardButton(place: pin.place)
+                    if case .stop = pin.kind {} else { Button("試算順路") { showsRoute = true } }
                 }
                 if pin.place.isInKorea {
                     Section("在地地圖") {

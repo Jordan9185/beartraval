@@ -199,6 +199,10 @@ struct SavedRow: View {
             if let source = entry.source, let url = source.url.flatMap(URL.init(string:)) {
                 Link(url.host ?? url.absoluteString, destination: url).font(.caption)
             }
+            if let place = entry.place {
+                TaxiCardButton(place: place, fallbackChineseLabel: entry.saved.rawLabel)
+                    .font(.caption).buttonStyle(.borderless)
+            }
             HStack(spacing: 16) {
                 Text(entry.saved.addedBy == nil ? "已刪除帳號的成員新增" : entry.saved.addedBy == me ? "你新增" : "旅伴新增").font(.caption).foregroundStyle(.secondary)
                 Button {
