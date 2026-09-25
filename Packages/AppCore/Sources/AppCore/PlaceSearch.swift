@@ -48,7 +48,7 @@ public struct MapKitPlaceSearch: PlaceSearching {
         request.naturalLanguageQuery = [query, city].compactMap { $0 }.joined(separator: " ")
         request.resultTypes = [.pointOfInterest, .address]
         let items = await Self.run(request)
-        return items.prefix(limit).map { PlaceOption(draft: Self.draft(from: $0)) }
+        return items.prefix(limit).map { Self.option(from: $0) }
     }
 
     public func search(_ query: String, around center: Coordinate?, limit: Int = 5) async -> [PlaceOption] {
@@ -67,7 +67,7 @@ public struct MapKitPlaceSearch: PlaceSearching {
         // 只留範圍附近（100 km 內）的結果，其他國家的同名地點不列入候選。
         let origin = center.map { CLLocation(latitude: $0.latitude, longitude: $0.longitude) }
         let options = items.filter { item in origin.map { Self.location(item).distance(from: $0) < 100_000 } ?? true }
-            .prefix(limit).map { PlaceOption(draft: Self.draft(from: $0)) }
+            .prefix(limit).map { Self.option(from: $0) }
         return options.isEmpty ? .notFound : .found(Array(options))
     }
 
@@ -110,7 +110,7 @@ public struct MapKitPlaceSearch: PlaceSearching {
         let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
         return items
             .sorted { Self.location($0).distance(from: origin) < Self.location($1).distance(from: origin) }
-            .prefix(limit).map { PlaceOption(draft: Self.draft(from: $0)) }
+            .prefix(limit).map { Self.option(from: $0) }
     }
 
     static func location(_ item: MKMapItem) -> CLLocation {

@@ -1,4 +1,5 @@
 import Foundation
+import MapKit
 import Testing
 @testable import AppCore
 
@@ -23,5 +24,12 @@ struct NavigationTests {
         #expect(NearbyPlace(option: option, distanceMeters: 347).distanceText == "直線 350 公尺")
         #expect(NearbyPlace(option: option, distanceMeters: 1234).distanceText == "直線 1.2 公里")
         #expect(NearbyCategory.food.savedCategory == .eat)
+    }
+
+    @Test func mapCategoryBecomesSavedCategory() {
+        #expect(NearbyCategory(poi: .restaurant)?.savedCategory == .eat)
+        #expect(NearbyCategory(poi: .cafe)?.savedCategory == .cafe)
+        #expect(NearbyCategory(poi: .museum)?.savedCategory == .place)
+        #expect(NearbyCategory(poi: .parking) == nil)
     }
 }

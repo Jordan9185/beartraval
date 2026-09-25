@@ -1,3 +1,4 @@
+import AppCore
 import Foundation
 import Vision
 
@@ -42,6 +43,20 @@ public enum ScreenshotText {
         public var address: String?
         /// 其他可能是店名的文字列（給使用者點選）。
         public var otherLines: [String]
+        /// 從關鍵字（含 hashtag）猜的收藏類別；看不出來時為 nil。
+        public var category: SavedCategory?
+    }
+
+    /// 咖啡要排在美食前面：「咖啡廳美食」這類貼文通常是咖啡廳。
+    static let categoryKeywords: [(SavedCategory, [String])] = [
+        (.cafe, ["咖啡", "카페", "커피", "カフェ", "喫茶", "珈琲", "cafe", "café", "coffee"]),
+        (.eat, ["美食", "必吃", "餐廳", "小吃", "料理", "맛집", "식당", "レストラン", "食堂", "グルメ", "ラーメン", "restaurant"]),
+        (.shop, ["購物", "必買", "商店", "百貨", "쇼핑", "ショップ", "shopping"]),
+    ]
+
+    static func category(from lines: [String]) -> SavedCategory? {
+        let text = lines.joined(separator: " ").lowercased()
+        return categoryKeywords.first { $0.1.contains { text.contains($0) } }?.0
     }
 
     public static func guess(from lines: [String]) -> Guess {
@@ -53,7 +68,8 @@ public enum ScreenshotText {
             name = lines[..<index].reversed().first { candidates.contains($0) }
         }
         name = name ?? candidates.first
-        return Guess(name: name, address: address, otherLines: Array(candidates.filter { $0 != name }.prefix(8)))
+        return Guess(name: name, address: address, otherLines: Array(candidates.filter { $0 != name }.prefix(8)),
+                     category: category(from: lines))
     }
 
     static func isAddress(_ line: String) -> Bool {

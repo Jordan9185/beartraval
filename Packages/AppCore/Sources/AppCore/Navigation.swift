@@ -105,6 +105,21 @@ public enum NearbyCategory: String, CaseIterable, Sendable {
     }
 }
 
+extension NearbyCategory {
+    /// 地圖店家類型對應的分類；不在任何分類裡時為 nil。
+    init?(poi: MKPointOfInterestCategory) {
+        guard let match = Self.allCases.first(where: { $0.poiCategories.contains(poi) }) else { return nil }
+        self = match
+    }
+}
+
+extension MapKitPlaceSearch {
+    /// 候選附上店家類型，選定後可以直接帶入收藏類別。
+    static func option(from item: MKMapItem) -> PlaceOption {
+        PlaceOption(draft: draft(from: item), category: item.pointOfInterestCategory.flatMap(NearbyCategory.init(poi:))?.savedCategory)
+    }
+}
+
 public struct NearbyPlace: Identifiable, Equatable, Sendable {
     public var option: PlaceOption
     /// 與目前位置的直線距離（公尺）；不是路程時間。
@@ -131,7 +146,7 @@ extension MapKitPlaceSearch {
         request.pointOfInterestFilter = MKPointOfInterestFilter(including: category.poiCategories)
         let items = await Self.runPOI(request)
         return items
-            .map { NearbyPlace(option: PlaceOption(draft: Self.draft(from: $0)), distanceMeters: Self.location($0).distance(from: origin)) }
+            .map { NearbyPlace(option: Self.option(from: $0), distanceMeters: Self.location($0).distance(from: origin)) }
             .sorted { $0.distanceMeters < $1.distanceMeters }
             .prefix(limit).map { $0 }
     }

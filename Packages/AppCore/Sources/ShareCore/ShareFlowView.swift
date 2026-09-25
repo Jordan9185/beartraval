@@ -25,6 +25,8 @@ public struct ShareFlowView: View {
     @State private var readingScreenshot = false
     @State private var query: String
     @State private var category: SavedCategory = .place
+    /// 使用者自己選過類別後，不再用截圖文字或店家類型覆蓋。
+    @State private var categoryChosen = false
     @State private var candidates: [PlaceOption] = []
     @State private var searched = false
     @State private var selected: PlaceOption?
@@ -51,6 +53,13 @@ public struct ShareFlowView: View {
         _analysis = State(initialValue: analysis)
         _query = State(initialValue: analysis.suggestedQuery ?? "")
         _screenshot = State(initialValue: content.imageJPEG)
+        // 一開始就標成辨識中，登入檢查那段時間不會先閃出「沒有店名」的提醒。
+        _readingScreenshot = State(initialValue: Self.wantsScreenshotText(content.imageJPEG, analysis, query: analysis.suggestedQuery ?? ""))
+    }
+
+    /// 有截圖、文字又看不出店名時，才需要辨識截圖文字。
+    private static func wantsScreenshotText(_ screenshot: Data?, _ analysis: ShareAnalysis, query: String) -> Bool {
+        screenshot != nil && analysis.mapHint == nil && (query.isEmpty || !analysis.missing.isEmpty)
     }
 
     public var body: some View {
@@ -97,7 +106,7 @@ public struct ShareFlowView: View {
                 Text(excerpt).font(.subheadline).lineLimit(4)
             }
             // 截圖讀得到文字時，「拿不到貼文內容／沒有店名」的提醒就不適用。
-            if screenshotLines.isEmpty {
+            if screenshotLines.isEmpty && !readingScreenshot {
                 ForEach(Array(analysis.missing.enumerated()), id: \.offset) { _, missing in
                     Label(missingText(missing), systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
                 }
@@ -159,12 +168,13 @@ public struct ShareFlowView: View {
     private var placeSection: some View {
         Section {
             PlaceSearchField(text: $query) { Task { await search() } }
-            Picker("類別", selection: $category) {
+            Picker("類別", selection: Binding(get: { category }, set: { category = $0; categoryChosen = true })) {
                 ForEach(SavedCategory.allCases, id: \.self) { Text($0.displayName).tag($0) }
             }
             ForEach(candidates) { option in
                 Button {
                     selected = option
+                    if !categoryChosen, let kind = option.category { category = kind }
                     Task { await computeMatches() }
                 } label: {
                     PlaceOptionRow(title: option.displayTitle, address: option.address, selected: selected == option)
@@ -244,25 +254,29 @@ public struct ShareFlowView: View {
             analysis.missing = expandedAnalysis.missing
             if query.isEmpty { query = expandedAnalysis.suggestedQuery ?? "" }
         }
-        guard let repository, await repository.isSignedIn() else { signedIn = false; return }
+        guard let repository, await repository.isSignedIn() else { readingScreenshot = false; signedIn = false; return }
         do {
             trips = try await repository.editableTrips()
             signedIn = true
             tripID = Self.defaultTrip(trips)?.id
         } catch {
+            readingScreenshot = false
             signedIn = false
             return
         }
         // 有截圖、文字又看不出店名時，在裝置上辨識截圖文字。
-        if let screenshot, analysis.mapHint == nil, query.isEmpty || !analysis.missing.isEmpty {
+        if let screenshot, Self.wantsScreenshotText(screenshot, analysis, query: query) {
             readingScreenshot = true
             let lines = await ScreenshotText.recognize(jpeg: screenshot)
-            readingScreenshot = false
             let guess = ScreenshotText.guess(from: lines)
+            if !categoryChosen, let kind = guess.category { category = kind }
             screenshotAddress = guess.address
             screenshotLines = ([guess.name, guess.address].compactMap { $0 } + guess.otherLines)
                 .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
             if let best = guess.name ?? guess.address { query = best }
+            readingScreenshot = false
+        } else {
+            readingScreenshot = false
         }
         if let coordinate = analysis.mapHint?.coordinate, query.isEmpty {
             candidates = await placeSearch.nearby(coordinate, limit: 5)

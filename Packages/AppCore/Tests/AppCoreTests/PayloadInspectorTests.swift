@@ -102,6 +102,13 @@ struct ScreenshotTextTests {
     @Test func withoutAddressTheFirstMeaningfulLineIsTheName() {
         #expect(ScreenshotText.guess(from: ["12:03", "Follow", "Cafe Layered 연남", "1.2k"]).name == "Cafe Layered 연남")
     }
+
+    @Test func guessesCategoryFromKeywordsAndHashtags() {
+        #expect(ScreenshotText.guess(from: ["明洞必吃！排隊也值得", "명동교자 본점", "#明洞美食 #刀削麵"]).category == .eat)
+        #expect(ScreenshotText.guess(from: ["MAKMADE 성수", "#성수카페 #맛집"]).category == .cafe)
+        #expect(ScreenshotText.guess(from: ["Olive Young 명동", "#明洞必買"]).category == .shop)
+        #expect(ScreenshotText.guess(from: ["N서울타워", "서울특별시 용산구 남산공원길 105"]).category == nil)
+    }
 }
 
 #if canImport(AppKit)

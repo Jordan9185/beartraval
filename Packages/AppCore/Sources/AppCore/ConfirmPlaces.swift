@@ -6,9 +6,12 @@ public struct PlaceOption: Identifiable, Equatable, Sendable {
     public var id: String { draft.providerPlaceId }
     public var name: String { draft.name }
     public var address: String? { draft.address }
+    /// 地圖上的店家類型（餐廳、咖啡廳…）；不明時為 nil。
+    public var category: SavedCategory?
 
-    public init(draft: PlaceDraft) {
+    public init(draft: PlaceDraft, category: SavedCategory? = nil) {
         self.draft = draft
+        self.category = category
     }
 }
 

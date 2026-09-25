@@ -381,6 +381,8 @@ struct AddSavedPlaceView: View {
     let onDone: () -> Void
     @State private var query = ""
     @State private var category: SavedCategory = .place
+    /// 沒自己選類別時，用地圖上的店家類型（餐廳、咖啡廳…）。
+    @State private var categoryChosen = false
     @State private var results: [PlaceOption] = []
     @State private var searched = false
     @State private var searching = false
@@ -406,7 +408,7 @@ struct AddSavedPlaceView: View {
                 Section {
                     PlaceSearchField(text: $query, placeholder: "店名、地點，或貼上分享連結", isSearching: searching) { Task { await search() } }
                         .accessibilityIdentifier("savedQuery")
-                    Picker("類別", selection: $category) {
+                    Picker("類別", selection: Binding(get: { category }, set: { category = $0; categoryChosen = true })) {
                         ForEach(SavedCategory.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     }
                 }
@@ -488,7 +490,8 @@ struct AddSavedPlaceView: View {
         defer { saving = false }
         do {
             let placeID = if let option { try await session.trips.upsertPlace(option.draft).id } else { UUID?.none }
-            _ = try await session.trips.savePlace(tripID: tripID, label: option?.name ?? trimmed, category: category,
+            let kind = categoryChosen ? category : option?.category ?? category
+            _ = try await session.trips.savePlace(tripID: tripID, label: option?.name ?? trimmed, category: kind,
                                                   placeID: placeID, source: nil)
             onDone()
         } catch let error as BackendError {
