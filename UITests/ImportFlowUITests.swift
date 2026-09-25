@@ -44,16 +44,16 @@ final class ImportFlowUITests: XCTestCase {
         reveal(handled, in: app)
         XCTAssertFalse(app.buttons["candidate-0-광장시장"].exists, "自動處理的項目預設收起")
 
-        reveal(submit, in: app)
         XCTAssertFalse(submit.isEnabled, "分店未選時不能建立 Trip")
-        XCTAssertTrue(app.staticTexts["還有 1 項需要確認"].exists)
+        let remaining = app.staticTexts["還有 1 項需要確認"]
+        reveal(remaining, in: app)
 
         // 兩個分店都列出，選一個後才能提交。
         reveal(seongsu, in: app, up: true)
         XCTAssertTrue(app.buttons["candidate-1-XXX Shoes 명동점"].exists)
         seongsu.tap()
 
-        reveal(submit, in: app)
+        XCTAssertTrue(submit.waitForExistence(timeout: 2))
         XCTAssertTrue(submit.isEnabled)
         submit.tap()
         XCTAssertTrue(app.otherElements["tripCreated"].waitForExistence(timeout: 10)

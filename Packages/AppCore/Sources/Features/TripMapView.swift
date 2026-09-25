@@ -32,7 +32,7 @@ struct TripMapView: View {
                             CLLocationCoordinate2D(latitude: $0.place.latitude, longitude: $0.place.longitude)
                         }
                         if route.count > 1 {
-                            MapPolyline(coordinates: route).stroke(.blue.opacity(0.5), style: StrokeStyle(lineWidth: 3, dash: [6, 6]))
+                            MapPolyline(coordinates: route).stroke(Color.accentColor.opacity(0.5), style: StrokeStyle(lineWidth: 3, dash: [6, 6]))
                         }
                     }
                     .mapControls {
@@ -56,10 +56,7 @@ struct TripMapView: View {
                         }
                     }
                     .safeAreaInset(edge: .bottom) {
-                        VStack(spacing: 4) {
-                            LayerPicker(layers: $layers)
-                            Text("資料版本 r\(snapshot.revision)").font(.caption2).foregroundStyle(.secondary)
-                        }
+                        LayerPicker(layers: $layers)
                         .padding(8)
                         .background(.regularMaterial)
                     }
@@ -117,7 +114,7 @@ struct PinMarker: View {
             Circle().fill(color).frame(width: 28, height: 28)
             switch pin.kind {
             case .stop(_, let order, let fixed):
-                Text(fixed ? "🔒" : "\(order)").font(.caption.bold()).foregroundStyle(.white)
+                Group { if fixed { Image(systemName: "lock.fill") } else { Text("\(order)") } }.font(.caption.bold()).foregroundStyle(.white)
             case .saved:
                 Image(systemName: pin.layer == .food ? "fork.knife" : "bookmark.fill").font(.caption).foregroundStyle(.white)
             case .merchant:
@@ -128,14 +125,9 @@ struct PinMarker: View {
         .accessibilityLabel(pin.title)
     }
 
+    /// 只用兩色：今日路線用主色，其他圖層灰色；圖層差別由圖示表達（樣式指南）。
     private var color: Color {
-        switch pin.layer {
-        case .todayRoute: .blue
-        case .otherDays: .gray
-        case .saved: .purple
-        case .food: .orange
-        case .shopping: .green
-        }
+        pin.layer == .todayRoute ? .accentColor : Color(white: 0.55)
     }
 }
 
@@ -171,10 +163,10 @@ struct PinDetailView: View {
         NavigationStack {
             Form {
                 Section {
-                    Text(pin.title).font(.headline)
+                    Text(pin.title).font(.title3.weight(.semibold))
                     if let address = pin.place.address { Text(address).font(.caption).foregroundStyle(.secondary) }
                     if case .merchant = pin.kind {
-                        Text("可能販售 · 庫存未知").font(.caption).foregroundStyle(.orange)
+                        Text("可能販售 · 庫存未知").font(.caption).foregroundStyle(.secondary)
                         if pin.dimmed { Text("這個商品已購買").font(.caption).foregroundStyle(.secondary) }
                     }
                 }

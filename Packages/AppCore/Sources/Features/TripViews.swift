@@ -1,4 +1,5 @@
 import AppCore
+import ShareCore
 import SwiftUI
 
 /// Trip 分頁：列出自己參與的 Trip，可建立空 Trip。
@@ -16,12 +17,12 @@ struct TripListView: View {
         NavigationStack {
             List {
                 if let errorMessage {
-                    Text(errorMessage).foregroundStyle(.red)
+                    ErrorText(errorMessage)
                 }
                 ForEach(trips) { trip in
                     NavigationLink(value: trip) {
                         VStack(alignment: .leading) {
-                            Text(trip.name).font(.headline)
+                            Text(trip.name)
                             Text("\(trip.startDate) – \(trip.endDate) · \(trip.timeZone)")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
@@ -31,9 +32,13 @@ struct TripListView: View {
             .overlay {
                 if loaded && trips.isEmpty && errorMessage == nil {
                     ContentUnavailableView {
-                        Label("尚未建立行程", systemImage: "calendar")
+                        Label("還沒有旅程", systemImage: "calendar")
+                    } description: {
+                        Text("自己建立一個，或用好友傳來的邀請連結加入。")
                     } actions: {
                         Button("建立旅程") { showsCreate = true }
+                            .buttonStyle(.borderedProminent)
+                        Button("加入好友的旅程") { showsJoin = true }
                     }
                 }
             }
@@ -70,7 +75,7 @@ struct TripListView: View {
             trips = try await session.trips.myTrips()
             errorMessage = nil
         } catch {
-            errorMessage = "讀取失敗：\(error.localizedDescription)"
+            errorMessage = "讀取失敗：\(userMessage(for: error))"
         }
         loaded = true
     }
@@ -119,7 +124,7 @@ struct CreateTripView: View {
                     Text("貼上 ChatGPT、LINE 或備忘錄的行程。解析後逐一確認地點，才會建立正式行程；原文會保留。")
                 }
                 if let errorMessage {
-                    Text(errorMessage).foregroundStyle(.red)
+                    ErrorText(errorMessage)
                 }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -161,14 +166,8 @@ struct CreateTripView: View {
                 dismiss()
             }
             errorMessage = nil
-        } catch let error as BackendError {
-            errorMessage = switch error {
-            case .unauthenticated: "登入已失效，請重新登入。"
-            case .invalid(let reason): "資料不正確（\(reason)）"
-            default: "建立失敗：\(error)"
-            }
         } catch {
-            errorMessage = "建立失敗：\(error.localizedDescription)"
+            errorMessage = "建立失敗：\(userMessage(for: error))"
         }
     }
 }
@@ -187,13 +186,14 @@ struct TripDetailView: View {
     @State private var selectedStop: Stop?
     @State private var revision: Int?
     @State private var confirmDelete = false
+    @State private var showsMembers = false
     var onDeleted: () -> Void = {}
     @Environment(\.dismiss) private var dismissView
 
     var body: some View {
         List {
             if let errorMessage {
-                Text(errorMessage).foregroundStyle(.red)
+                ErrorText(errorMessage)
             }
             ForEach(timeline) { day in
                 Section {
@@ -230,9 +230,6 @@ struct TripDetailView: View {
                     Text("第 \(day.day.displayOrder + 1) 天 · \(day.day.localDate)")
                 }
             }
-            if let revision {
-                Section { Text("資料版本 r\(revision)").font(.caption2).foregroundStyle(.secondary) }
-            }
         }
         .confirmationDialog("刪除「\(trip.name)」？所有旅伴都會失去這個旅程，匯入原文與 AI 紀錄也會刪除。", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("刪除旅程", role: .destructive) {
@@ -255,21 +252,23 @@ struct TripDetailView: View {
                 .presentationDetents([.medium])
         }
         .navigationTitle(trip.name)
+        // toolbar 只留一個主要動作「試算順路」，其餘收進「更多」。
         .toolbar {
-            NavigationLink { MembersView(session: session, trip: trip, myRole: myRole) } label: { Label("成員", systemImage: "person.2") }
-            if myRole == .owner {
-                Menu("更多", systemImage: "ellipsis.circle") {
+            Button("試算順路") { showsRouteMatch = true }
+                .disabled(timeline.isEmpty)
+            Menu("更多", systemImage: "ellipsis.circle") {
+                Button("成員", systemImage: "person.2") { showsMembers = true }
+                if myRole == .owner {
                     Button("刪除旅程", systemImage: "trash", role: .destructive) { confirmDelete = true }
                 }
             }
-            Button("試算順路", systemImage: "point.topleft.down.to.point.bottomright.curvepath") { showsRouteMatch = true }
-                .disabled(timeline.isEmpty)
             #if DEBUG
             Menu("除錯", systemImage: "ladybug") {
                 Button("寫入範例行程點到第 1 天") { Task { await seedSample() } }
             }
             #endif
         }
+        .navigationDestination(isPresented: $showsMembers) { MembersView(session: session, trip: trip, myRole: myRole) }
         .sheet(isPresented: $showsRouteMatch) {
             RouteMatchView(session: session, tripID: trip.id, timeline: timeline, places: places, onAdded: {
                 Task { await reload() }
@@ -326,7 +325,7 @@ struct TripDetailView: View {
             revision = try? await session.trips.tripRevision(trip.id)
             errorMessage = nil
         } catch {
-            errorMessage = "讀取失敗：\(error.localizedDescription)"
+            errorMessage = "讀取失敗：\(userMessage(for: error))"
             return
         }
         // Base Route 綁定當日 route_revision 與交通方式；revision 改變時重算。
@@ -362,7 +361,7 @@ struct TripDetailView: View {
             errorMessage = "行程已被其他人修改，已重新載入。"
             await reload()
         } catch {
-            errorMessage = "寫入失敗：\(error.localizedDescription)"
+            errorMessage = "寫入失敗：\(userMessage(for: error))"
         }
     }
     #endif
@@ -384,7 +383,7 @@ struct StopDetailView: View {
         NavigationStack {
             Form {
                 Section {
-                    Text(place?.displayTitle(fallbackChinese: stop.rawLabel) ?? stop.rawLabel).font(.headline)
+                    Text(place?.displayTitle(fallbackChinese: stop.rawLabel) ?? stop.rawLabel).font(.title3.weight(.semibold))
                     if let address = place?.address { Text(address).font(.caption).foregroundStyle(.secondary) }
                     if let start = stop.startTime { LabeledContent("時間", value: LocalTime.hourMinute(start)) }
                     if let dwell = stop.dwellMinutes { LabeledContent("停留", value: "\(dwell) 分") }
@@ -433,11 +432,11 @@ struct StopRow: View {
                 HStack(spacing: 6) {
                     Text(place?.displayTitle(fallbackChinese: stop.rawLabel) ?? stop.rawLabel)
                     if stop.fixed {
-                        Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.orange)
+                        Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
                             .accessibilityLabel("固定")
                     }
                     if stop.kind == .purchase {
-                        Image(systemName: "bag").font(.caption2).accessibilityLabel("購買")
+                        Image(systemName: "bag").font(.caption).foregroundStyle(.secondary).accessibilityLabel("購買")
                     }
                 }
                 if !stop.isRoutable {

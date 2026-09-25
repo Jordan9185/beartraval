@@ -25,7 +25,7 @@ extension BackendError {
             case "PLACE_UNRESOLVED": "地點尚未確認，無法加入行程或計算路線。"
             case "INVALID_DATES": "結束日期不能早於開始日期。"
             case "EMPTY_TEXT": "請先貼上行程文字。"
-            default: "資料格式不正確（\(code)）。"
+            default: "資料格式不正確，請檢查後再試。"
             }
         case .other: "無法連線，請檢查網路後再試。"
         }
@@ -47,6 +47,21 @@ extension RouteEstimate.UnavailableReason {
         case .unknown: "無法估算這段路線。"
         }
     }
+}
+
+/// 任何錯誤轉成給使用者看的中文原因：不露出系統英文訊息或錯誤碼（審查：錯誤訊息）。
+public func userMessage(for error: any Error) -> String {
+    if let error = error as? URLError {
+        switch error.code {
+        case .notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotConnectToHost, .cannotFindHost, .dataNotAllowed:
+            return "無法連線，請檢查網路後再試。"
+        default:
+            return "連線發生問題，請稍後再試。"
+        }
+    }
+    let backend = BackendError.from(error)
+    if case .other = backend { return "發生問題，請稍後再試。" }
+    return backend.userMessage
 }
 
 // MARK: - 刪除（plan §3.1）

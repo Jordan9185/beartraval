@@ -103,7 +103,7 @@ public struct ProductImportView: View {
                 Button(saving ? "加入中…" : "加入購物清單（\(selectedCount)）") { Task { await save() } }
                     .disabled(saving || tripID == nil || !drafts.contains { $0.selected && !$0.name.trimmingCharacters(in: .whitespaces).isEmpty })
                     .accessibilityIdentifier("addProducts")
-                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+                if let errorMessage { ErrorText(errorMessage) }
             }
         }
         .task {
@@ -140,7 +140,7 @@ public struct ProductImportView: View {
         } catch let error as BackendError {
             errorMessage = error.userMessage
         } catch {
-            errorMessage = "辨識失敗：\(error.localizedDescription)"
+            errorMessage = "辨識失敗：\(userMessage(for: error))"
         }
     }
 
@@ -162,7 +162,7 @@ public struct ProductImportView: View {
         } catch let error as BackendError {
             errorMessage = added > 0 ? "已加入 \(added) 項，其餘失敗：\(error.userMessage)" : error.userMessage
         } catch {
-            errorMessage = "加入失敗：\(error.localizedDescription)"
+            errorMessage = "加入失敗：\(userMessage(for: error))"
         }
     }
 

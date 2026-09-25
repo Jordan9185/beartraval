@@ -1,4 +1,5 @@
 import AppCore
+import ShareCore
 import SwiftUI
 
 /// 某一天的設定：交通方式與時區（跨國旅程每天可以不同）。
@@ -47,7 +48,7 @@ struct DaySettingsView: View {
             } footer: {
                 Text("行程時間都是當地時間。跨國移動那天，建議設成抵達地的時區。")
             }
-            if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            if let errorMessage { ErrorText(errorMessage) }
         }
         .navigationTitle("第 \(day.day.displayOrder + 1) 天的設定")
         .toolbar {
@@ -68,7 +69,7 @@ struct DaySettingsView: View {
         } catch let error as BackendError {
             errorMessage = error.userMessage
         } catch {
-            errorMessage = "儲存失敗：\(error.localizedDescription)"
+            errorMessage = "儲存失敗：\(userMessage(for: error))"
         }
     }
 }

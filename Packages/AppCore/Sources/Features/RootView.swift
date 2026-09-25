@@ -48,11 +48,12 @@ public struct RootView: View {
         tabView(session)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if !session.network.isOnline {
-                    Label("離線中：顯示最近一次的資料；行程修改需要連線，收藏與購買會在連線後送出。", systemImage: "wifi.slash")
+                    Label("離線中：顯示最近一次的資料", systemImage: "wifi.slash")
                         .font(.caption)
+                        .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                         .padding(8)
-                        .background(.yellow.opacity(0.25))
+                        .background(.bar)
                 }
             }
             .onChange(of: session.network.isOnline) { _, online in

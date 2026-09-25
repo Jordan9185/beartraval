@@ -72,9 +72,9 @@ struct TodayView: View {
                     Button { dayIndex = index - 1 } label: { Image(systemName: "chevron.left") }.disabled(index == 0)
                     Spacer()
                     VStack {
-                        Text(snapshot.trip.name).font(.headline)
+                        Text(snapshot.trip.name)
                         Text("第 \(index + 1) 天 · \(day.day.localDate)").font(.subheadline).foregroundStyle(.secondary)
-                        Text(TripTimeZones.displayName(day.day.timeZone) + "時間").font(.caption2).foregroundStyle(.tertiary)
+                        Text(TripTimeZones.displayName(day.day.timeZone) + "時間").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Button { dayIndex = index + 1 } label: { Image(systemName: "chevron.right") }.disabled(index >= snapshot.timeline.count - 1)
@@ -87,12 +87,10 @@ struct TodayView: View {
                     Text("今天沒有行程").foregroundStyle(.secondary)
                 }
                 ForEach(day.stops) { stop in
-                    Button { selectedStop = stop } label: { HStack {
-                        Text(stop.startTime.map(LocalTime.hourMinute) ?? "--:--").monospacedDigit().foregroundStyle(.secondary)
-                        Text(stop.placeId.flatMap { snapshot.places[$0] }.map { $0.displayTitle(fallbackChinese: stop.rawLabel) } ?? stop.rawLabel)
-                        if stop.fixed { Image(systemName: "lock.fill").font(.caption).foregroundStyle(.orange).accessibilityLabel("固定") }
-                        if stop.kind == .purchase { Image(systemName: "bag").font(.caption) }
-                    } }
+                    // 與「旅程」同一個行程列元件（未定位標記、固定、購買一致）。
+                    Button { selectedStop = stop } label: {
+                        StopRow(stop: stop, place: stop.placeId.flatMap { snapshot.places[$0] })
+                    }
                     .buttonStyle(.plain)
                     if let leg = todayBase?.dayID == day.id ? todayBase?.leg(from: stop.id) : nil {
                         LegRow(leg: leg, mode: day.day.transportMode, toName: nil)
@@ -110,7 +108,8 @@ struct TodayView: View {
                     HStack {
                         VStack(alignment: .leading) {
                             Text(entry.title)
-                            Text("+\(match.best?.addedTravelMinutes ?? 0) 分路程 · \(entry.saved.category.displayName)").font(.caption).foregroundStyle(.secondary)
+                            Text("路程 \(match.best?.addedTravelMinutes.map { "+\($0) 分" } ?? "無法估算") · \(entry.saved.category.displayName)")
+                                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                         }
                         Spacer()
                         if store.myRole?.canEdit == true { Button("加入") { adding = entry }.buttonStyle(.borderless) }
@@ -138,12 +137,11 @@ struct TodayView: View {
                 Text("今天可買")
             }
 
-            Section {
-                if let cachedAt = store.cachedAt {
+            if let cachedAt = store.cachedAt {
+                Section {
                     Label("離線資料：\(cachedAt.formatted(date: .abbreviated, time: .shortened))", systemImage: "icloud.slash")
-                        .font(.caption).foregroundStyle(.orange)
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("資料版本 r\(snapshot.revision)").font(.caption2).foregroundStyle(.tertiary)
             }
         }
         .task(id: "\(snapshot.revision)-\(index)") { await computeNearby(snapshot, index) }

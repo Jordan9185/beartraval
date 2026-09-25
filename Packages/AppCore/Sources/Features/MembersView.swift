@@ -1,4 +1,5 @@
 import AppCore
+import ShareCore
 import SwiftUI
 
 /// 成員與邀請（§3.3、決策 D5：只有 Owner 可邀請）。
@@ -65,7 +66,7 @@ struct MembersView: View {
                             .buttonStyle(.borderless)
                 }
             }
-            if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            if let errorMessage { ErrorText(errorMessage) }
         }
         .navigationTitle("成員")
         .task { await reload() }
@@ -76,7 +77,7 @@ struct MembersView: View {
             members = try await session.trips.members(of: trip.id)
             myName = members.first { $0.userID == session.trips.currentUserID }?.displayName ?? myName
         } catch {
-            errorMessage = "讀取失敗：\(error.localizedDescription)"
+            errorMessage = "讀取失敗：\(userMessage(for: error))"
         }
     }
 
@@ -86,23 +87,23 @@ struct MembersView: View {
             if let backend = BackendConfig.fromBundle()?.url { inviteURL = InviteLink.webURL(token: token, backend: backend) }
             appURL = InviteLink.appURL(token: token)
         } catch {
-            errorMessage = "無法建立邀請：\(error.localizedDescription)"
+            errorMessage = "無法建立邀請：\(userMessage(for: error))"
         }
     }
 
     private func setRole(_ member: TripMember, _ role: TripRole) async {
         do { try await session.trips.setMemberRole(tripID: trip.id, userID: member.userID, role: role); await reload() }
-        catch { errorMessage = "更新失敗：\(error.localizedDescription)" }
+        catch { errorMessage = "更新失敗：\(userMessage(for: error))" }
     }
 
     private func remove(_ member: TripMember) async {
         do { try await session.trips.removeMember(tripID: trip.id, userID: member.userID); await reload() }
-        catch { errorMessage = "移除失敗：\(error.localizedDescription)" }
+        catch { errorMessage = "移除失敗：\(userMessage(for: error))" }
     }
 
     private func saveName() async {
         do { try await session.trips.setDisplayName(myName); await reload() }
-        catch { errorMessage = "儲存失敗：\(error.localizedDescription)" }
+        catch { errorMessage = "儲存失敗：\(userMessage(for: error))" }
     }
 }
 
@@ -121,12 +122,21 @@ struct JoinTripView: View {
             Form {
                 Section {
                     TextField("貼上邀請連結", text: $text, axis: .vertical)
+                        .autocorrectionDisabled()
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                        #endif
+                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && InviteLink.token(from: text) == nil {
+                        Text("這不是邀請連結。請貼上好友傳來、以 beartravel://invite 開頭的完整連結。")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
                 } footer: {
                     Text("加入後可依權限查看或編輯共同的收藏、購物清單與行程。")
                 }
                 Button(joining ? "加入中…" : "加入") { Task { await join() } }
                     .disabled(joining || InviteLink.token(from: text) == nil)
-                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+                if let errorMessage { ErrorText(errorMessage) }
             }
             .navigationTitle("加入旅程")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
@@ -145,10 +155,10 @@ struct JoinTripView: View {
             errorMessage = switch error {
             case .gone(let reason): reason == "INVITE_REVOKED" ? "邀請已被撤銷，請向擁有者索取新的邀請。" : "邀請已過期，請向擁有者索取新的邀請。"
             case .notFound: "邀請連結無效。"
-            default: "加入失敗：\(error)"
+            default: "加入失敗：\(error.userMessage)"
             }
         } catch {
-            errorMessage = "加入失敗：\(error.localizedDescription)"
+            errorMessage = "加入失敗：\(userMessage(for: error))"
         }
     }
 }

@@ -52,7 +52,7 @@ struct ProposalReviewView: View {
                 case .unavailable:
                     Text("以最新行程重新計算後，這天已無法估算，所以不能加入。").foregroundStyle(.secondary)
                 case .failed(let message):
-                    Text(message).foregroundStyle(.red)
+                    ErrorText(message)
                 case .review, .confirming:
                     if let pending {
                         Section("\(dayTitle)（\(mode.displayName)）") {
@@ -102,7 +102,7 @@ struct ProposalReviewView: View {
             pending = fresh
             phase = fresh == nil ? .unavailable : .review
         } catch {
-            phase = .failed("無法建立加入要求：\(error.localizedDescription)")
+            phase = .failed("無法建立加入要求：\(userMessage(for: error))")
         }
     }
 
@@ -125,7 +125,7 @@ struct ProposalReviewView: View {
         } catch let error as BackendError {
             phase = .failed(error.userMessage)
         } catch {
-            phase = .failed("加入失敗：\(error.localizedDescription)")
+            phase = .failed("加入失敗：\(userMessage(for: error))")
         }
     }
 }

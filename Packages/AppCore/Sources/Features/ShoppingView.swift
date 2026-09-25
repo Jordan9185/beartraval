@@ -126,7 +126,7 @@ public struct ShoppingListView<MerchantScreen: View>: View {
                     }
                 }
             }
-            if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            if let errorMessage { ErrorText(errorMessage) }
             ForEach(entries) { entry in
                 NavigationLink {
                     ShoppingItemDetailView(service: service, tripID: tripID, entry: entry, canEdit: canEdit,
@@ -161,7 +161,7 @@ public struct ShoppingListView<MerchantScreen: View>: View {
             entries = try await service.shoppingEntries(of: tripID)
             errorMessage = nil
         } catch {
-            errorMessage = "讀取失敗：\(error.localizedDescription)"
+            errorMessage = "讀取失敗：\(userMessage(for: error))"
         }
         loaded = true
     }
@@ -177,7 +177,7 @@ public struct ShoppingListView<MerchantScreen: View>: View {
             newPhoto = nil
             await reload()
         } catch {
-            errorMessage = "新增失敗：\(error.localizedDescription)"
+            errorMessage = "新增失敗：\(userMessage(for: error))"
         }
     }
 
@@ -193,7 +193,7 @@ public struct ShoppingListView<MerchantScreen: View>: View {
         } catch BackendError.forbidden {
             errorMessage = "只有購買者或擁有者可以撤銷。"
         } catch {
-            errorMessage = "更新失敗：\(error.localizedDescription)"
+            errorMessage = "更新失敗：\(userMessage(for: error))"
         }
     }
 }
@@ -216,7 +216,8 @@ struct ShoppingRow<MerchantScreen: View>: View {
                 ShoppingImage(path: path, service: service).frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
             }
             Button(action: toggle) {
-                Image(systemName: entry.isPurchased ? "checkmark.circle.fill" : "circle").font(.title2)
+                Image(systemName: entry.isPurchased ? "checkmark.circle.fill" : "circle").font(.title3)
+                    .foregroundStyle(entry.isPurchased ? Color.green : Color.secondary)
             }
             .buttonStyle(.borderless)
             .disabled(!canEdit)
@@ -225,17 +226,21 @@ struct ShoppingRow<MerchantScreen: View>: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.item.name).strikethrough(entry.isPurchased)
-                Group {
-                    switch entry.status {
-                    case .unscheduled: Text("未安排").foregroundStyle(.orange)
-                    case .scheduled: Text("已安排：\(entry.plannedDate ?? "") \(entry.plannedStore ?? "")")
-                    case .purchased(let by, let at):
-                        Text("\(by == nil ? "已刪除帳號的成員" : by == me ? "你" : "旅伴")已購買 · \(at.formatted(date: .abbreviated, time: .shortened))")
+                // 一行狀態：狀態 · 想買人數。
+                HStack(spacing: 0) {
+                    Group {
+                        switch entry.status {
+                        case .unscheduled: Text("未安排")
+                        case .scheduled: Text("已安排：\(entry.plannedDate ?? "") \(entry.plannedStore ?? "")")
+                        case .purchased(let by, let at):
+                            Text("\(by == nil ? "已刪除帳號的成員" : by == me ? "你" : "旅伴")已購買 · \(at.formatted(date: .abbreviated, time: .shortened))")
+                        }
                     }
+                    .accessibilityIdentifier("status-\(entry.item.name)")
+                    Text(" · \(entry.interestedUserIDs.count) 人想買").monospacedDigit()
                 }
                 .font(.caption)
-                .accessibilityIdentifier("status-\(entry.item.name)")
-                Text("\(entry.interestedUserIDs.count) 人想買").font(.caption2).foregroundStyle(.secondary)
+                .foregroundStyle(.secondary)
 
             }
         }
@@ -283,9 +288,9 @@ struct MerchantSearchView: View {
             ForEach(options) { option in
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(option.place.displayTitle).font(.headline)
+                        Text(option.place.displayTitle)
                         if let address = option.place.address { Text(address).font(.caption).foregroundStyle(.secondary) }
-                        Text("可能販售（\(evidence.displayName)）· 庫存未知").font(.caption).foregroundStyle(.orange)
+                        Text("可能販售（\(evidence.displayName)） · 庫存未知").font(.caption).foregroundStyle(.secondary)
                         if let best = option.best, let ins = best.best {
                             Text("最適合 \(dayTitles[best.dayID] ?? "")：路程 +\(ins.addedTravelMinutes ?? 0) 分").font(.caption)
                         } else {
@@ -386,10 +391,10 @@ struct ShoppingItemDetailView: View {
                 }
             }
             Section {
-                Text(entry.item.name).font(.headline)
-                if let note = entry.item.note { Text(note).font(.callout) }
+                Text(entry.item.name).font(.title3.weight(.semibold))
+                if let note = entry.item.note { Text(note) }
                 if let link = entry.item.url.flatMap(URL.init(string:)) {
-                    Link(link.host ?? link.absoluteString, destination: link).font(.callout)
+                    Link(link.host ?? link.absoluteString, destination: link)
                 }
                 if canEdit {
                     PhotosPicker(selection: $photo, matching: .images) {
@@ -397,7 +402,7 @@ struct ShoppingItemDetailView: View {
                     }
                     .disabled(uploading)
                 }
-                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+                if let errorMessage { ErrorText(errorMessage) }
             }
             if let merchantScreen {
                 Section {
@@ -426,7 +431,7 @@ struct ShoppingItemDetailView: View {
                     try await service.setShoppingImage(tripID: tripID, itemID: entry.id, jpeg: jpeg)
                     onChanged()
                 } catch {
-                    errorMessage = "上傳失敗：\(error.localizedDescription)"
+                    errorMessage = "上傳失敗：\(userMessage(for: error))"
                 }
             }
         }

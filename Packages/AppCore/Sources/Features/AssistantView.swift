@@ -36,7 +36,7 @@ struct AssistantView: View {
                 }
                 ForEach(turns) { turn in
                     Section {
-                        Text(turn.question).font(.headline)
+                        Text(turn.question)
                         switch turn.result {
                         case nil:
                             ProgressView("思考中…")

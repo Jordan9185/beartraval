@@ -20,6 +20,7 @@ struct SavedView: View {
     @State private var sync: TripSync?
     @State private var queued = 0
     @State private var adding = false
+    @State private var detail: SavedEntry?
 
     var body: some View {
         NavigationStack {
@@ -50,7 +51,7 @@ struct SavedView: View {
                 .listRowBackground(Color.clear)
                 Toggle("顯示已加入行程", isOn: $includeAdded)
 
-                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+                if let errorMessage { ErrorText(errorMessage) }
                 if queued > 0 {
                     Label("\(queued) 項變更等待連線後送出", systemImage: "icloud.slash").font(.caption).foregroundStyle(.secondary)
                 }
@@ -59,7 +60,8 @@ struct SavedView: View {
                     SavedRow(entry: entry, me: session.trips.currentUserID, canEdit: myRole?.canEdit == true,
                              toggleInterest: { Task { await toggleInterest(entry) } },
                              showRoute: { routeFor = entry },
-                             resolve: { resolving = entry })
+                             resolve: { resolving = entry },
+                             open: { detail = entry })
                     .swipeActions {
                         if myRole?.canEdit == true {
                             Button("移除", role: .destructive) { Task { await dismiss(entry) } }
@@ -114,6 +116,10 @@ struct SavedView: View {
                     }
                 }
             }
+            .sheet(item: $detail) { entry in
+                SavedDetailView(entry: entry, me: session.trips.currentUserID)
+                    .presentationDetents([.medium, .large])
+            }
             .sheet(item: $resolving) { entry in
                 ResolvePlaceSheet(session: session, entry: entry) {
                     resolving = nil
@@ -129,7 +135,7 @@ struct SavedView: View {
             trips = try await session.trips.myTrips()
             if tripID == nil { tripID = ShareFlowView.defaultTrip(trips)?.id }
         } catch {
-            errorMessage = "讀取失敗：\(error.localizedDescription)"
+            errorMessage = "讀取失敗：\(userMessage(for: error))"
         }
         loaded = true
         await reload()
@@ -160,7 +166,7 @@ struct SavedView: View {
             entries = try await session.trips.savedEntries(of: tripID)
             errorMessage = nil
         } catch {
-            errorMessage = "讀取失敗：\(error.localizedDescription)"
+            errorMessage = "讀取失敗：\(userMessage(for: error))"
         }
     }
 
@@ -178,7 +184,7 @@ struct SavedView: View {
             }
             queued = await session.offlineQueue.items.count
         } catch {
-            errorMessage = "更新失敗：\(error.localizedDescription)"
+            errorMessage = "更新失敗：\(userMessage(for: error))"
         }
     }
 
@@ -187,11 +193,12 @@ struct SavedView: View {
             try await session.trips.dismissSaved(savedID: entry.id)
             await reload()
         } catch {
-            errorMessage = "移除失敗：\(error.localizedDescription)"
+            errorMessage = "移除失敗：\(userMessage(for: error))"
         }
     }
 }
 
+/// 收藏列：標題、一行狀態、想去與一個主要動作；其餘（來源、司機卡、當地地圖）點列進詳情。
 struct SavedRow: View {
     let entry: SavedEntry
     let me: UUID?
@@ -199,41 +206,19 @@ struct SavedRow: View {
     let toggleInterest: () -> Void
     let showRoute: () -> Void
     let resolve: () -> Void
+    let open: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(entry.title).font(.headline)
-                Spacer()
-                Text(entry.saved.category.displayName).font(.caption).padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(.quaternary, in: Capsule())
-            }
-            if !entry.isConfirmed {
-                Label("未定位，不計入路線", systemImage: "mappin.slash").font(.caption).foregroundStyle(.secondary)
-            } else if entry.saved.status == .addedToItinerary {
-                Label("已加入行程", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.secondary)
-            }
-            if let source = entry.source, let url = source.url.flatMap(URL.init(string:)) {
-                Link(url.host ?? url.absoluteString, destination: url).font(.caption)
-            }
-            if let place = entry.place {
-                TaxiCardButton(place: place, fallbackChineseLabel: entry.saved.rawLabel)
-                    .font(.caption).buttonStyle(.borderless)
-            } else {
-                let country = LocalMapCountry.guess(name: entry.saved.rawLabel, timeZone: nil)
-                HStack(spacing: 16) {
-                    TaxiCardButton(unlocatedName: entry.saved.rawLabel, countryCode: country)
-                    LocalMapSearchButtons(name: entry.saved.rawLabel, countryCode: country)
-                }
-                .font(.caption).buttonStyle(.borderless)
-            }
+        VStack(alignment: .leading, spacing: 4) {
+            Text(entry.title)
+            Text(SavedRow.status(entry, me: me)).font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 16) {
-                Text(entry.saved.addedBy == nil ? "已刪除帳號的成員新增" : entry.saved.addedBy == me ? "你新增" : "旅伴新增").font(.caption).foregroundStyle(.secondary)
                 Button {
                     toggleInterest()
                 } label: {
                     Label("\(entry.interestedUserIDs.count) 人想去",
                           systemImage: me.map(entry.interestedUserIDs.contains) == true ? "heart.fill" : "heart")
+                        .monospacedDigit()
                 }
                 .disabled(!canEdit)
                 Spacer()
@@ -245,6 +230,61 @@ struct SavedRow: View {
             }
             .font(.caption)
             .buttonStyle(.borderless)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: open)
+    }
+
+    static func status(_ entry: SavedEntry, me: UUID?) -> String {
+        var parts = [entry.saved.category.displayName]
+        if !entry.isConfirmed {
+            parts.append("未定位")
+        } else if entry.saved.status == .addedToItinerary {
+            parts.append("已加入行程")
+        }
+        parts.append(entry.saved.addedBy == nil ? "已刪除帳號的成員新增" : entry.saved.addedBy == me ? "你新增" : "旅伴新增")
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// 收藏詳情：來源、司機卡、當地地圖。
+struct SavedDetailView: View {
+    let entry: SavedEntry
+    let me: UUID?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(entry.title).font(.title3.weight(.semibold))
+                    if let address = entry.place?.address { Text(address).font(.caption).foregroundStyle(.secondary) }
+                    Text(SavedRow.status(entry, me: me)).font(.caption).foregroundStyle(.secondary)
+                    if !entry.isConfirmed {
+                        Label("未定位，不計入路線", systemImage: "mappin.slash").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if let source = entry.source, let url = source.url.flatMap(URL.init(string:)) {
+                    Section("來源") { Link(url.host ?? url.absoluteString, destination: url) }
+                }
+                Section {
+                    if let place = entry.place {
+                        TaxiCardButton(place: place, fallbackChineseLabel: entry.saved.rawLabel)
+                    } else {
+                        let country = LocalMapCountry.guess(name: entry.saved.rawLabel, timeZone: nil)
+                        TaxiCardButton(unlocatedName: entry.saved.rawLabel, countryCode: country)
+                        LocalMapSearchButtons(name: entry.saved.rawLabel, countryCode: country)
+                    }
+                }
+                if let place = entry.place, place.isInKorea {
+                    Section("在地地圖") {
+                        LocalMapButtons(destination: place.mapPoint, origin: nil, mode: .walking, address: place.address)
+                    }
+                }
+            }
+            .navigationTitle("收藏")
+            .navigationBarTitleDisplayModeInline()
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
         }
     }
 }
@@ -309,7 +349,7 @@ struct ResolvePlaceSheet: View {
                         }
                     }
                 }
-                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+                if let errorMessage { ErrorText(errorMessage) }
             }
             .navigationTitle("補填地點")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
@@ -330,7 +370,7 @@ struct ResolvePlaceSheet: View {
         } catch BackendError.conflict("DUPLICATE_SAVED") {
             errorMessage = "這個地點已經在收藏清單裡。"
         } catch {
-            errorMessage = "補填失敗：\(error.localizedDescription)"
+            errorMessage = "補填失敗：\(userMessage(for: error))"
         }
     }
 }
@@ -395,7 +435,7 @@ struct AddSavedPlaceView: View {
                         Text("只收藏名稱時不計入路線，之後可以再補定位。")
                     }
                 }
-                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+                if let errorMessage { ErrorText(errorMessage) }
             }
             .navigationTitle("新增收藏")
             .navigationBarTitleDisplayModeInline()
@@ -422,7 +462,7 @@ struct AddSavedPlaceView: View {
         } catch let error as BackendError {
             errorMessage = error.userMessage
         } catch {
-            errorMessage = "收藏失敗：\(error.localizedDescription)"
+            errorMessage = "收藏失敗：\(userMessage(for: error))"
         }
     }
 }

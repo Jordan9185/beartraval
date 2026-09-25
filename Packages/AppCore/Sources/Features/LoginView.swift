@@ -1,3 +1,4 @@
+import ShareCore
 import SwiftUI
 
 /// Email＋密碼註冊／登入。
@@ -52,7 +53,7 @@ struct LoginView: View {
                 }
 
                 if let errorMessage {
-                    Section { Text(errorMessage).foregroundStyle(.red) }
+                    Section { ErrorText(errorMessage) }
                 }
             }
             .navigationTitle("BeaRTravel")

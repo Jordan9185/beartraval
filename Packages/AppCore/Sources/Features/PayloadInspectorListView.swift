@@ -15,7 +15,7 @@ struct PayloadInspectorListView: View {
                     .foregroundStyle(.red)
             }
             if let errorMessage {
-                Text(errorMessage).foregroundStyle(.red)
+                ErrorText(errorMessage)
             }
             ForEach(records) { record in
                 NavigationLink {

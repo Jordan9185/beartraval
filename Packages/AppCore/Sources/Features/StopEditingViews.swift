@@ -1,4 +1,5 @@
 import AppCore
+import ShareCore
 import SwiftUI
 
 /// 兩個行程點之間的這一段路程（逐段顯示，不是整天總和）。
@@ -66,7 +67,7 @@ struct PendingStopActions: View {
                 .confirmationDialog("移除「\(stop.rawLabel)」？", isPresented: $confirmRemove, titleVisibility: .visible) {
                     Button("移除", role: .destructive) { Task { await remove() } }
                 }
-            if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
+            if let errorMessage { ErrorText(errorMessage) }
         } header: {
             Text("編輯")
         } footer: {
@@ -81,7 +82,7 @@ struct PendingStopActions: View {
         } catch let error as BackendError {
             errorMessage = error.userMessage
         } catch {
-            errorMessage = "更新失敗：\(error.localizedDescription)"
+            errorMessage = "更新失敗：\(userMessage(for: error))"
         }
     }
 }
@@ -98,7 +99,7 @@ struct RenameStopView: View {
             TextField("行程點名稱", text: $text)
             Button("儲存") { Task { await save() } }
                 .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
-            if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            if let errorMessage { ErrorText(errorMessage) }
         }
         .navigationTitle("修改文字")
         .onAppear { text = stop.rawLabel }
@@ -111,7 +112,7 @@ struct RenameStopView: View {
         } catch let error as BackendError {
             errorMessage = error.userMessage
         } catch {
-            errorMessage = "更新失敗：\(error.localizedDescription)"
+            errorMessage = "更新失敗：\(userMessage(for: error))"
         }
     }
 }
@@ -155,7 +156,7 @@ struct ResolveStopSheet: View {
                         }
                     }
                 }
-                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+                if let errorMessage { ErrorText(errorMessage) }
             }
             .navigationTitle("確認地點")
             .task {
@@ -180,7 +181,7 @@ struct ResolveStopSheet: View {
             errorMessage = error.userMessage
             if error == .staleRevision { context.onChanged() }
         } catch {
-            errorMessage = "更新失敗：\(error.localizedDescription)"
+            errorMessage = "更新失敗：\(userMessage(for: error))"
         }
     }
 }

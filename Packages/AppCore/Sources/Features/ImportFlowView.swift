@@ -1,4 +1,5 @@
 import AppCore
+import ShareCore
 import SwiftUI
 
 /// Import → Parsing → Confirm Places → Create Trip（規格 §3.1、WP3）。
@@ -65,7 +66,7 @@ public struct ImportFlowView: View {
                 Text(failureText).foregroundStyle(.secondary)
             }
             Section("原文（已保留）") {
-                Text(session.rawText).font(.callout).textSelection(.enabled)
+                Text(session.rawText).font(.subheadline).textSelection(.enabled)
                     .accessibilityIdentifier("rawText")
             }
             Section {
@@ -74,7 +75,7 @@ public struct ImportFlowView: View {
                 Button("編輯原文") { editedText = session.rawText; phase = .editing }
                 Button("略過匯入，建立空旅程") { Task { await commitEmpty() } }
             }
-            if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            if let errorMessage { ErrorText(errorMessage) }
         }
     }
 
@@ -89,7 +90,7 @@ public struct ImportFlowView: View {
                     .disabled(editedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Button("取消") { phase = .failed }
             }
-            if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            if let errorMessage { ErrorText(errorMessage) }
         }
     }
 
@@ -159,7 +160,7 @@ public struct ImportFlowView: View {
             phase = .parsing
             await parse()
         } catch {
-            errorMessage = "儲存失敗：\(error.localizedDescription)"
+            errorMessage = "儲存失敗：\(userMessage(for: error))"
         }
     }
 
@@ -167,7 +168,7 @@ public struct ImportFlowView: View {
         do {
             onCreated(try await service.commit(importID: session.id, days: []))
         } catch {
-            errorMessage = "建立失敗：\(error.localizedDescription)"
+            errorMessage = "建立失敗：\(userMessage(for: error))"
         }
     }
 
@@ -181,7 +182,7 @@ public struct ImportFlowView: View {
             }
             onCreated(try await service.commit(importID: session.id, days: state.commitDays(placeIDs: ids)))
         } catch {
-            errorMessage = "建立失敗：\(error.localizedDescription)"
+            errorMessage = "建立失敗：\(userMessage(for: error))"
             phase = .confirming
         }
     }
@@ -228,20 +229,20 @@ struct ConfirmPlacesView: View {
                 Section {
                     DisclosureGroup("AI 備註（\(warnings.count)）") {
                         ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in
-                            Text(verbatim: warning).font(.callout)
+                            Text(verbatim: warning).font(.subheadline)
                         }
                     }
                 }
             }
             Section {
                 DisclosureGroup("原文") {
-                    Text(rawText).font(.callout).textSelection(.enabled).accessibilityIdentifier("rawText")
+                    Text(rawText).font(.subheadline).textSelection(.enabled).accessibilityIdentifier("rawText")
                 }
             }
             // 只把需要使用者決定的項目攤開；App 代為處理的收在下面，可點開檢查或修改。
             ForEach(attention, id: \.self) { index in
                 Section {
-                    ConfirmItemView(item: $state.items[index], tripDates: state.tripDates, timeZone: timeZone)
+                    ConfirmItemView(item: $state.items[index], tripDates: state.tripDates, timeZone: timeZone) { await research(index, $0) }
                 } header: {
                     Text(state.items[index].date ?? "日期未定")
                 }
@@ -256,7 +257,7 @@ struct ConfirmPlacesView: View {
                 Section {
                     DisclosureGroup("已自動處理 \(handled.count) 項") {
                         ForEach(handled, id: \.self) { index in
-                            ConfirmItemView(item: $state.items[index], tripDates: state.tripDates, timeZone: timeZone)
+                            ConfirmItemView(item: $state.items[index], tripDates: state.tripDates, timeZone: timeZone) { await research(index, $0) }
                         }
                     }
                     .accessibilityIdentifier("autoHandled")
@@ -265,14 +266,19 @@ struct ConfirmPlacesView: View {
                 }
             }
             Section {
-                Button(isCommitting ? "建立中…" : "建立旅程", action: onSubmit)
-                    .disabled(!state.canSubmit || isCommitting)
-                    .accessibilityIdentifier("submitImport")
                 if !state.canSubmit {
                     Text("還有 \(state.remainingCount) 項需要確認").font(.caption).foregroundStyle(.secondary)
                         .accessibilityIdentifier("remainingCount")
                 }
-                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+                if let errorMessage { ErrorText(errorMessage) }
+            }
+        }
+        // 長表單的主要動作放在上方，不用捲到最底。
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(isCommitting ? "建立中…" : "建立", action: onSubmit)
+                    .disabled(!state.canSubmit || isCommitting)
+                    .accessibilityIdentifier("submitImport")
             }
         }
         .task { await searchAll() }
@@ -342,6 +348,18 @@ struct ConfirmPlacesView: View {
         }
     }
 
+    /// 使用者換關鍵字搜尋：只更新候選，由使用者自己選（不自動選定）。
+    private func research(_ index: Int, _ text: String) async {
+        guard !text.isEmpty else { return }
+        let area = state.items[index].stop.city ?? city
+        let center: Coordinate? = if let area { await placeSearch.locate(city: area) } else { nil }
+        var result = await placeSearch.lookup(text, around: center, limit: 5)
+        if result == .notFound, center != nil { result = await placeSearch.lookup(text, around: nil, limit: 5) }
+        state.items[index].candidates = result.options
+        state.items[index].searchFailed = result == .unavailable
+        state.items[index].searched = true
+    }
+
     private func retryFailedSearches() {
         state.resetFailedSearches()
         Task { await searchAll() }
@@ -352,6 +370,11 @@ struct ConfirmItemView: View {
     @Binding var item: ConfirmItem
     let tripDates: [String]
     var timeZone: String? = nil
+    /// 用使用者輸入的關鍵字重新搜尋這一項。
+    var research: ((String) async -> Void)? = nil
+    @State private var showsSearch = false
+    @State private var query = ""
+    @State private var researching = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -359,21 +382,22 @@ struct ConfirmItemView: View {
                 if let start = item.stop.startTime {
                     Text(start + (item.stop.timeIsApproximate ? "（推測）" : "")).monospacedDigit()
                 }
-                Text(item.label).font(.headline)
+                Text(item.label)
             }
             Text("「\(item.stop.sourceExcerpt)」").font(.caption).foregroundStyle(.secondary)
             if item.autoDecided, let note = autoNote {
-                Label(note, systemImage: "wand.and.stars").font(.caption).foregroundStyle(.tint)
+                Label(note, systemImage: "sparkles").font(.caption).foregroundStyle(.secondary)
             }
             ForEach(item.stop.needsConfirmation, id: \.self) { reason in
                 Label(reasonText(reason), systemImage: "questionmark.circle").font(.caption).foregroundStyle(.orange)
             }
         }
 
-        if item.date == nil || item.stop.needsConfirmation.contains(.ambiguousDate) {
-            Picker("日期", selection: $item.date) {
-                Text("未選").tag(String?.none)
-                ForEach(tripDates, id: \.self) { Text($0).tag(Optional($0)) }
+        // 每一項都能改日期：AI 放錯天時可以直接調整。
+        Picker("日期", selection: $item.date) {
+            Text("未選").tag(String?.none)
+            ForEach(Array(tripDates.enumerated()), id: \.element) { index, date in
+                Text("第 \(index + 1) 天 · \(date)").tag(Optional(date))
             }
         }
 
@@ -414,6 +438,15 @@ struct ConfirmItemView: View {
                                   ?? LocalMapCountry.guess(name: (item.stop.searchQuery ?? "") + item.label, timeZone: timeZone))
                 .font(.callout)
         }
+        if showsSearch, let research {
+            HStack {
+                TextField("換個名稱搜尋", text: $query)
+                    .onSubmit { Task { await runSearch(research) } }
+                Button(researching ? "搜尋中…" : "搜尋") { Task { await runSearch(research) } }
+                    .buttonStyle(.borderless)
+                    .disabled(researching || query.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
 
         HStack {
             Button {
@@ -422,6 +455,15 @@ struct ConfirmItemView: View {
                 Label("只保留名稱", systemImage: item.decision == .pendingText ? "checkmark.circle.fill" : "text.bubble")
             }
             .accessibilityIdentifier("pending-\(item.id)")
+            if item.needsSearch && research != nil && !showsSearch {
+                Spacer()
+                Button {
+                    query = item.stop.placeName ?? item.label
+                    showsSearch = true
+                } label: {
+                    Label("換關鍵字", systemImage: "magnifyingglass")
+                }
+            }
             Spacer()
             Button(role: .destructive) {
                 item.decision = .remove
@@ -432,6 +474,12 @@ struct ConfirmItemView: View {
         }
         .buttonStyle(.borderless)
         .font(.caption)
+    }
+
+    private func runSearch(_ research: (String) async -> Void) async {
+        researching = true
+        defer { researching = false }
+        await research(query.trimmingCharacters(in: .whitespaces))
     }
 
     private var autoNote: String? {
@@ -467,7 +515,7 @@ struct ParsingProgressView: View {
             step(done: false, active: false, title: "搜尋地點，讓你逐一確認")
             TimelineView(.periodic(from: started, by: 1)) { context in
                 let seconds = max(0, Int(context.date.timeIntervalSince(started)))
-                Text("已經過 \(seconds / 60):\(String(format: "%02d", seconds % 60))・長行程約需 1～2 分鐘")
+                Text("已經過 \(seconds / 60):\(String(format: "%02d", seconds % 60)) · 長行程約需 1～2 分鐘")
                     .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
         }
@@ -480,7 +528,7 @@ struct ParsingProgressView: View {
 
     private var draftDetail: String? {
         guard let progress, writing else { return nil }
-        var text = "第 \(max(progress.days, 1)) 天・已找到 \(progress.stops) 項"
+        var text = "第 \(max(progress.days, 1)) 天 · 已找到 \(progress.stops) 項"
         if let last = progress.lastPlace { text += "（最新：\(last)）" }
         return text
     }

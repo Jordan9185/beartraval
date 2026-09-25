@@ -84,6 +84,7 @@ struct ShareRootView: View {
             }
             .navigationTitle("BeaRTravel")
             .navigationBarTitleDisplayMode(.inline)
+            .tint(.bearBrown)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消", action: finish) }
                 #if DEBUG

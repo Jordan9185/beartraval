@@ -65,7 +65,7 @@ public struct ShareFlowView: View {
                 if selected != nil, tripID != nil { routeSection }
                 actionSection
             }
-            if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            if let errorMessage { ErrorText(errorMessage) }
         }
         .task { await start() }
     }
@@ -80,7 +80,7 @@ public struct ShareFlowView: View {
                 LabeledContent("來源", value: "文字")
             }
             if let excerpt = analysis.excerpt {
-                Text(excerpt).font(.callout).lineLimit(4)
+                Text(excerpt).font(.subheadline).lineLimit(4)
             }
             ForEach(Array(analysis.missing.enumerated()), id: \.offset) { _, missing in
                 Label(missingText(missing), systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.orange)
@@ -170,7 +170,7 @@ public struct ShareFlowView: View {
                 Button(busy ? "加入中…" : "確認加入") { Task { await confirm() } }.disabled(busy)
                 Button("不加入") { self.pending = nil }
             } else if let best = RouteMatcher.bestDay(matches), let insertion = best.best {
-                Text("最適合：\(dayTitles[best.dayID] ?? "")").font(.headline)
+                Text("最適合：\(dayTitles[best.dayID] ?? "")")
                 MatchNumbers(insertion: insertion) { _ in nil }
             } else if !computing && !matches.isEmpty {
                 Text("所有日子都無法估算路線，可以先收藏。").foregroundStyle(.secondary)
@@ -260,7 +260,7 @@ public struct ShareFlowView: View {
             }
             matches = results
         } catch {
-            errorMessage = "無法讀取行程：\(error.localizedDescription)"
+            errorMessage = "無法讀取行程：\(userMessage(for: error))"
         }
     }
 
@@ -278,7 +278,7 @@ public struct ShareFlowView: View {
             notice = nil
             if fresh == nil { errorMessage = "以最新行程重新計算後無法估算，可以先收藏。" }
         } catch {
-            errorMessage = "無法建立加入要求：\(error.localizedDescription)"
+            errorMessage = "無法建立加入要求：\(userMessage(for: error))"
         }
     }
 
@@ -298,7 +298,7 @@ public struct ShareFlowView: View {
                 errorMessage = "行程剛被其他人修改，重新計算後無法估算，可以先收藏。"
             }
         } catch {
-            errorMessage = "加入失敗：\(error.localizedDescription)"
+            errorMessage = "加入失敗：\(userMessage(for: error))"
         }
     }
 
@@ -318,7 +318,7 @@ public struct ShareFlowView: View {
             let (_, duplicate) = try await repository.savePlace(tripID: tripID, label: label, category: category, placeID: placeID, source: source)
             onFinish(.saved(duplicate: duplicate))
         } catch {
-            errorMessage = "收藏失敗：\(error.localizedDescription)"
+            errorMessage = "收藏失敗：\(userMessage(for: error))"
         }
     }
 }
