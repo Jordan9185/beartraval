@@ -8,6 +8,8 @@ public protocol PlaceSearching: Sendable {
     func nearby(_ coordinate: Coordinate, limit: Int) async -> [PlaceOption]
     /// 以某個中心點附近為範圍搜尋（旅程所在城市），避免搜到其他國家的同名地點。
     func search(_ query: String, around center: Coordinate?, limit: Int) async -> [PlaceOption]
+    /// 城市或島嶼的中心點（例如 "Onomichi"），找不到時為 nil。
+    func locate(city: String) async -> Coordinate?
 }
 
 extension PlaceSearching {
@@ -15,6 +17,7 @@ extension PlaceSearching {
     public func search(_ query: String, around center: Coordinate?, limit: Int) async -> [PlaceOption] {
         await search(query, near: nil, limit: limit)
     }
+    public func locate(city: String) async -> Coordinate? { nil }
 }
 
 /// Apple MapKit POI 搜尋（決策 D3）。
@@ -26,7 +29,7 @@ public struct MapKitPlaceSearch: PlaceSearching {
         // S1：搜尋結果依查詢字串而定，把城市併入查詢比 region 更穩定。
         request.naturalLanguageQuery = [query, city].compactMap { $0 }.joined(separator: " ")
         request.resultTypes = [.pointOfInterest, .address]
-        guard let items = try? await MKLocalSearch(request: request).start().mapItems else { return [] }
+        let items = await Self.run(request)
         return items.prefix(limit).map { PlaceOption(draft: Self.draft(from: $0)) }
     }
 
@@ -37,11 +40,36 @@ public struct MapKitPlaceSearch: PlaceSearching {
         request.resultTypes = [.pointOfInterest, .address]
         request.region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: center.latitude, longitude: center.longitude),
                                             latitudinalMeters: 30_000, longitudinalMeters: 30_000)
-        guard let items = try? await MKLocalSearch(request: request).start().mapItems else { return [] }
+        let items = await Self.run(request)
         // 只留範圍附近（100 km 內）的結果，其他國家的同名地點不列入候選。
         let origin = CLLocation(latitude: center.latitude, longitude: center.longitude)
         return items.filter { Self.location($0).distance(from: origin) < 100_000 }
             .prefix(limit).map { PlaceOption(draft: Self.draft(from: $0)) }
+    }
+
+    public func locate(city: String) async -> Coordinate? {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = city
+        request.resultTypes = .address
+        guard let item = await Self.run(request).first else { return nil }
+        let c = Self.location(item).coordinate
+        return Coordinate(latitude: c.latitude, longitude: c.longitude)
+    }
+
+    /// MapKit 每分鐘約 50 次查詢，超過會回 `loadingThrottled`；匯入時一次查幾十個地點很容易碰到，
+    /// 所以被節流時等一下再試，不把它當成「找不到」。
+    static func run(_ request: MKLocalSearch.Request) async -> [MKMapItem] {
+        for wait in [10, 20, 30, 0] {
+            do {
+                return try await MKLocalSearch(request: request).start().mapItems
+            } catch let error as MKError where error.code == .loadingThrottled && wait > 0 {
+                try? await Task.sleep(for: .seconds(wait))
+                if Task.isCancelled { return [] }
+            } catch {
+                return []
+            }
+        }
+        return []
     }
 
     public func nearby(_ coordinate: Coordinate, limit: Int = 5) async -> [PlaceOption] {

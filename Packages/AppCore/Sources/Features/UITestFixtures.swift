@@ -74,6 +74,13 @@ final class FakeImportService: ImportService, @unchecked Sendable {
         return s
     }
 
+    func session(importID: UUID) async throws -> ImportSession {
+        var s = Self.session
+        s.parseStatus = .parsing
+        s.parseProgress = ParseProgress(stage: "writing", days: 1, stops: 2, lastPlace: "XXX Shoes")
+        return s
+    }
+
     func registerPlace(_ draft: PlaceDraft) async throws -> Place {
         Place(id: UUID(), provider: draft.provider.rawValue, providerPlaceId: draft.providerPlaceId, name: draft.name,
               nameLocal: nil, address: draft.address, latitude: draft.latitude, longitude: draft.longitude, countryCode: draft.countryCode)

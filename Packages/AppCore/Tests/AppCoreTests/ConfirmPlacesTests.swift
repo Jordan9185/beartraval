@@ -94,4 +94,35 @@ struct ConfirmPlacesTests {
         let stored = try JSONDecoder().decode(ImportSession.Stored.self, from: Data(json.utf8))
         #expect(stored.draft.days[0].stops[0].needsConfirmation == [.ambiguousBranch])
     }
+
+    @Test func flightsAndUnnamedItemsStartAsText() {
+        let mixed = ParseDraft(days: [
+            .init(date: "2026-10-01", dayLabel: "Day 1", stops: [
+                ParsedStop(sourceExcerpt: "09:20 BR156", placeName: "長榮 BR156", category: "transport", startTime: "09:20", fixedSuspected: true),
+                ParsedStop(sourceExcerpt: "晚餐留白", placeName: nil, category: "eat"),
+                ParsedStop(sourceExcerpt: "MAKMADE", placeName: "MAKMADE", city: "Seoul", searchQuery: "MAKMADE 성수", category: "shop"),
+            ]),
+        ], cityCandidates: ["Seoul"], warnings: [])
+        var state = ConfirmPlacesState(session: session, draft: mixed)
+        #expect(state.items.map(\.needsSearch) == [false, false, true])
+        #expect(state.items[0].decision == .pendingText)
+        #expect(state.items[1].decision == .pendingText)
+        #expect(state.items[2].decision == nil)
+        #expect(state.undecidedCount == 1)
+        #expect(state.unconfirmedFixedCount == 1)
+
+        state.keepUndecidedAsText()
+        state.confirmSuspectedFixed()
+        #expect(state.items[2].decision == .pendingText)
+        #expect(state.items[0].fixed == true)
+        #expect(state.canSubmit)
+    }
+
+    @Test func decodesCityAndParseProgress() throws {
+        let json = #"{"id":"6f1c3b1e-0000-4000-8000-000000000001","trip_name":"t","start_date":"2026-10-23","end_date":"2026-10-29","time_zone":"Asia/Seoul","raw_text":"x","parse_status":"parsing","parse_result":null,"parse_error":null,"parse_progress":{"stage":"writing","days":3,"stops":18,"last_place":"大久野島"},"trip_id":null}"#
+        let session = try JSONDecoder().decode(ImportSession.self, from: Data(json.utf8))
+        #expect(session.parseProgress == ParseProgress(stage: "writing", days: 3, stops: 18, lastPlace: "大久野島"))
+        let stop = try JSONDecoder().decode(ParsedStop.self, from: Data(#"{"source_excerpt":"尾道","place_name":"尾道","branch_hint":null,"city":"Onomichi","search_query":"尾道","category":"place","start_time":null,"end_time":null,"time_is_approximate":false,"fixed_suspected":false,"fixed_reason":null,"confidence":"high","needs_confirmation":[]}"#.utf8))
+        #expect(stop.city == "Onomichi")
+    }
 }

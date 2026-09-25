@@ -6,6 +6,8 @@ import type { ConfirmationReason, ParseInput, ParseResult, ParsedStop } from "./
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_WARNINGS = 20;
+const MAX_WARNING_LENGTH = 300;
 
 export interface ValidationIssue {
   path: string;
@@ -64,11 +66,26 @@ export function validateDraft(input: ParseInput, draft: ParseResult): ValidatedR
         stop.confidence = "low";
       }
 
+      // Names are copied as written, so one that isn't in the text was invented
+      // or planted; it goes to the user as an unknown place.
+      if (stop.place_name !== null && !haystack.toLowerCase().includes(squash(stop.place_name).toLowerCase())) {
+        issues.push({ path: `${path}.place_name`, issue: "place name not found in input" });
+        stop.confidence = "low";
+        addReason(stop, "unknown_place");
+      }
+
       if (stop.place_name === null && stop.category !== "transport") {
         addReason(stop, "unknown_place");
       }
     });
   });
+
+  // Warnings are shown as-is; keep them to a readable size.
+  if (result.warnings.length > MAX_WARNINGS) {
+    issues.push({ path: "warnings", issue: `${result.warnings.length} warnings, kept ${MAX_WARNINGS}` });
+    result.warnings = result.warnings.slice(0, MAX_WARNINGS);
+  }
+  result.warnings = result.warnings.map((w) => (w.length > MAX_WARNING_LENGTH ? `${w.slice(0, MAX_WARNING_LENGTH)}…` : w));
 
   return { result, issues };
 }

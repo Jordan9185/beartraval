@@ -24,7 +24,21 @@ select tests.throws(format($$select app.record_parse_result(%L, 'parsed', '{}', 
 select tests.throws(format($$update app.import_sessions set parse_status = 'parsed' where id = %L$$, :'import_id'),
                     '42501', 'direct update denied');
 
+select tests.throws(format($$select app.record_parse_progress(%L, '{"stage":"writing"}')$$, :'import_id'),
+                    '42501', 'client cannot record parse progress');
+
 reset role;
+set role service_role;
+-- Progress is only kept while parsing.
+select app.record_parse_progress(:'import_id', '{"stage":"writing","stops":1}');
+reset role;
+select tests.ok((select parse_progress is null from app.import_sessions where id = :'import_id'), 'progress ignored unless parsing');
+set role service_role;
+select app.record_parse_result(:'import_id', 'parsing', null, null, null);
+select app.record_parse_progress(:'import_id', '{"stage":"writing","days":1,"stops":2,"last_place":"광장시장"}');
+reset role;
+select tests.ok((select parse_progress ->> 'last_place' = '광장시장' from app.import_sessions where id = :'import_id'),
+                'progress recorded while parsing');
 set role service_role;
 select app.record_parse_result(:'import_id', 'failed', null, 'invalid_output', 'claude-opus-5');
 reset role;

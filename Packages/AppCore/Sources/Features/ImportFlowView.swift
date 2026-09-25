@@ -12,6 +12,8 @@ public struct ImportFlowView: View {
     @State private var editedText: String
     @State private var confirm: ConfirmPlacesState?
     @State private var errorMessage: String?
+    @State private var progress: ParseProgress?
+    @State private var parseStarted = Date()
 
     enum Phase: Equatable {
         case parsing
@@ -33,12 +35,7 @@ public struct ImportFlowView: View {
         Group {
             switch phase {
             case .parsing:
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("正在解析行程文字…")
-                    Text("通常需要數十秒").font(.caption).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ParsingProgressView(characters: session.rawText.count, progress: progress, started: parseStarted)
             case .failed:
                 failedView
             case .editing:
@@ -47,6 +44,7 @@ public struct ImportFlowView: View {
                 if let confirm = Binding($confirm) {
                     ConfirmPlacesView(state: confirm, rawText: session.rawText, placeSearch: placeSearch,
                                       city: session.parseResult?.draft.cityCandidates.first,
+                                      warnings: session.parseResult?.draft.warnings ?? [],
                                       isCommitting: phase == .committing, errorMessage: errorMessage) {
                         Task { await commit() }
                     }
@@ -105,6 +103,19 @@ public struct ImportFlowView: View {
     }
 
     private func parse() async {
+        progress = nil
+        parseStarted = Date()
+        // 解析是一個長請求；同時輪詢服務端寫入的進度。
+        let poll = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                if Task.isCancelled { break }
+                if let latest = try? await service.session(importID: session.id), latest.parseStatus == .parsing {
+                    progress = latest.parseProgress
+                }
+            }
+        }
+        defer { poll.cancel() }
         do {
             let updated = try await service.parse(importID: session.id)
             if updated.parseStatus == .parsed { apply(updated) } else {
@@ -166,12 +177,39 @@ struct ConfirmPlacesView: View {
     let rawText: String
     let placeSearch: any PlaceSearching
     let city: String?
+    let warnings: [String]
     let isCommitting: Bool
     let errorMessage: String?
     let onSubmit: () -> Void
 
     var body: some View {
         Form {
+            Section {
+                summary
+                if searchTotal > 0 && searchDone < searchTotal {
+                    ProgressView(value: Double(searchDone), total: Double(searchTotal)) {
+                        Text("搜尋地點 \(searchDone)/\(searchTotal)").font(.caption)
+                    }
+                }
+                if state.undecidedCount > 0 {
+                    Button("其餘 \(state.undecidedCount) 項先保留為文字，之後再確認") { state.keepUndecidedAsText() }
+                        .accessibilityIdentifier("keepUndecided")
+                }
+                if state.unconfirmedFixedCount > 0 {
+                    Button("疑似固定的 \(state.unconfirmedFixedCount) 項都設為固定") { state.confirmSuspectedFixed() }
+                }
+            } footer: {
+                Text("地點要由你選定才會寫入行程；保留為文字的項目不參與路線，之後可在行程裡再確認。")
+            }
+            if !warnings.isEmpty {
+                Section {
+                    DisclosureGroup("AI 備註（\(warnings.count)）") {
+                        ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in
+                            Text(verbatim: warning).font(.callout)
+                        }
+                    }
+                }
+            }
             Section {
                 DisclosureGroup("原文") {
                     Text(rawText).font(.callout).textSelection(.enabled).accessibilityIdentifier("rawText")
@@ -198,13 +236,55 @@ struct ConfirmPlacesView: View {
         .task { await searchAll() }
     }
 
-    /// 依序查詢（MapKit 有節流）；只列候選，不自動選定。
-    private func searchAll() async {
-        for index in state.items.indices where !state.items[index].searched {
-            let stop = state.items[index].stop
-            if let query = stop.searchQuery ?? stop.placeName {
-                state.items[index].candidates = await placeSearch.search(query, near: city, limit: 5)
+    private var summary: some View {
+        let places = state.items.filter(\.needsSearch).count
+        let text = state.items.count - places
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("解析出 \(state.items.count) 項：\(places) 個地點待選")
+                .font(.subheadline.weight(.semibold))
+            if text > 0 {
+                Text("\(text) 項（航班、未指定地點）已先保留為文字").font(.caption).foregroundStyle(.secondary)
             }
+        }
+        .accessibilityIdentifier("importSummary")
+    }
+
+    private var searchTotal: Int { state.items.filter(\.needsSearch).count }
+    private var searchDone: Int { state.items.filter { $0.needsSearch && $0.searched }.count }
+
+    /// 依序查詢（MapKit 有節流）；只列候選，不自動選定。
+    /// 每個地點在自己的城市一帶搜尋，跨國旅程才不會拿首爾去搜廣島的地點。
+    private func searchAll() async {
+        var centers: [String: Coordinate?] = [:]
+        var cache: [String: [PlaceOption]] = [:]
+        for index in state.items.indices where !state.items[index].searched {
+            let item = state.items[index]
+            guard item.needsSearch, let query = item.stop.searchQuery ?? item.stop.placeName else {
+                state.items[index].searched = true
+                continue
+            }
+            let area = item.stop.city ?? city
+            var center: Coordinate?
+            if let area {
+                if let known = centers[area] {
+                    center = known
+                } else {
+                    center = await placeSearch.locate(city: area)
+                    centers[area] = center
+                }
+            }
+            let key = "\(query)|\(area ?? "")"
+            let results: [PlaceOption]
+            if let cached = cache[key] {
+                results = cached
+            } else if let center {
+                results = await placeSearch.search(query, around: center, limit: 5)
+            } else {
+                results = await placeSearch.search(query, near: area, limit: 5)
+            }
+            if Task.isCancelled { return }
+            cache[key] = results
+            state.items[index].candidates = results
             state.items[index].searched = true
         }
     }
@@ -244,7 +324,7 @@ struct ConfirmItemView: View {
             .accessibilityIdentifier("fixed-\(item.id)")
         }
 
-        if !item.searched && item.stop.placeName != nil {
+        if !item.searched && item.needsSearch {
             ProgressView("搜尋候選地點…")
         }
         ForEach(item.candidates) { option in
@@ -262,8 +342,8 @@ struct ConfirmItemView: View {
             }
             .accessibilityIdentifier("candidate-\(item.id)-\(option.name)")
         }
-        if item.searched && item.candidates.isEmpty && item.stop.placeName != nil {
-            Text("找不到符合的地點").font(.caption).foregroundStyle(.secondary)
+        if item.searched && item.candidates.isEmpty && item.needsSearch {
+            Text("Apple 地圖找不到這個地點，可以先保留為文字，之後在行程裡再確認。").font(.caption).foregroundStyle(.secondary)
         }
 
         HStack {
@@ -291,6 +371,59 @@ struct ConfirmItemView: View {
         case .unknownPlace: "可能不是可搜尋的地點"
         case .ambiguousDate: "日期不明確"
         case .ambiguousTime: "時間不明確"
+        }
+    }
+}
+
+/// 解析中的畫面：顯示實際進度（服務端邊串流邊回報），不是假的轉圈。
+struct ParsingProgressView: View {
+    let characters: Int
+    let progress: ParseProgress?
+    let started: Date
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            step(done: true, active: false, title: "已送出原文（\(characters.formatted()) 字）")
+            step(done: writing, active: !writing, title: "AI 閱讀行程",
+                 detail: writing ? nil : "先讀完整份行程，分辨哪些是地點、哪些只是備註")
+            step(done: false, active: writing, title: "整理成每日行程", detail: draftDetail)
+            step(done: false, active: false, title: "搜尋地點，讓你逐一確認")
+            TimelineView(.periodic(from: started, by: 1)) { context in
+                let seconds = max(0, Int(context.date.timeIntervalSince(started)))
+                Text("已經過 \(seconds / 60):\(String(format: "%02d", seconds % 60))・長行程約需 1～2 分鐘")
+                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("parsingProgress")
+    }
+
+    private var writing: Bool { progress?.stage == "writing" }
+
+    private var draftDetail: String? {
+        guard let progress, writing else { return nil }
+        var text = "第 \(max(progress.days, 1)) 天・已找到 \(progress.stops) 項"
+        if let last = progress.lastPlace { text += "（最新：\(last)）" }
+        return text
+    }
+
+    private func step(done: Bool, active: Bool, title: String, detail: String? = nil) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Group {
+                if done {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                } else if active {
+                    ProgressView()
+                } else {
+                    Image(systemName: "circle").foregroundStyle(.tertiary)
+                }
+            }
+            .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).foregroundStyle(done || active ? .primary : .secondary)
+                if let detail { Text(verbatim: detail).font(.caption).foregroundStyle(.secondary) }
+            }
         }
     }
 }

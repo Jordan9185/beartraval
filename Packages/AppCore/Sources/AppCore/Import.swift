@@ -48,6 +48,8 @@ public struct ParsedStop: Codable, Hashable, Sendable {
     public var sourceExcerpt: String
     public var placeName: String?
     public var branchHint: String?
+    /// 地點所在城市（英文，例如 "Onomichi"），用來把地圖搜尋限定在那一帶。
+    public var city: String?
     public var searchQuery: String?
     public var category: String
     public var startTime: String?
@@ -58,12 +60,13 @@ public struct ParsedStop: Codable, Hashable, Sendable {
     public var confidence: String
     public var needsConfirmation: [Reason]
 
-    public init(sourceExcerpt: String, placeName: String?, branchHint: String? = nil, searchQuery: String? = nil,
+    public init(sourceExcerpt: String, placeName: String?, branchHint: String? = nil, city: String? = nil, searchQuery: String? = nil,
                 category: String = "place", startTime: String? = nil, endTime: String? = nil, timeIsApproximate: Bool = false,
                 fixedSuspected: Bool = false, fixedReason: String? = nil, confidence: String = "high", needsConfirmation: [Reason] = []) {
         self.sourceExcerpt = sourceExcerpt
         self.placeName = placeName
         self.branchHint = branchHint
+        self.city = city
         self.searchQuery = searchQuery
         self.category = category
         self.startTime = startTime
@@ -76,7 +79,7 @@ public struct ParsedStop: Codable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case category, confidence
+        case category, confidence, city
         case sourceExcerpt = "source_excerpt"
         case placeName = "place_name"
         case branchHint = "branch_hint"
@@ -103,6 +106,26 @@ public struct ParsedStop: Codable, Hashable, Sendable {
 
 // MARK: - ImportSession
 
+/// 解析進度：AI 還在閱讀（reading），或已開始寫出草稿（writing）。
+public struct ParseProgress: Codable, Hashable, Sendable {
+    public var stage: String
+    public var days: Int
+    public var stops: Int
+    public var lastPlace: String?
+
+    public init(stage: String, days: Int = 0, stops: Int = 0, lastPlace: String? = nil) {
+        self.stage = stage
+        self.days = days
+        self.stops = stops
+        self.lastPlace = lastPlace
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case stage, days, stops
+        case lastPlace = "last_place"
+    }
+}
+
 public struct ImportSession: Codable, Identifiable, Hashable, Sendable {
     public enum Status: String, Codable, Sendable {
         case pending, parsing, parsed, failed
@@ -126,6 +149,8 @@ public struct ImportSession: Codable, Identifiable, Hashable, Sendable {
     public var parseStatus: Status
     public var parseResult: Stored?
     public var parseError: String?
+    /// 解析中的進度（服務端邊串流邊寫入）。
+    public var parseProgress: ParseProgress?
     public var tripId: UUID?
 
     public init(id: UUID, tripName: String, startDate: String, endDate: String, timeZone: String, rawText: String,
@@ -152,6 +177,7 @@ public struct ImportSession: Codable, Identifiable, Hashable, Sendable {
         case parseStatus = "parse_status"
         case parseResult = "parse_result"
         case parseError = "parse_error"
+        case parseProgress = "parse_progress"
         case tripId = "trip_id"
     }
 
@@ -184,6 +210,8 @@ public protocol ImportService: Sendable {
     func updateText(importID: UUID, rawText: String) async throws -> ImportSession
     /// 觸發 AI 解析，回傳更新後的 session（parsed 或 failed）。
     func parse(importID: UUID) async throws -> ImportSession
+    /// 讀取目前狀態（解析中輪詢進度用）。
+    func session(importID: UUID) async throws -> ImportSession
     func registerPlace(_ draft: PlaceDraft) async throws -> Place
     func commit(importID: UUID, days: [ImportDayCommit]) async throws -> Trip
 }
@@ -215,6 +243,10 @@ public struct SupabaseImportService: ImportService {
         } catch {
             // 函式失敗時 session 仍保留原文；以資料庫狀態為準。
         }
+        return try await session(importID: importID)
+    }
+
+    public func session(importID: UUID) async throws -> ImportSession {
         do {
             return try await client.from("import_sessions").select().eq("id", value: importID).single().execute().value
         } catch {

@@ -34,7 +34,10 @@ export const ParsedStop = z.object({
   place_name: z.string().nullable(),
   // Branch or area hint from the text ("明洞", "Seongsu", "広島駅"), if any.
   branch_hint: z.string().nullable(),
-  // Query for the place lookup service, e.g. "XXX Shoes Seongsu Seoul".
+  // City, town or island in English ("Seoul", "Onomichi"); scopes the map search.
+  city: z.string().nullable(),
+  // Query for the place lookup in the place's local language, e.g. "마뗑킴 성수";
+  // null for transport legs.
   search_query: z.string().nullable(),
   category: StopCategory,
   // 24h "HH:MM" local time, or null when no time is given.

@@ -12,9 +12,39 @@ export const DEFAULT_MODEL = "claude-opus-5-5";
 // Opus 5.5 defaults to medium effort; parsing accuracy matters more than latency here.
 export const DEFAULT_EFFORT = "high" as const;
 
+export interface ParseProgress {
+  // "reading" until the model starts writing the draft, then "writing".
+  stage: "reading" | "writing";
+  days: number;
+  stops: number;
+  last_place: string | null;
+}
+
 export interface ParseOptions {
   model?: string;
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
+  // Called as the draft streams in; counts come from the partial JSON text.
+  onProgress?: (progress: ParseProgress) => void;
+}
+
+// Counts what the partial draft JSON contains so far.
+export function progressOf(partialJson: string): ParseProgress {
+  const names = [...partialJson.matchAll(/"place_name"\s*:\s*"((?:[^"\\]|\\.)*)"/g)];
+  return {
+    stage: "writing",
+    days: (partialJson.match(/"day_label"\s*:/g) ?? []).length,
+    stops: (partialJson.match(/"source_excerpt"\s*:/g) ?? []).length,
+    last_place: unescape(names.at(-1)?.[1]),
+  };
+}
+
+function unescape(raw: string | undefined): string | null {
+  if (raw === undefined) return null;
+  try {
+    return JSON.parse(`"${raw}"`);
+  } catch {
+    return raw;
+  }
 }
 
 export type ParseOutcome =
@@ -33,7 +63,8 @@ export async function parseItinerary(
   input: ParseInput,
   options: ParseOptions = {},
 ): Promise<ParseOutcome> {
-  const response = await client.beta.messages.parse({
+  // Streamed so long itineraries don't hit request timeouts and progress can be shown.
+  const stream = client.beta.messages.stream({
     model: options.model ?? DEFAULT_MODEL,
     max_tokens: 16000,
     betas: ["server-side-fallback-2026-07-01"],
@@ -46,6 +77,9 @@ export async function parseItinerary(
     system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: userMessage(input) }],
   });
+  options.onProgress?.({ stage: "reading", days: 0, stops: 0, last_place: null });
+  stream.on("text", (_delta, snapshot) => options.onProgress?.(progressOf(snapshot)));
+  const response = await stream.finalMessage();
 
   if (response.stop_reason === "refusal") {
     return { status: "failed", reason: "refusal", detail: response.stop_details?.category ?? undefined };

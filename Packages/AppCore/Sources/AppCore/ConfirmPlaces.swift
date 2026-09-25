@@ -42,6 +42,12 @@ public struct ConfirmItem: Identifiable, Equatable, Sendable {
         stop.placeName ?? stop.sourceExcerpt
     }
 
+    /// 航班等交通段、沒有地名的項目不查地圖，預設保留為文字（使用者仍可改）。
+    public var needsSearch: Bool {
+        guard stop.placeName != nil else { return false }
+        return !(stop.category == "transport" && stop.searchQuery == nil)
+    }
+
     public var blockers: [Blocker] {
         guard let decision else { return [.undecided] }
         if decision == .remove { return [] }
@@ -63,7 +69,9 @@ public struct ConfirmPlacesState: Equatable, Sendable {
             for stop in day.stops {
                 let dateOK = day.date.map(session.tripDates.contains) ?? false
                 let date = dateOK && !stop.needsConfirmation.contains(.ambiguousDate) ? day.date : nil
-                items.append(ConfirmItem(id: items.count, stop: stop, date: date, fixed: stop.fixedSuspected ? nil : false))
+                var item = ConfirmItem(id: items.count, stop: stop, date: date, fixed: stop.fixedSuspected ? nil : false)
+                if !item.needsSearch { item.decision = .pendingText }
+                items.append(item)
             }
         }
         self.items = items
@@ -75,6 +83,28 @@ public struct ConfirmPlacesState: Equatable, Sendable {
 
     public var remainingCount: Int {
         items.filter { !$0.blockers.isEmpty }.count
+    }
+
+    public var undecidedCount: Int {
+        items.filter { $0.decision == nil }.count
+    }
+
+    public var unconfirmedFixedCount: Int {
+        items.filter { $0.decision != .remove && $0.fixed == nil }.count
+    }
+
+    /// 還沒決定的項目先保留為待確認文字：不猜地點，之後在行程裡再確認（規格 §1）。
+    public mutating func keepUndecidedAsText() {
+        for index in items.indices where items[index].decision == nil {
+            items[index].decision = .pendingText
+        }
+    }
+
+    /// 使用者一次確認：疑似固定的項目都設為固定。
+    public mutating func confirmSuspectedFixed() {
+        for index in items.indices where items[index].fixed == nil {
+            items[index].fixed = true
+        }
     }
 
     /// 需要先註冊的地點（去重）。

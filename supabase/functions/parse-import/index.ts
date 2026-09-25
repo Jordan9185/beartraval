@@ -53,13 +53,27 @@ Deno.serve(async (req) => {
   }
 
   await record("parsing", null, null, null);
+
+  // Progress for the waiting screen: at most one write every 1.5 s, in order.
+  let lastWrite = 0;
+  let writing = Promise.resolve();
+  const onProgress = (progress: unknown) => {
+    const now = Date.now();
+    if (now - lastWrite < 1500) return;
+    lastWrite = now;
+    writing = writing.then(async () => {
+      await admin.rpc("record_parse_progress", { p_import_id: importId, p_progress: progress });
+    }).catch(() => {});
+  };
+
   try {
     const outcome = await parseItinerary(new Anthropic({ apiKey }), {
       tripStart: session.start_date,
       tripEnd: session.end_date,
       timeZone: session.time_zone,
       rawText: session.raw_text,
-    }, { model: Deno.env.get("ANTHROPIC_MODEL") || undefined });
+    }, { model: Deno.env.get("ANTHROPIC_MODEL") || undefined, onProgress });
+    await writing;
     if (outcome.status === "failed") {
       await record("failed", null, outcome.reason, null);
       return json({ status: "failed", reason: outcome.reason });
