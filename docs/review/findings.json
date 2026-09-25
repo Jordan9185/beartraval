@@ -1,0 +1,2027 @@
+{
+ "reviewed_commit": "e5511f8",
+ "code": {
+  "confirmed": [
+   {
+    "file": "Packages/AppCore/Sources/AppCore/OfflineQueue.swift",
+    "line": 61,
+    "severity": "high",
+    "category": "concurrency",
+    "title": "OfflineQueue.flush is re-entrant: concurrent flushes double-send, drop an unexecuted item, and can crash on items[0]",
+    "detail": "`flush` is an actor method that suspends on `await executor.execute(item)`. Swift actors are re-entrant at suspension points, and the app calls flush from several places at once (Features/RootView.swift:36 `.task { flushOfflineQueue() }`, RootView.swift:56 on network reconnect, ShoppingView.swift:118 on every shopping reload, SavedView.swift:139 on saved reload). Scenario with queue [item1, item2]: flush A reads `items.first` = item1 and suspends in execute; flush B enters, also reads item1 and executes it again; A resumes and `items.removeFirst()` removes item1; B resumes and `items.removeFirst()` removes item2, which was never sent — a queued Saved/purchase operation is silently lost (result.sent is even incremented for it). Variant with a single-item queue: A succeeds and removes item1 (queue now empty); B's execute fails with a transient error and runs `items[0].attempts += 1` on an empty array → index out of range trap. The 'replay order preserved, stop on network error' contract the type documents does not hold under overlapping flushes.",
+    "evidence": "while let item = items.first {\n            do {\n                try await executor.execute(item)\n                result.sent += 1\n                items.removeFirst()\n            } catch let error as BackendError where !Self.isTransient(error) {\n                result.rejected.append(item)\n                items.removeFirst()\n            } catch {\n                items[0].attempts += 1\n                break\n            }",
+    "rule": "plan D6 (offline queue: Saved/Shopping ops replay in order, idempotent)",
+    "fixes": [
+     "Make flush non-re-entrant inside the actor. Minimal version in OfflineQueue.swift: add `private var flushing = false`, and at the top of `flush` do `guard !flushing else { return FlushResult(remaining: items.count) }; flushing = true; defer { flushing = false }`. Additionally (or alternatively) make each post-await mutation id-checked so a stale iteration can never remove the wrong element: replace `items.removeFirst()` with `if items.first?.id == item.id { items.removeFirst() }` and `items[0].attempts += 1` with `if let i = items.firstIndex(where: { $0.id == item.id }) { items[i].attempts += 1 }`. A tests-only reproduction: enqueue two ops, start two `flush` calls concurrently against an executor that suspends (e.g. `await Task.yield()`/continuation) before returning, and assert the executor saw both item ids exactly once and `items` is empty.",
+     "In OfflineQueue add a re-entrancy guard so overlapping calls coalesce, and verify the head before mutating:\n\n```swift\nprivate var inFlight: Task<FlushResult, Never>?\n\npublic func flush(using executor: any QueuedOperationExecutor) async -> FlushResult {\n    if let inFlight { return await inFlight.value }\n    let task = Task { await self.run(executor) }\n    inFlight = task\n    defer { inFlight = nil }\n    return await task.value\n}\n\nprivate func run(_ executor: any QueuedOperationExecutor) async -> FlushResult {\n    var result = FlushResult()\n    while let item = items.first {\n        do {\n            try await executor.execute(item)\n            result.sent += 1\n        } catch let error as BackendError where !Self.isTransient(error) {\n            result.rejected.append(item)\n        } catch {\n            if items.first?.id == item.id { items[0].attempts += 1 }\n            break\n        }\n        if items.first?.id == item.id { items.removeFirst() }\n        persist()\n    }\n    persist()\n    result.remaining = items.count\n    return result\n}\n```\n\nAdd a test in SharingTests.swift that launches two `queue.flush` calls concurrently (with a FakeExecutor that suspends) and asserts each item is executed exactly once and no trap occurs.",
+     "Make flush non-re-entrant and stop mutating by position. In OfflineQueue: add `private var isFlushing = false`; at the top of `flush`, `guard !isFlushing else { return FlushResult(remaining: items.count) }` (or await a stored in-flight Task and return its result), set `isFlushing = true` and `defer { isFlushing = false }`. Additionally, replace the positional mutations with id-based ones so a stale iteration can never remove or index the wrong element: `items.removeAll { $0.id == item.id }` on success/reject, and `if let i = items.firstIndex(where: { $0.id == item.id }) { items[i].attempts += 1 }` on transient failure. Add a test in SharingTests that starts two concurrent `flush` calls against a slow FakeExecutor with a two-item queue and asserts each item is executed exactly once and nothing remains."
+    ]
+   },
+   {
+    "file": "supabase/migrations/20260925000010_place_chinese_name.sql",
+    "line": 238,
+    "severity": "medium",
+    "category": "security",
+    "title": "Any authenticated account can define or amend shared place data used by every other trip",
+    "detail": "app.places is a global cache readable by every authenticated user (migration 1 line 219-220: `create policy places_authenticated_read on app.places for select to authenticated using (true)`), and app.upsert_place is callable by any authenticated user with no trip membership check at all (it only calls `perform app.current_user_id()`). Two cross-tenant writes follow. (a) First-writer-wins with no validation against the provider: an attacker who registers ('apple_mapkit', <real Apple identifier>) with an arbitrary name and latitude/longitude before anyone else permanently binds that identifier for every trip; when a legitimate user's client later calls upsert_place with the real data, the `on conflict ... do update` never touches name/latitude/longitude, so the attacker's coordinates are returned and become the stop's place_id used in route computation. There is no admin/repair path. places.test.sql lines 53-55 confirms the second caller's coordinates (0,0) are ignored, which is the same mechanism in reverse. (b) The `coalesce(app.places.name_local, excluded.name_local)` / `coalesce(app.places.name_zh, excluded.name_zh)` fill-in lets any authenticated user (including a non-member or a Viewer of an unrelated trip) set the Chinese/local display name of any existing place whose value is still null; that text is then rendered inside other users' itineraries and Saved lists. Identifiers are discoverable because places is enumerable via the `using (true)` policy. This violates 「權限一律由服務端驗證」 for data that feeds other trips' route math.",
+    "evidence": "  on conflict (provider, provider_place_id) do update\n    set name_local = coalesce(app.places.name_local, excluded.name_local),\n        name_zh = coalesce(app.places.name_zh, excluded.name_zh)\n  returning * into p;",
+    "rule": "CLAUDE.md 權限一律由服務端驗證；未確認地點不得參與路線計算",
+    "fixes": [
+     "Minimal server-side fix in a new migration replacing app.upsert_place: (a) drop the cross-tenant fill-in — on conflict do nothing (as in 20260924000002) and instead store name_zh/name_local overrides on the trip-scoped rows (stops / saved_places) or only allow the fill-in when the caller is a member of a trip that references the place (`exists (select 1 from app.stops s where s.place_id = app.places.id and app.trip_role_of(s.trip_id) is not null)`); (b) on conflict, if the incoming latitude/longitude differ from the stored row by more than a small tolerance (e.g. 100 m), raise a PLACE_CONFLICT error instead of silently returning the stored row, so a client that has the real MapKit data never adopts poisoned coordinates; (c) add `created_by uuid` to app.places for audit and an owner/service-role repair path. Longer term, resolve identity fields via the apple_maps_server provider in an Edge Function rather than trusting client-supplied coordinates.",
+     "In app.upsert_place: add `created_by uuid` to app.places and (a) restrict the coalesce fill-in of name_local/name_zh to callers who are the row's creator or a member of a trip that references the place (exists in app.stops / app.saved_places / app.shopping merchants where app.trip_role_of(trip_id) is not null); (b) on conflict, if the existing row's coordinates differ from the caller's by more than a small tolerance (e.g. ~100 m via earth-distance), do not silently return the existing row — raise 'PLACE_CONFLICT' (PT409) or insert a separate row keyed by (provider, provider_place_id, created_by) so one account's bad data cannot bind the identifier for everyone. Add a places.test.sql case asserting an outsider cannot fill name_zh on a place it does not use.",
+     "Minimal: in supabase/migrations (new migration) add `created_by uuid not null default app.current_user_id()` to app.places, and change upsert_place's `on conflict ... do update` to fill name_local/name_zh only when the caller may legitimately edit that row, e.g. `where app.places.created_by = app.current_user_id() or exists (select 1 from app.stops s where s.place_id = app.places.id and app.trip_role_of(s.trip_id) in ('owner','editor'))` (otherwise `do nothing` and return the existing row as migration 2 did). For the first-writer problem, add a server-side guard on conflict: if the incoming coordinates differ from the stored ones by more than a small threshold (e.g. > 500 m), do not silently return the stored row — raise `PLACE_MISMATCH` (PT409) so the client re-resolves and the row can be flagged for review, and provide an owner/service-role repair RPC. Alternatively, keep places purely as identity (provider, provider_place_id) and move name_zh/name_local overrides into trip-scoped columns on app.stops / app.saved_places so display text is never writable across tenants."
+    ]
+   },
+   {
+    "file": "supabase/migrations/20260924000001_core_itinerary.sql",
+    "line": 311,
+    "severity": "medium",
+    "category": "correctness",
+    "title": "commit_itinerary skips the STALE_REVISION check when p_expected_route_revision is NULL",
+    "detail": "The revision guard is a plain `<>` comparison. If the caller passes JSON null for p_expected_route_revision (PostgREST maps it to SQL NULL), `d.route_revision <> NULL` evaluates to NULL, the IF is not taken, and the commit proceeds to rewrite the whole day and soft-delete every stop not in the list, with no revision check at all. create_proposal is protected only by accident (the NOT NULL column on change_proposals.expected_route_revision makes the insert fail with 23502). Any editor-role client that sends null, e.g. a future optional field or a hand-crafted request, overwrites the formal itinerary silently, which is exactly what the revision check exists to prevent. The current Swift StopDraft/Params encode a non-optional Int, so the shipped app does not trigger it, but the rule is required to hold server-side.",
+    "evidence": "  if d.route_revision <> p_expected_route_revision then\n    raise exception 'STALE_REVISION'",
+    "rule": "CLAUDE.md: 正式行程提交需檢查 revision，過期 proposal 不可靜默覆蓋",
+    "fixes": [
+     "In supabase/migrations/20260924000001_core_itinerary.sql line 311 change the guard to reject NULL: `if p_expected_route_revision is null then raise exception 'INVALID_REVISION' using errcode = 'PT422'; end if;` before the existing check, or simply use `if d.route_revision is distinct from p_expected_route_revision then` (raises STALE_REVISION on NULL). Apply the same `is distinct from` to create_proposal at 20260924000004_change_proposals.sql:81 and 20260924000008_ai_assistant.sql:52 for a clear error instead of the accidental 23502. Add a test case in supabase/tests/itinerary_revision.test.sql: `select tests.throws(format($$select app.commit_itinerary(%L, null, '[]')$$, :'day_id'), 'PT409', 'null revision rejected');`.",
+     "In supabase/migrations/20260924000001_core_itinerary.sql line 311 (via a new migration that `create or replace function app.commit_itinerary`), change the guard to:\n\n  if p_expected_route_revision is null\n     or d.route_revision is distinct from p_expected_route_revision then\n    raise exception 'STALE_REVISION' using errcode = 'PT409', ...\n\nOptionally apply the same `is null or ... is distinct from` form to create_proposal (004:81, 008:52) so the rule does not depend on the column's NOT NULL constraint, and add a test in supabase/tests/itinerary_revision.test.sql: `select tests.throws(format($$select app.commit_itinerary(%L, null, '[]')$$, :'day_id'), 'PT409', 'null revision rejected');`.",
+     "In supabase/migrations/20260924000001_core_itinerary.sql, before line 311 add an explicit null guard:\n\n  if p_expected_route_revision is null then\n    raise exception 'INVALID_REVISION' using errcode = 'PT422';\n  end if;\n\n(or change line 311 to `if p_expected_route_revision is null or d.route_revision <> p_expected_route_revision then`). Apply the same guard in app.create_proposal (20260924000004_change_proposals.sql:81) and the AI variant (20260924000008_ai_assistant.sql:52) so a null revision fails with a clear error rather than 23502. Add a test in supabase/tests/itinerary_revision.test.sql asserting `commit_itinerary(day, null, '[...]')` throws and writes nothing."
+    ]
+   },
+   {
+    "file": "supabase/migrations/20260924000005_saved_places.sql",
+    "line": 72,
+    "severity": "medium",
+    "category": "correctness",
+    "title": "Saved entry stays 'added_to_itinerary' after the stop is removed and can never be re-saved",
+    "detail": "mark_saved_added only moves saved -> added_to_itinerary; the soft-delete branch (new.deleted_at is not null) does nothing, so removing the stop via commit_itinerary leaves the Saved row hidden from the 'to add' list although the place is no longer on the itinerary. The row is not dismissed either, so save_place's place dedupe (`status <> 'dismissed'`, migration 6 lines 141-142) matches it and returns duplicate=true with the stale status: the user cannot get the place back into Saved for that trip. Scenario: save Onion (status saved) -> commit day with Onion (status added_to_itinerary, trigger) -> commit day without Onion (stop tombstoned, saved status unchanged) -> save_place(Onion) returns the added_to_itinerary row, no new entry.",
+    "evidence": "  if new.place_id is not null and new.deleted_at is null then\n    update app.saved_places\n       set status = 'added_to_itinerary', updated_at = now()\n     where trip_id = new.trip_id and place_id = new.place_id and status = 'saved';\n  end if;",
+    "rule": "CLAUDE.md: Saved（地點）與 Shopping（商品）是兩個不同清單 / spec Saved 'to add' semantics",
+    "fixes": [
+     "In supabase/migrations/20260924000005_saved_places.sql (or a new migration with `create or replace function app.mark_saved_added()`), add a revert branch that only fires when no live stop for the same trip/place remains:\n\n  if new.place_id is not null and new.deleted_at is null then\n    update app.saved_places\n       set status = 'added_to_itinerary', updated_at = now()\n     where trip_id = new.trip_id and place_id = new.place_id and status = 'saved';\n  elsif new.place_id is not null and new.deleted_at is not null\n        and not exists (select 1 from app.stops\n                         where trip_id = new.trip_id and place_id = new.place_id and deleted_at is null) then\n    update app.saved_places\n       set status = 'saved', updated_at = now()\n     where trip_id = new.trip_id and place_id = new.place_id and status = 'added_to_itinerary';\n  end if;\n\nAdd a test step to supabase/tests/saved.test.sql: commit the day with an empty list after the existing 'itinerary stop marks saved as added' assertion and assert the row returns to 'saved'.",
+     "Add a revert branch to app.mark_saved_added in supabase/migrations/20260924000005_saved_places.sql (or a new migration replacing the function), so a tombstoned stop restores the Saved entry when no other live stop for the same place remains in the trip:\n\n  if new.place_id is not null and new.deleted_at is null then\n    update app.saved_places\n       set status = 'added_to_itinerary', updated_at = now()\n     where trip_id = new.trip_id and place_id = new.place_id and status = 'saved';\n  elsif new.place_id is not null and new.deleted_at is not null\n        and not exists (select 1 from app.stops\n                         where trip_id = new.trip_id and place_id = new.place_id and deleted_at is null) then\n    update app.saved_places\n       set status = 'saved', updated_at = now()\n     where trip_id = new.trip_id and place_id = new.place_id and status = 'added_to_itinerary';\n  end if;\n\nAlso add a test step in supabase/tests/saved.test.sql: commit the day without Onion and assert status = 'saved' again.",
+     "In app.mark_saved_added (supabase/migrations/20260924000005_saved_places.sql:67-79, or a new migration replacing it) add the reverse branch: after the existing `if`, when the row was tombstoned or its place changed, revert Saved entries whose place no longer has any live stop in the trip, e.g.\n\n  if (new.deleted_at is not null and new.place_id is not null)\n     or (tg_op = 'UPDATE' and old.place_id is distinct from new.place_id and old.place_id is not null) then\n    update app.saved_places sp\n       set status = 'saved', updated_at = now()\n     where sp.trip_id = new.trip_id\n       and sp.place_id = coalesce(case when new.deleted_at is not null then new.place_id end, old.place_id)\n       and sp.status = 'added_to_itinerary'\n       and not exists (select 1 from app.stops st\n                        where st.trip_id = sp.trip_id and st.place_id = sp.place_id and st.deleted_at is null);\n  end if;\n\nand add a test in supabase/tests/saved.test.sql that commits the day without Onion and asserts the row returns to 'saved'."
+    ]
+   },
+   {
+    "file": "supabase/functions/delete-account/index.ts",
+    "line": 24,
+    "severity": "medium",
+    "category": "correctness",
+    "title": "Account deletion is two non-atomic steps; prepare's irreversible effects survive a failed deleteUser",
+    "detail": "`prepare_account_deletion` hard-deletes the caller's solo trips, transfers shared trips to an heir (trips.owner_id and heir's trip_members.role = 'owner') and deletes their import_sessions, and only then is `auth.admin.deleteUser` called. If deleteUser fails (Auth API error, network, rate limit) the function returns 500 DELETE_FAILED, but the trips are already gone/transferred and nothing is rolled back. Concrete state after that path: the account still exists and can sign in; its solo trips and pasted import text are permanently deleted; each shared trip now has two members with role 'owner' (the old owner's trip_members row is only removed by the auth.users cascade, which never ran) while trips.owner_id points at the heir. The iOS client (Hardening.swift deleteAccount) surfaces DELETE_FAILED and keeps the session, so the user sees a working account with missing trips. The migration test only covers the happy path (prepare then `delete from auth.users`).",
+    "evidence": "const prep = await admin.rpc(\"prepare_account_deletion\", { p_user_id: userId });\n  if (prep.error) { ... return json({ error: \"DELETE_FAILED\" }, 500); }\n  const removed = await admin.auth.admin.deleteUser(userId);\n  if (removed.error) {\n    console.log(JSON.stringify({ fn: \"delete-account\", status: \"delete_failed\" }));\n    return json({ error: \"DELETE_FAILED\" }, 500);\n  }",
+    "rule": "docs/planning/mvp-technical-plan.md §3.1 刪除策略; docs/acceptance/mvp-acceptance.md 刪除帳號",
+    "fixes": [
+     "Make the whole deletion one transaction: extend app.prepare_account_deletion (or add app.delete_account(p_user_id)) to end with `delete from auth.users where id = p_user_id;` (service_role, security definer — exactly what the SQL test already does), so the trip transfers, anonymisation and the auth-user removal commit or roll back together; then have the Edge Function call only that RPC and drop the separate `auth.admin.deleteUser` step. If the Admin API must stay, at minimum (a) in prepare, delete or demote the leaving user's trip_members row for transferred trips so no dual-owner state exists, and (b) retry deleteUser a few times before returning DELETE_FAILED, and add a test asserting the partial-failure state.",
+     "Make the transfer and the user removal one transaction: extend `app.prepare_account_deletion` (security definer, service_role only) to end with `delete from auth.users where id = p_user_id;` (exactly what supabase/tests/deletion.test.sql:29-32 already does, so the cascades are known to work), rename it e.g. `app.delete_account`, and have the Edge Function call only that RPC, dropping the separate `auth.admin.deleteUser` step. If deleting auth.users via SQL is not wanted, the fallback is to keep the two steps but make prepare non-destructive until deleteUser succeeds (e.g. move the solo-trip and import_sessions hard-deletes into a second RPC run only after deleteUser returns OK, and rely on the cascade for the rest), plus add a test for the deleteUser-failure path.",
+     "Make the pre-step leave a self-consistent state and make the second step retry: (a) in app.prepare_account_deletion, after transferring each trip also `delete from app.trip_members where trip_id = t.id and user_id = p_user_id;` (or delete all of the user's memberships at the end) so a transferred trip never has two owners; (b) in delete-account/index.ts, retry `admin.auth.admin.deleteUser(userId)` a few times with backoff before returning DELETE_FAILED, and log the userId so it can be finished manually; (c) add a test asserting prepare is idempotent (second call returns transferred=0, deleted=0) and that no trip has two 'owner' members after prepare alone."
+    ]
+   },
+   {
+    "file": "supabase/functions/ask-trip/index.ts",
+    "line": 18,
+    "severity": "medium",
+    "category": "security",
+    "title": "No per-user rate limit or quota on the Claude-backed functions; any authenticated member can drive unbounded API spend",
+    "detail": "ask-trip accepts any number of POSTs from any active trip member and each call goes straight to `client.beta.messages.parse` with `max_tokens: 16000` on the default Opus model; parse-import likewise re-parses on every call (each import_session may hold 50,000 chars of raw_text, and a user can create unlimited sessions). Neither function nor any SQL function checks a per-user count, a cooldown, or an in-flight state before calling the provider (ai_messages is only written after the call; import_sessions.parse_status='parsing' is not checked before starting another parse). A single compromised or malicious account, or a client bug that retries in a loop, can exhaust the ANTHROPIC_API_KEY budget with no server-side cap. The gateway only verifies the JWT, which the app's own users hold.",
+    "evidence": "Deno.serve(async (req) => {\n  if (req.method !== \"POST\") return json({ error: \"METHOD_NOT_ALLOWED\" }, 405);\n  const auth = req.headers.get(\"Authorization\");\n  if (!auth) return json({ error: \"UNAUTHENTICATED\" }, 401);\n...\n    const outcome = await askTrip(new Anthropic({ apiKey }), context.data, question,\n      { model: Deno.env.get(\"ANTHROPIC_MODEL\") || undefined });",
+    "rule": "",
+    "fixes": [
+     "Add a server-side per-user cap before each provider call. Minimal version: (1) ask-trip: after resolving userId and before line 129, use the admin client to count `ai_messages` rows for `user_id = userId` with `created_at > now() - interval '1 hour'` (and optionally `status`-agnostic), and return `json({ error: \"RATE_LIMITED\" }, 429)` when over a threshold (e.g. 30/hour); also insert the ai_messages row with status 'pending' BEFORE the call and update it after, so an in-flight request counts toward the cap. (2) parse-import: after loading the session, return 409 `PARSE_IN_PROGRESS` when `session.parse_status === 'parsing'` and `updated_at` is within the last few minutes; and count `import_sessions` rows for `created_by = uid` updated in the last hour (or add a small `app.ai_calls` ledger table written by both functions via service role) and return 429 when over a threshold. Optionally cap concurrent import sessions per user in `app.create_import`. A cleaner shared form is a `security definer` SQL function `app.reserve_ai_call(p_user_id uuid, p_kind text, p_limit int, p_window interval) returns boolean` that inserts into an `app.ai_calls` ledger and returns false when the window count is exceeded; both functions call it and return 429 on false.",
+     "Add a server-side gate before the provider call in both functions. ask-trip: after resolving userId (index.ts:39), run `admin.from(\"ai_messages\").select(\"id\", { count: \"exact\", head: true }).eq(\"user_id\", userId).gte(\"created_at\", new Date(Date.now() - 60*60*1000).toISOString())` and return json({ error: \"RATE_LIMITED\" }, 429) when count >= N (e.g. 30/hour); optionally also insert a 'pending' ai_messages row first and update it after, so in-flight calls count. parse-import: before `record(\"parsing\", ...)` (index.ts:55), refuse with 409 when `session.parse_status === \"parsing\"` and `session.updated_at` is within the last few minutes, and refuse with 429 when the user has more than N import_sessions with parse_status in ('parsing','parsed','failed') updated in the last hour (count via admin client on import_sessions by created_by). Optionally make the 'pending'->'parsing' transition atomic in SQL (`update ... where parse_status <> 'parsing' returning id`) so concurrent requests cannot both start.",
+     "In ask-trip, before calling the provider, count app.ai_messages for (user_id, created_at > now() - interval '1 hour'/'1 day') with the admin client and return {error:\"RATE_LIMITED\"} 429 above a threshold (e.g. 20/hour, 100/day). In parse-import, reject when session.parse_status = 'parsing' and updated_at is within the last few minutes (409 IN_PROGRESS), and count import_sessions created by the user in the last day (or parse attempts) against a cap before record(\"parsing\"). Also set a monthly spend limit on the Anthropic workspace as a backstop."
+    ]
+   },
+   {
+    "file": "supabase/functions/parse-import/index.ts",
+    "line": 70,
+    "severity": "medium",
+    "category": "correctness",
+    "title": "parse-import holds the HTTP response for the whole Claude parse and does not guard against a concurrent re-parse; a client timeout produces a false failure and a duplicate parse",
+    "detail": "The function awaits `parseItinerary` (streamed from Claude, 16,000 max output tokens, the source comment says minutes at high effort) before answering, while the app already polls `parse_progress` separately. The iOS client (Backend.swift builds SupabaseClient with default options, i.e. URLSession.shared whose timeoutIntervalForRequest is 60 s) swallows the invoke error and reads the session (Import.swift lines 244-249); with the row still at 'parsing' ImportFlowView sets phase = .failed with the generic \"暫時無法連線到解析服務\" text while the server keeps parsing and later writes 'parsed'. Pressing 重試 starts a second invocation for the same import_id: there is no `parse_status = 'parsing'` check before `record(\"parsing\")`, so both invocations run, both bill the API, and whichever finishes last overwrites parse_result. If the Edge Runtime kills the request on its wall-clock limit or a worker restart, nothing marks the session 'failed' (only the in-process catch does), so the row stays 'parsing' with no error until the user manually retries.",
+    "evidence": "if (session.trip_id) return json({ error: \"ALREADY_COMMITTED\" }, 409);\n...\n  await record(\"parsing\", null, null, null);\n...\n    const outcome = await parseItinerary(new Anthropic({ apiKey }), {\n      tripStart: session.start_date,\n      tripEnd: session.end_date,\n      timeZone: session.time_zone,\n      rawText: session.raw_text,\n    }, { model: Deno.env.get(\"ANTHROPIC_MODEL\") || undefined, onProgress });\n    await writing;",
+    "rule": "docs/planning/mvp-technical-plan.md §3.5 PARSE_FAILED",
+    "fixes": [
+     "1) Make the 'parsing' transition an atomic claim: add an RPC (service_role only) e.g. `app.claim_parse(p_import_id uuid) returns boolean` doing `update app.import_sessions set parse_status='parsing', parse_error=null, updated_at=now() where id=p_import_id and trip_id is null and (parse_status in ('pending','failed') or (parse_status='parsing' and updated_at < now() - interval '3 minutes')) returning true`; in parse-import/index.ts replace line 55 with this call and return `json({ error: \"PARSE_IN_PROGRESS\" }, 409)` when it returns false. The stale window lets a retry recover a row left at 'parsing' by a killed worker. 2) In ImportFlowView.parse(), on invoke error/timeout keep polling `service.session` until parse_status leaves 'parsing' (bounded, e.g. 3 min) before setting `.failed`, and only call parse() from `.task` when parseStatus is pending/failed (or 'parsing' older than the stale window), not for every non-parsed row.",
+     "Minimal fix in two parts:\n\n(a) Server claim, supabase/functions/parse-import/index.ts: replace the unconditional `await record(\"parsing\", ...)` at line 55 with an atomic claim RPC (new migration) such as\n  update app.import_sessions set parse_status='parsing', parse_error=null, parse_progress=null, updated_at=now()\n   where id = p_import_id and trip_id is null and (parse_status <> 'parsing' or updated_at < now() - interval '10 minutes')\n  returning id;\nand return `json({ error: \"PARSE_IN_PROGRESS\" }, 409)` when no row is returned. Then respond immediately after the claim (`return json({ status: \"parsing\" })`) and run the parse via `EdgeRuntime.waitUntil(...)` so the HTTP response no longer waits on Claude.\n\n(b) Client, Packages/AppCore/Sources/AppCore/Import.swift `parse(importID:)` / Packages/AppCore/Sources/Features/ImportFlowView.swift `parse()`: after invoke returns (or throws), keep polling `session(importID:)` while `parseStatus == .parsing` (bounded, e.g. up to the runtime limit) and only set `.failed` when the row reports `.failed` or the poll deadline passes; treat a 409 PARSE_IN_PROGRESS from 重試 as \"keep polling\", not as a new failure.",
+     "1) parse-import/index.ts: after the trip_id check, add `if (session.parse_status === \"parsing\" && Date.now() - Date.parse(session.updated_at) < STALE_MS) return json({ status: \"parsing\" }, 202);` so a retry cannot start a second concurrent parse, and treat older 'parsing' rows as stale (retryable). 2) Return immediately after record(\"parsing\") and run the parse in the background with `EdgeRuntime.waitUntil(run())` so the HTTP response is not held for the whole model call. 3) ImportFlowView.parse(): when service.parse returns a session still at .parsing (or invoke throws), keep polling service.session until status becomes .parsed/.failed (with a cap, e.g. 8 min) instead of setting phase = .failed; on cap expiry show failure and let 重試 go through the stale-reset path above."
+    ]
+   },
+   {
+    "file": "ai/itinerary-parse/src/parse.ts",
+    "line": 83,
+    "severity": "medium",
+    "category": "correctness",
+    "title": "max_tokens / invalid_output branches are unreachable: SDK throws inside finalMessage() before stop_reason is checked",
+    "detail": "betaZodOutputFormat() installs a `parse` function, and in @anthropic-ai/sdk 0.128.0 the beta stream calls maybeParseBetaMessage() on every text block at `message_stop` (lib/BetaMessageStream.js:432) regardless of stop_reason. That parse does `zodObject.safeParse(JSON.parse(content))` and throws AnthropicError('Failed to parse structured output') when JSON.parse fails or Zod rejects. When the model hits max_tokens mid-JSON (the normal case for a long itinerary: the output is truncated JSON), or emits schema-invalid JSON, `await stream.finalMessage()` rejects, so the code never reaches `if (response.stop_reason === \"max_tokens\")` or the `invalid_output` return. The exception propagates to supabase/functions/parse-import/index.ts:83, which records `provider_error` instead of `max_tokens`/`invalid_output`, and to eval/run.ts:84, which records status \"error\" instead of \"failed\". Only the case with zero text blocks (e.g. max_tokens exhausted entirely during thinking) reaches those branches. The same pattern applies to ai/trip-assistant/src/ask.ts:30-51, where client.beta.messages.parse() calls parseBetaMessage() unconditionally (resources/beta/messages/messages.js:83). The PARSE_FAILED reason contract (plan §3.5) is therefore misreported for the truncation case; to get the intended reasons the request must use output_config.format without the SDK `parse` hook (or catch AnthropicError and inspect the raw message's stop_reason).",
+    "evidence": "const response = await stream.finalMessage();\n\n  if (response.stop_reason === \"refusal\") {\n    return { status: \"failed\", reason: \"refusal\", detail: response.stop_details?.category ?? undefined };\n  }\n  if (response.stop_reason === \"max_tokens\") {\n    return { status: \"failed\", reason: \"max_tokens\" };\n  }\n\n  const parsed = response.parsed_output;\n  const check = parsed ? ParseResult.safeParse(parsed) : null;\n  if (!check?.success) {\n    return { status: \"failed\", reason: \"invalid_output\", detail: check?.error.message };\n  }",
+    "rule": "plan §3.5 PARSE_FAILED reasons (refusal / max_tokens / invalid_output)",
+    "fixes": [
+     "Send the JSON schema without the SDK `parse` hook and do the parsing after the stop_reason checks. In ai/itinerary-parse/src/parse.ts: `const { parse: _ignored, ...format } = betaZodOutputFormat(ParseResult);` and pass `output_config: { format, effort }`; after the refusal/max_tokens checks, replace the `response.parsed_output` lines with: `const text = response.content.find((b) => b.type === \"text\")?.text; let raw: unknown; try { raw = text ? JSON.parse(text) : null; } catch (e) { return { status: \"failed\", reason: \"invalid_output\", detail: String(e) }; } const check = raw ? ParseResult.safeParse(raw) : null;` (rest unchanged). Apply the same change to ai/trip-assistant/src/ask.ts, switching `client.beta.messages.parse(...)` to `client.beta.messages.create(...)` (keeping betas/output_config) and parsing the first text block after the stop_reason checks. Alternative smaller patch: wrap `await stream.finalMessage()` in try/catch for `Anthropic.AnthropicError` that is not an `Anthropic.APIError`, and return `{ status: \"failed\", reason: stream.currentMessage?.stop_reason === \"max_tokens\" ? \"max_tokens\" : \"invalid_output\", detail: err.message }`.",
+     "Stop giving the SDK the `parse` hook so finalMessage()/parse() cannot throw on the model's text, then check stop_reason before parsing yourself.\n\nai/itinerary-parse/src/parse.ts:\n  // strip the SDK parse hook; keep only the JSON schema\n  const { parse: _parse, ...format } = betaZodOutputFormat(ParseResult);\n  ... output_config: { format, effort: ... } ...\n  const response = await stream.finalMessage();\n  if (response.stop_reason === \"refusal\") { ...unchanged... }\n  if (response.stop_reason === \"max_tokens\") return { status: \"failed\", reason: \"max_tokens\" };\n  const text = response.content.find((b) => b.type === \"text\")?.text;\n  let check: ReturnType<typeof ParseResult.safeParse> | null = null;\n  try { check = text ? ParseResult.safeParse(JSON.parse(text)) : null; } catch (e) { return { status: \"failed\", reason: \"invalid_output\", detail: String(e) }; }\n  if (!check?.success) return { status: \"failed\", reason: \"invalid_output\", detail: check?.error.message };\n\nai/trip-assistant/src/ask.ts: same strip of `parse`, switch `client.beta.messages.parse({...})` to `client.beta.messages.create({...})` (keep betas), then apply the identical stop_reason -> JSON.parse (try/catch) -> AssistantAnswer.safeParse sequence in place of `response.parsed_output`.\n\nAdd a unit test that feeds a fake client whose stream ends with stop_reason \"max_tokens\" and a truncated text block, asserting `{ status: \"failed\", reason: \"max_tokens\" }`.",
+     "In ai/itinerary-parse/src/parse.ts, stop using the SDK parse hook and parse the text yourself so stop_reason is inspected first: `const { parse: _unused, ...format } = betaZodOutputFormat(ParseResult);` pass `format` in output_config; after `finalMessage()` keep the refusal/max_tokens checks, then `const text = response.content.find((b) => b.type === \"text\")?.text; let raw: unknown; try { raw = text === undefined ? undefined : JSON.parse(text); } catch (e) { return { status: \"failed\", reason: \"invalid_output\", detail: String(e) }; } const check = raw === undefined ? null : ParseResult.safeParse(raw);` (rest unchanged). Apply the same in ai/trip-assistant/src/ask.ts: use `client.beta.messages.create` with the parse-less format and JSON.parse the first text block after the stop_reason checks. Alternatively, wrap finalMessage() in try/catch for `Anthropic.AnthropicError` (not APIError) and record stop_reason from a `streamEvent` listener on message_delta to classify the failure."
+    ]
+   },
+   {
+    "file": "supabase/migrations/20260924000009_deletion.sql",
+    "line": 147,
+    "severity": "low",
+    "category": "correctness",
+    "title": "prepare_account_deletion leaves the departing user as an active owner and deletes their import text before the auth user is removed",
+    "detail": "The function promotes the heir (`update app.trip_members set role = 'owner'`) and repoints `app.trips.owner_id`, but never updates or removes the departing user's own trip_members row, which stays `role = 'owner', status = 'active'`. It relies entirely on the later `auth.admin.deleteUser` cascading that row away. supabase/functions/delete-account/index.ts lines 29-33 calls deleteUser after the RPC has already committed and, on failure, returns 500 without any compensation. In that state (deleteUser fails: transient network/Auth error) the trip has two active owners: the old owner still passes `app.require_role(..., array['owner'])` for delete_trip, create_invite, remove_member and set_member_role, and can demote the heir to viewer (set_member_role only forbids p_role = 'owner' and self-targeting), leaving trips.owner_id pointing at a viewer. Re-running the function does not repair this because the loop is `where owner_id = p_user_id`, which no longer matches. In the same failed-delete case, lines 143/154 have already irreversibly deleted the user's import_sessions (pasted raw text) even though the account persists.",
+    "evidence": "      update app.trip_members set role = 'owner' where trip_id = t.id and user_id = heir;\n      update app.trips set owner_id = heir, updated_at = now() where id = t.id;\n      perform app.bump_trip(t.id, 'member.changed', heir);",
+    "rule": "",
+    "fixes": [
+     "In app.prepare_account_deletion, inside the `else` branch after promoting the heir, mark the departing owner's membership inactive so they are no longer an active owner: `update app.trip_members set status = 'removed' where trip_id = t.id and user_id = p_user_id;` (or delete the row). Additionally, defer the irreversible personal-data step: either move `delete from app.import_sessions where created_by = p_user_id` (line 81) out of the RPC and rely on the created_by on-delete-cascade FK (import_sessions.sql:11), or have the Edge Function call deleteUser first only after a cheap precheck, and on deleteUser failure log/raise so the state can be retried. Optionally make the loop idempotent by also selecting trips where the user still holds an active owner membership (`or id in (select trip_id from app.trip_members where user_id = p_user_id and role = 'owner' and status = 'active')`).",
+     "In app.prepare_account_deletion (supabase/migrations/20260924000009_deletion.sql), after the loop add `update app.trip_members set status = 'removed' where user_id = p_user_id and status = 'active';` so the departing user atomically loses owner/member access in the same transaction as the ownership transfer (idempotent on re-run; the later auth cascade still removes the row). Optionally have delete-account/index.ts retry deleteUser once before returning DELETE_FAILED.",
+     "In the transfer branch of app.prepare_account_deletion (supabase/migrations/20260924000009_deletion.sql:73-78), add `update app.trip_members set status = 'removed' where trip_id = t.id and user_id = p_user_id;` (or `delete from app.trip_members where user_id = p_user_id;` after the loop) so the trip never has two active owners regardless of whether auth.admin.deleteUser succeeds. Optionally have delete-account call deleteUser first and run the RPC only when it succeeds, or log the failed-delete userId for manual cleanup."
+    ]
+   },
+   {
+    "file": "supabase/migrations/20260924000001_core_itinerary.sql",
+    "line": 317,
+    "severity": "low",
+    "category": "correctness",
+    "title": "commit_itinerary treats p_stops = NULL as an empty list and soft-deletes every stop of the day",
+    "detail": "`jsonb_typeof(NULL)` is NULL, so `NULL <> 'array'` is NULL and INVALID_STOPS is not raised. `jsonb_array_elements(NULL)` yields zero rows, `kept` stays '{}', and the final UPDATE at lines 363-365 tombstones every live stop on the day. A request whose stops payload failed to encode (null instead of an array) therefore wipes the day instead of being rejected with PT422, and, combined with the NULL revision issue above, does so with no revision check.",
+    "evidence": "  if jsonb_typeof(p_stops) <> 'array' then\n    raise exception 'INVALID_STOPS' using errcode = 'PT422';\n  end if;",
+    "rule": "",
+    "fixes": [
+     "In supabase/migrations/20260924000001_core_itinerary.sql line 317 (or a new migration that `create or replace`s the function), change the guard to null-safe form:\n\n  if p_stops is null or jsonb_typeof(p_stops) <> 'array' then\n    raise exception 'INVALID_STOPS' using errcode = 'PT422';\n  end if;\n\n(equivalently `if jsonb_typeof(p_stops) is distinct from 'array'`). Optionally add a test in supabase/tests/itinerary_revision.test.sql: `tests.throws(format($$select app.commit_itinerary(%L, 2, null)$$, :'day_id'), 'PT422', 'null stops rejected')`.",
+     "In supabase/migrations/20260924000001_core_itinerary.sql:317 change the guard to `if p_stops is null or jsonb_typeof(p_stops) <> 'array' then` (or `jsonb_typeof(p_stops) is distinct from 'array'`), and add a test in supabase/tests/itinerary_revision.test.sql asserting `commit_itinerary(day, rev, null)` throws PT422. (Do not use STRICT: that would silently return NULL instead of raising.)",
+     "In supabase/migrations/20260924000001_core_itinerary.sql:317 change the guard to `if p_stops is null or jsonb_typeof(p_stops) <> 'array' then` (or `coalesce(jsonb_typeof(p_stops), '') <> 'array'`), and add a case to supabase/tests/itinerary_revision.test.sql asserting `commit_itinerary(day, rev, null)` throws PT422 and leaves stops untouched."
+    ]
+   },
+   {
+    "file": "supabase/migrations/20260924000003_import_sessions.sql",
+    "line": 107,
+    "severity": "low",
+    "category": "concurrency",
+    "title": "A late parse result overwrites a draft that was reset by update_import_text, attaching the old text's result to the new text",
+    "detail": "record_parse_result has no guard on the current parse_status or on which raw_text was parsed; it only checks `trip_id is null`. update_import_text (line 84-87) resets parse_status to 'pending' and raw_text to the edited text while the parse-import Edge Function for the previous text is still running. When that function finishes it calls record_parse_result('parsed', <result for OLD text>), which succeeds and sets parse_status='parsed' with a parse_result that does not correspond to raw_text. The user then sees, and can commit, a draft built from text they already replaced. parse-import/index.ts re-reads nothing before recording, so the DB is the only place this can be enforced.",
+    "evidence": "  update app.import_sessions\n     set parse_status = p_status, parse_result = p_result, parse_error = p_error,\n         model = p_model, updated_at = now()\n   where id = p_import_id and trip_id is null;",
+    "rule": "",
+    "fixes": [
+     "Make record_parse_result (and record_parse_progress) prove which text they belong to. Minimal: add `p_raw_text text` to app.record_parse_result and change the where clause to `where id = p_import_id and trip_id is null and raw_text = p_raw_text` (or compare md5(raw_text)); in parse-import/index.ts pass `p_raw_text: session.raw_text` in the record() rpc call. Alternatively add a `parse_generation int` column bumped by update_import_text, have the function read it with the session and pass it back, and guard `and parse_generation = p_generation`. Optionally, client-side, keep phase = .parsing (and keep polling) when the returned session is still `.parsing` instead of dropping to .failed.",
+     "Bind each parse result to the text it parsed. Minimal version without a schema change: add a p_raw_text_hash text parameter to app.record_parse_result (and app.record_parse_progress) and extend the WHERE to `and md5(raw_text) = p_raw_text_hash`; in supabase/functions/parse-import/index.ts compute the hash of session.raw_text read at line 35 and pass it in every record()/record_parse_progress call. Cleaner alternative: add `parse_revision int not null default 0` to app.import_sessions, increment it in update_import_text, have the Edge Function pass the revision it read, and guard `and parse_revision = p_revision` in both service-role functions. Update the function signatures in the revoke/grant lists (lines 157-171) and add a test in supabase/tests/imports.test.sql that update_import_text followed by a stale record_parse_result leaves parse_status='pending'.",
+     "Tag each parse with the text it belongs to: add `parse_version int not null default 1` to app.import_sessions, increment it in update_import_text, have parse-import read it with the session and pass it to record_parse_result / record_parse_progress, and change their WHERE to `where id = p_import_id and trip_id is null and parse_version = p_parse_version`. (Cheaper variant without a column: add `p_raw_text_md5 text` and `and md5(raw_text) = p_raw_text_md5`, with the function passing md5 of the raw_text it parsed.)"
+    ]
+   },
+   {
+    "file": "supabase/migrations/20260924000007_shopping.sql",
+    "line": 217,
+    "severity": "low",
+    "category": "product-rule",
+    "title": "Any editor can undo a purchase whose buyer's account was deleted (actor_id NULL bypasses the buyer-or-owner check)",
+    "detail": "Migration 9 makes purchase_events.actor_id nullable with ON DELETE SET NULL. After the buyer deletes their account, last_event.actor_id is NULL, so `last_event.actor_id <> uid` is NULL, `NULL and role <> 'owner'` is NULL, the IF is not taken and a non-owner editor inserts the 'undone' event. The plan §3.3 rule that only the buyer or the owner may undo is silently dropped for anonymised purchases.",
+    "evidence": "    if last_event.actor_id <> uid and role <> 'owner' then\n      raise exception 'FORBIDDEN_ROLE' using errcode = 'PT403', detail = 'only the buyer or the owner can undo';",
+    "rule": "plan §3.3 undo limited to buyer or owner",
+    "fixes": [
+     "In supabase/migrations/20260924000007_shopping.sql:217 (or a new migration re-creating app.record_purchase), replace `if last_event.actor_id <> uid and role <> 'owner' then` with `if last_event.actor_id is distinct from uid and role <> 'owner' then`, so an anonymised (NULL) buyer leaves undo to the owner only. Optionally add a test in supabase/tests/shopping.test.sql that nulls actor_id on the last event and asserts a non-owner editor still gets PT403.",
+     "In a new migration, `create or replace function app.record_purchase(...)` identical to 20260924000007_shopping.sql:189-225 but change line 217 to `if last_event.actor_id is distinct from uid and role <> 'owner' then` (NULL-safe comparison, so an anonymised purchase can only be undone by the owner). Optionally add a test in supabase/tests/shopping.test.sql: after `update app.purchase_events set actor_id = null where item_id = :'item2'` (or via prepare_account_deletion + auth user delete), assert `tests.throws(... record_purchase(item2, false) ..., 'PT403', 'editor cannot undo anonymised purchase')` and that the owner still can.",
+     "In supabase/migrations/20260924000007_shopping.sql:217 use null-safe comparison so the check is taken deterministically: `if last_event.actor_id is distinct from uid and role <> 'owner' then` (keeps owner-only undo for anonymised purchases). If the intended behaviour is instead to let any editor undo once the buyer is gone, make it explicit: `if last_event.actor_id is not null and last_event.actor_id <> uid and role <> 'owner' then` and note that decision in the plan."
+    ]
+   },
+   {
+    "file": "supabase/migrations/20260924000008_ai_assistant.sql",
+    "line": 65,
+    "severity": "low",
+    "category": "correctness",
+    "title": "create_proposal accepts anchors, kind and dwell_minutes that make the proposal unconfirmable",
+    "detail": "Only place_id and raw_label are validated at creation. before_stop_id/after_stop_id are not checked against the day, kind is not validated, dwell_minutes is not range-checked. The proposal is stored as 'proposed' and shown to the user, but confirm_proposal (migration 7) then fails: unknown anchor -> STOP_NOT_IN_DAY PT422 (line 267/272), kind 'bogus' -> 22P02 from the enum cast (line 285), dwell 2000 -> 23514 from the stops check constraint. The last two are not PTnnn codes, so PostgREST returns a generic error the client cannot map. The proposal remains open and can only be rejected.",
+    "evidence": "  insert into app.change_proposals (trip_id, day_id, change, route_match, expected_route_revision, created_by, created_by_ai)\n  values (d.trip_id, d.id, p_change, p_route_match, p_expected_route_revision, uid, coalesce(p_created_by_ai, false))",
+    "rule": "",
+    "fixes": [
+     "In app.create_proposal (20260924000008_ai_assistant.sql, before the insert at line 65) add:\n  if p_change ? 'before_stop_id' and not exists (select 1 from app.stops where id = (p_change->>'before_stop_id')::uuid and day_id = d.id and deleted_at is null) then raise exception 'STOP_NOT_IN_DAY' using errcode = 'PT422'; end if;\n  same check for after_stop_id;\n  if p_change ? 'kind' and (p_change->>'kind') not in ('standard','purchase') then raise exception 'INVALID_STOPS' using errcode = 'PT422'; end if;\n  if p_change ? 'dwell_minutes' and ((p_change->>'dwell_minutes')::int < 0 or (p_change->>'dwell_minutes')::int > 1440) then raise exception 'INVALID_STOPS' using errcode = 'PT422'; end if;\n(Optionally wrap the uuid/int casts in a begin/exception block mapping 22P02 to PT422 as well.) Ship as a new migration that re-creates the function rather than editing migration 8.",
+     "In app.create_proposal (supabase/migrations/20260924000008_ai_assistant.sql, after the raw_label check at line 63) add: (1) if p_change ? 'kind' and p_change->>'kind' not in ('standard','purchase') then raise 'INVALID_STOPS' PT422; (2) if p_change ? 'dwell_minutes' and ((p_change->>'dwell_minutes')::int is null or not between 0 and 1440) then raise 'INVALID_STOPS' PT422; (3) for each of before_stop_id / after_stop_id present, require exists(select 1 from app.stops where id = (p_change->>...)::uuid and day_id = d.id and deleted_at is null) else raise 'STOP_NOT_IN_DAY' PT422. Optionally add a proposals.test.sql case asserting these throw PT422."
+    ]
+   },
+   {
+    "file": "supabase/migrations/20260924000006_sharing.sql",
+    "line": 140,
+    "severity": "low",
+    "category": "concurrency",
+    "title": "Two concurrent save_place calls for the same place raise unique_violation instead of returning the duplicate",
+    "detail": "The place dedupe is a read followed by an insert with no lock on the trip or an ON CONFLICT clause on saved_places. Two members sharing the same place at the same time both see no row, both insert, and the second hits saved_places_trip_place_idx (23505), which is not a PTnnn code and surfaces as a 500-style error rather than the documented duplicate=true result.",
+    "evidence": "  if not duplicate and p_place_id is not null then\n    select * into s from app.saved_places\n     where trip_id = p_trip_id and place_id = p_place_id and status <> 'dismissed';\n    duplicate := found;\n  end if;",
+    "rule": "",
+    "fixes": [
+     "In supabase/migrations/20260924000006_sharing.sql (or a new migration re-creating app.save_place), serialise per-trip dedupe before the reads at line 133, e.g. add after `perform app.require_role(...)` (line 116): `perform pg_advisory_xact_lock(hashtext('save_place:' || p_trip_id::text));` (or `perform 1 from app.trips where id = p_trip_id for update;`). This makes the second concurrent caller wait, then see the first row via the existing dedupe select and return duplicate=true. Alternatively wrap the insert at lines 155-161 in `begin ... exception when unique_violation then` re-run the select at lines 141-142 and set duplicate := true.",
+     "In app.save_place (supabase/migrations/20260924000006_sharing.sql, or a new migration re-creating it), wrap the saved_places insert at lines 155-162 so a lost race re-reads instead of erroring, e.g.:\n\n  begin\n    insert into app.saved_places (...) values (...) returning * into s;\n    perform app.bump_trip(p_trip_id, 'saved.changed', s.id);\n  exception when unique_violation then\n    select * into s from app.saved_places\n     where trip_id = p_trip_id and place_id = p_place_id and status <> 'dismissed';\n    duplicate := true;\n  end;\n\n(Alternatively serialize writers per trip with `perform pg_advisory_xact_lock(hashtext(p_trip_id::text))` before the dedupe select at line 133.) Add a test in supabase/tests/saved.test.sql asserting a second insert that violates saved_places_trip_place_idx returns duplicate=true rather than 23505.",
+     "In app.save_place (supabase/migrations/20260924000006_sharing.sql), make the place insert conflict-safe: change the INSERT at lines 155-161 to `... on conflict (trip_id, place_id) where place_id is not null and status <> 'dismissed' do nothing returning * into s;` and, if `not found`, re-run the SELECT from lines 141-142 and set `duplicate := true` (skipping bump_trip). Alternatively, serialize per trip by adding `perform 1 from app.trips where id = p_trip_id for update;` right after `app.require_role(...)` at line 116 so the read-then-insert cannot interleave."
+    ]
+   },
+   {
+    "file": "supabase/tests/run.sh",
+    "line": 75,
+    "severity": "low",
+    "category": "config",
+    "title": "Concurrency checks depend on a 0.5 s sleep to order two psql sessions and fail on a slow runner",
+    "detail": "Session A is started in the background and B is launched after `sleep 0.5`; the test asserts B gets STALE_REVISION and the surviving stop is 'from A'. If A's psql startup plus login takes longer than 0.5 s (cold CI runner), B acquires the day lock first, A is the one that fails, LABELS is 'from B' and the run exits non-zero although the server behaved correctly. The same pattern is used for the proposal race at line 125.",
+    "evidence": "A_PID=$!\nsleep 0.5\nset +e",
+    "rule": "",
+    "fixes": [
+     "Replace the fixed `sleep 0.5` with an explicit handshake so B only starts once A holds the lock. E.g. in session A's heredoc add a psql shell meta-command right after the locking call:\n\n  select app.commit_itinerary('$DAY_ID', 0, '[{\"raw_label\":\"from A\"}]');\n  \\! touch \"$WORK/a.locked\"\n  select pg_sleep(1.5);\n\nand in the script replace `sleep 0.5` with:\n\n  until [[ -f \"$WORK/a.locked\" ]]; do sleep 0.05; done\n\n(or poll `select count(*) from pg_stat_activity where datname='t_concurrency' and wait_event='PgSleep'` until it is 1). Apply the same change to the proposal race at run.sh:116-125 (touch \"$WORK/pa.locked\" after the confirm_proposal call). Optionally also increase pg_sleep or drop it entirely once the handshake exists, since B blocking on the row lock no longer depends on the sleep window.",
+     "Replace the fixed `sleep 0.5` (run.sh:75 and :125) with a poll that waits until session A is inside its pg_sleep (i.e. already holds the lock), e.g. a helper:\n\nwait_for_sleeper() { for _ in $(seq 1 100); do [[ \"$(\"${PSQL[@]}\" -d \"$1\" -At -c \"select count(*) from pg_stat_activity where state='active' and query like '%pg_sleep%'\")\" == \"1\" ]] && return 0; sleep 0.1; done; echo \"session A never reached pg_sleep\" >&2; return 1; }\n\nand call `wait_for_sleeper t_concurrency` / `wait_for_sleeper t_proposal_race` instead of `sleep 0.5`. Optionally also move `wait \"$A_PID\"` (run.sh:84) under `set +e` (or `wait \"$A_PID\" || true`) so a flipped outcome still prints the FAIL diagnostics instead of aborting the script.",
+     "Replace the fixed `sleep 0.5` (lines 75 and 125) with a readiness poll that waits until session A actually holds the day row lock before starting B, e.g.:\n\nwait_for_day_lock() {  # $1=db $2=day id\n  for _ in $(seq 1 100); do\n    [[ -z \"$(\"${PSQL[@]}\" -d \"$1\" -At -c \"select 1 from app.trip_days where id='$2' for update skip locked\")\" ]] && return 0\n    sleep 0.1\n  done\n  echo \"timed out waiting for session A to take the day lock\"; return 1\n}\nwait_for_day_lock t_concurrency \"$DAY_ID\"        # instead of sleep 0.5 at line 75\nwait_for_day_lock t_proposal_race \"$RACE_DAY\"     # instead of sleep 0.5 at line 125\n\n(`for update skip locked` returns no row once A holds the lock and never blocks, so B is only launched after A is guaranteed to be first.)"
+    ]
+   },
+   {
+    "file": "supabase/tests/shopping.test.sql",
+    "line": 74,
+    "severity": "low",
+    "category": "test-gap",
+    "title": "Shopping RPC branches without any test",
+    "detail": "No test calls set_shopping_interest at all. Untested: record_purchase(true) twice without a client_op_id (state-based idempotency, must stay one event), record_purchase(false) when nothing was purchased (returns 'undone' without an event), add_merchant_candidate for an existing (item, place) pair (the ON CONFLICT refresh of evidence/expires_at), viewer calling add_merchant_candidate, add_shopping_item with a blank name (PT422), confirm_proposal with a shopping_item_id from another trip or a soft-deleted item (NOT_FOUND branch, migration 7 line 260), and the anonymised-buyer undo path from the finding above.",
+    "evidence": "select tests.ok((select planned_stop_id is null from app.shopping_items where id = :'item_id'), 'deleting stop unschedules item');",
+    "rule": "",
+    "fixes": [
+     "Append to supabase/tests/shopping.test.sql, e.g.:\n\n-- interest toggle\nselect tests.login(:'owner');\nselect app.set_shopping_interest(:'item2', true);\nselect tests.ok((select count(*) from app.shopping_interests where item_id = :'item2') = 2, 'owner wants item2');\nselect app.set_shopping_interest(:'item2', false);\nselect tests.ok((select count(*) from app.shopping_interests where item_id = :'item2') = 1, 'interest removed');\nselect tests.login(:'viewer');\nselect tests.throws(format($$select app.set_shopping_interest(%L, true)$$, :'item2'), 'PT403', 'viewer cannot set interest');\n\n-- state-based idempotency without client_op_id, and undo with nothing to undo\nselect tests.login(:'editor');\nselect id as item3 from app.add_shopping_item(:'trip_id', 'Kaki') \\gset\nselect tests.ok(app.record_purchase(:'item3', false) = 'undone', 'undo with no purchase is a no-op');\nselect tests.ok((select count(*) from app.purchase_events where item_id = :'item3') = 0, 'no event written');\nselect app.record_purchase(:'item3', true);\nselect app.record_purchase(:'item3', true);\nselect tests.ok((select count(*) from app.purchase_events where item_id = :'item3') = 1, 'repeat purchase without op id stays one event');\n\n-- validation and role checks\nselect tests.throws(format($$select app.add_shopping_item(%L, '   ')$$, :'trip_id'), 'PT422', 'blank name rejected');\nselect tests.login(:'viewer');\nselect tests.throws(format($$select app.add_merchant_candidate(%L, %L, 'poi_category')$$, :'item_id', :'store'), 'PT403', 'viewer cannot add merchants');\n\n-- ON CONFLICT refresh\nselect tests.login(:'editor');\nupdate app.merchant_candidates set expires_at = now() - interval '1 day' where item_id = :'item_id' and place_id = :'store';\nselect app.add_merchant_candidate(:'item_id', :'store', 'official_locator', 'https://example.com/stores', null);\nselect tests.ok((select count(*) = 1 and bool_and(evidence_type = 'official_locator' and expires_at > now() + interval '29 days') from app.merchant_candidates where item_id = :'item_id'), 're-adding refreshes evidence, no duplicate');\n\n-- confirm_proposal rejects foreign shopping item\nselect id as trip2 from app.create_trip('Other', '2026-10-02', '2026-10-02', 'Asia/Tokyo') \\gset\nselect id as item_other from app.add_shopping_item(:'trip2', 'Foreign') \\gset\nselect id as pid2 from app.create_proposal(:'day_id', (select route_revision from app.trip_days where id = :'day_id'), format('{\"place_id\": %s, \"raw_label\": \"x\", \"shopping_item_id\": %s}', to_json(:'store'::text), to_json(:'item_other'::text))::jsonb) \\gset\nselect tests.throws(format($$select app.confirm_proposal(%L)$$, :'pid2'), 'PT404', 'shopping item from another trip rejected');\n\nAlso add a case for an anonymised buyer (set purchase_events.actor_id to null for item2's purchase, then assert a non-owner editor's undo still throws PT403) once the null-actor guard in record_purchase is fixed (use `is distinct from`).",
+     "Append assertions to supabase/tests/shopping.test.sql, e.g.: as editor, `select app.set_shopping_interest(:'item2', true)` then ok(count(shopping_interests where item_id=item2)=2), then `set_shopping_interest(:'item2', false)` then ok(count=1); `select app.set_shopping_interest(:'item2', true)` twice and assert count still 2 (ON CONFLICT DO NOTHING); as viewer, throws(set_shopping_interest, 'PT403'). Add a fresh item3 and: ok(record_purchase(item3,false)='undone') with count(purchase_events)=0; record_purchase(item3,true) twice without op id, ok(count=1). Re-call add_merchant_candidate(item_id, store, 'user', null, 'seen') and ok(evidence_type='user' and count(merchant_candidates where item_id)=1). As viewer, throws(add_merchant_candidate(...), 'PT403'). As editor, throws(add_shopping_item(trip_id, '   '), 'PT422'). Create a proposal with shopping_item_id from a second trip (or an item after soft-delete) and throws(confirm_proposal(pid), 'PT404'). Optionally in deletion.test.sql: after the buyer's account is deleted, assert whether another editor may undo (decide desired behaviour first, since actor_id NULL currently bypasses the PT403 check).",
+     "Append to supabase/tests/shopping.test.sql (after the AC-11 block, before commit_itinerary at line 72): (1) as viewer, tests.throws set_shopping_interest(item_id, true) 'PT403'; as owner, set_shopping_interest(item_id, true) then assert interests count = 2, set false → count = 1, set false again → still 1. (2) add item3, record_purchase(item3, true) twice with no op id, assert 1 purchase_event; record_purchase(item3, false) on a fresh item4 returns 'undone' and inserts 0 events. (3) call add_merchant_candidate(item_id, store, 'poi_category', null, 'new note') again and assert exactly 1 merchant_candidates row with the updated note and expires_at refreshed; as viewer tests.throws the same call 'PT403'. (4) tests.throws add_shopping_item(trip_id, '   ') 'PT422'. (5) create_proposal with shopping_item_id of a soft-deleted item (or an item from a second trip) and tests.throws confirm_proposal(pid) 'PT404'."
+    ]
+   },
+   {
+    "file": "supabase/tests/proposals.test.sql",
+    "line": 86,
+    "severity": "low",
+    "category": "test-gap",
+    "title": "Proposal and itinerary branches without any test",
+    "detail": "Untested: confirm_proposal with after_stop_id (only before_stop_id and append are covered); confirm with an anchor not in the day (STOP_NOT_IN_DAY); reject_proposal on a still-open 'proposed' proposal (only a stale one is rejected) and on a confirmed one (silent no-op); commit_itinerary with p_expected_route_revision NULL and with p_stops NULL (the two null-handling findings); commit_itinerary carrying kind='purchase', end_time, or an invalid HH:MM (22007 not PT422); dwell_minutes out of range; moving a stop id from another day; get_trip_changes as a viewer; the day.settings_changed event from update_day; update_day with transport_mode only.",
+    "evidence": "select tests.ok((select count(*) from app.stops where raw_label = 'AI 建議') = 0, 'AI proposal wrote no stop');",
+    "rule": "",
+    "fixes": [
+     "Add assertions to supabase/tests/proposals.test.sql, itinerary_revision.test.sql and days.test.sql covering: a proposal with after_stop_id (assert insert position = anchor.sort_order+1); a proposal whose anchor is a soft-deleted or other-day stop (tests.throws ... 'PT422'); reject_proposal on an open 'proposed' proposal (status -> rejected) and on a confirmed one (status unchanged); commit_itinerary(day, null, '[]') and commit_itinerary(day, rev, null) (decide expected behaviour, then tests.throws 'PT409'/'PT422' or assert no stops deleted); commit_itinerary entries with kind='purchase', end_time, start_time '25:99' (tests.throws '22007'), dwell_minutes 2000 (tests.throws '23514'), and an id belonging to a stop on another day (tests.throws 'PT422'); get_trip_changes as viewer returning rows; update_day(d, null, 'transit') bumping route_revision and the latest trip_events.kind = 'day.settings_changed'.",
+     "Add assertions to supabase/tests/proposals.test.sql, itinerary_revision.test.sql and days.test.sql: (a) a proposal with after_stop_id confirmed and order asserted; (b) a proposal whose anchor is a stop from another day (or soft-deleted) -> tests.throws(..., 'PT422'); (c) reject_proposal on an open proposal -> status='rejected', and on a confirmed one -> status unchanged; (d) tests.throws for commit_itinerary(day, null, '[]') and commit_itinerary(day, rev, null) once the null-handling fixes land (expect PT409/PT422); (e) commit_itinerary rows with kind='purchase', end_time, an invalid start_time ('25:00' -> '22007'), and dwell_minutes 2000 (-> '23514'); (f) in days.test.sql assert the latest app.trip_events kind = 'day.settings_changed' after update_day and add an update_day(d3, null, 'transit') call asserting transport_mode and route_revision bump; (g) in permissions.test.sql a viewer select from app.get_trip_changes(trip, 0) succeeds."
+    ]
+   },
+   {
+    "file": "supabase/tests/deletion.test.sql",
+    "line": 52,
+    "severity": "low",
+    "category": "test-gap",
+    "title": "Deletion, sharing and saved branches without any test",
+    "detail": "Untested: purge_tombstones' saved_places branch (dismissed older than 30 days) and that it leaves recent tombstones alone; prepare_account_deletion for a user who is only an editor/viewer (membership vanishes by cascade) and the heir preference (editor chosen over an older viewer); delete_trip cascading stops, proposals, shopping items and ai_messages (only import_sessions is asserted; the AI-history assertion runs against the account-deletion path); set_member_role called by an editor (PT403) and remove_member of self (PT422); revoke_invite by a non-owner; accept_invite by a previously removed member (status flips back to active); set_display_name with blank or >60 chars; resolve_saved/dismiss_saved by a viewer; the mark_saved_added trigger on the confirm_proposal insert path; record_parse_result against an already committed import (silent no-op); create_trip/create_import spanning 60+ days (raises 23514, not PT422).",
+    "evidence": "select tests.ok((:'purged'::jsonb ->> 'stops')::int = 1, 'old tombstone purged');",
+    "rule": "",
+    "fixes": [
+     "Extend the existing test files rather than the code. In supabase/tests/deletion.test.sql: before purge, dismiss a saved entry and age it (`update app.saved_places set updated_at = now() - interval '31 days' where status = 'dismissed'`), leave a second stop tombstoned at now(), and assert `purged->>'saved' = 1` plus the recent stop still exists; delete a trip that has stops, a proposal, a shopping item and an ai_messages row via app.delete_trip and assert each table is empty; add a viewer joined before an editor to shared_trip and assert the editor becomes heir; run prepare_account_deletion for the editor-only user and assert transferred = deleted = 0. In permissions.test.sql: tests.throws for set_member_role as editor (PT403), remove_member(self) as owner (PT422), revoke_invite as editor (PT403), accept_invite by the removed viewer then assert status = 'active'; tests.throws for create_trip with a 60-day span expecting '23514'. In sharing.test.sql: tests.throws set_display_name('  ') and repeat('x', 61) expecting PT422. In saved.test.sql: tests.throws resolve_saved/dismiss_saved as viewer (PT403). In proposals.test.sql: save the proposal's place first and assert its saved_places.status = 'added_to_itinerary' after confirm_proposal. In imports.test.sql: after commit, call record_parse_result(:'import_id', 'failed', ...) as service_role and assert parse_status is unchanged; add a 60-day create_import throws '23514'.",
+     "Add assertions: in deletion.test.sql, dismiss a saved entry and backdate its updated_at 31 days, keep one recent stop tombstone, and assert purge returns saved=1 and the recent stop survives; before the owner's deletion, seed a stop/proposal/shopping item/ai_message on imported_trip and assert their counts are 0 after delete_trip; add an older viewer alongside the editor to assert the editor is chosen as heir, and run prepare_account_deletion for the editor to assert transferred=0/deleted=0. In permissions.test.sql add tests.throws for set_member_role as editor (PT403), remove_member(self) as owner (PT422), revoke_invite as editor (PT403), a 60-day create_trip ('23514'), and re-accept an invite as the removed viewer asserting status='active'. In sharing.test.sql add set_display_name('  ') and a 61-char name (PT422). In saved.test.sql add resolve_saved/dismiss_saved as viewer (PT403). In imports.test.sql call record_parse_result on a committed import and assert parse_status unchanged. Optionally guard the day span in create_trip/create_import with a PT422 INVALID_DATES check so clients get the documented error class.",
+     "Add a handful of targeted assertions rather than a full matrix. In supabase/tests/deletion.test.sql: insert the ai_messages/shopping/proposal rows into imported_trip before `app.delete_trip(:'imported_trip')` and assert count = 0 right after line 24 (keep the solo_trip assertion for the account path); in the purge block, tombstone two stops, backdate only one, and assert `(purged->>'stops')::int = 1` plus one row still present; dismiss a saved entry, backdate its updated_at 31 days, and assert `(purged->>'saved')::int = 1`; add a viewer who joined earlier than the editor to shared_trip and keep the 'editor now owns' assertion to cover the heir preference. In supabase/tests/permissions.test.sql: add `tests.throws(... app.set_member_role(trip, viewer, 'viewer') ..., 'PT403')` as editor, `tests.throws(... app.remove_member(trip, owner) ..., 'PT422')` as owner, and `tests.throws(... app.revoke_invite(id) ..., 'PT403')` as editor; after remove_member(viewer), have the viewer accept a fresh invite and assert status = 'active'. In supabase/tests/saved.test.sql viewer block: add PT403 throws for resolve_saved and dismiss_saved. In supabase/tests/sharing.test.sql: add `tests.throws($$select app.set_display_name('   ')$$, 'PT422')` and the 61-char case."
+    ]
+   },
+   {
+    "file": "supabase/functions/ask-trip/index.ts",
+    "line": 50,
+    "severity": "low",
+    "category": "correctness",
+    "title": "Unscoped, unlimited reads of purchase_events/saved_interests/merchant_candidates are capped by PostgREST max_rows, so shopping status can be wrong",
+    "detail": "These three queries carry no trip filter and no `.limit()`; RLS returns rows from every trip the caller belongs to and PostgREST truncates the result at `max_rows = 1000` (supabase/config.toml line 18). purchase_events is ordered by id ascending and the code derives an item's status from `.at(-1)` of the filtered rows, so once the caller's visible purchase events exceed 1000 the newest events are the ones dropped: an item whose latest event is 'purchased' is reported as \"unscheduled\"/\"scheduled\", and an item whose latest event is 'undone' (with an older 'purchased' still inside the first 1000) is reported as \"purchased\". saved_interests (`interested` names) and merchant_candidates (possible sellers) are truncated the same way. The model then answers from a wrong context with no indication anything was cut. Trigger: an active user in several trips with >1000 purchase events / interests overall.",
+    "evidence": "db.from(\"saved_interests\").select(\"saved_id, user_id\"),\n    db.from(\"shopping_items\").select(\"*\").eq(\"trip_id\", trip.id).is(\"deleted_at\", null),\n    db.from(\"purchase_events\").select(\"item_id, type, id\").order(\"id\"),\n    db.from(\"merchant_candidates\").select(\"item_id, place_id, evidence_type\"),\n...\n      const last = (events.data ?? []).filter((e) => e.item_id === i.id).at(-1);\n...\n        status: last?.type === \"purchased\" ? \"purchased\" : stop ? \"scheduled\" : \"unscheduled\",",
+    "rule": "",
+    "fixes": [
+     "Scope the three queries to this trip's rows and make truncation, if it ever happens, drop the oldest events instead of the newest. In supabase/functions/ask-trip/index.ts fetch saved/items first, then:\n\nconst savedIdList = (saved.data ?? []).map(s => s.id);\nconst itemIdList = (items.data ?? []).map(i => i.id);\nconst [interests, events, merchants] = await Promise.all([\n  db.from(\"saved_interests\").select(\"saved_id, user_id\").in(\"saved_id\", savedIdList),\n  db.from(\"purchase_events\").select(\"item_id, type, id\").in(\"item_id\", itemIdList).order(\"id\", { ascending: false }),\n  db.from(\"merchant_candidates\").select(\"item_id, place_id, evidence_type\").in(\"item_id\", itemIdList),\n]);\n\nand derive the latest event per item from the descending list (first match instead of .at(-1)):\nconst lastEvent = new Map<string, string>();\nfor (const e of events.data ?? []) if (!lastEvent.has(e.item_id)) lastEvent.set(e.item_id, e.type);\n...\nstatus: lastEvent.get(i.id) === \"purchased\" ? \"purchased\" : stop ? \"scheduled\" : \"unscheduled\",\n\n(Alternatively use a PostgREST inner-join filter, e.g. .select(\"item_id, type, id, shopping_items!inner(trip_id)\").eq(\"shopping_items.trip_id\", trip.id), to keep the queries parallel.)",
+     "In supabase/functions/ask-trip/index.ts, fetch saved_places and shopping_items first, then scope the dependent queries to this trip's ids (as Shopping.swift does): `db.from(\"saved_interests\").select(\"saved_id, user_id\").in(\"saved_id\", savedIds)`, `db.from(\"purchase_events\").select(\"item_id, type, id\").in(\"item_id\", itemIds).order(\"id\")`, `db.from(\"merchant_candidates\").select(\"item_id, place_id, evidence_type\").in(\"item_id\", itemIds)`. Alternatively, for purchase_events order by id descending and take the first event per item so truncation can never drop the newest event.",
+     "Scope the three queries to this trip's rows and stop relying on ascending order + .at(-1). Fetch saved/items first, then: `db.from(\"saved_interests\").select(\"saved_id, user_id\").in(\"saved_id\", savedIdList)`, `db.from(\"merchant_candidates\").select(\"item_id, place_id, evidence_type\").in(\"item_id\", itemIdList)`, and `db.from(\"purchase_events\").select(\"item_id, type, id\").in(\"item_id\", itemIdList).order(\"id\", { ascending: false })`, then take the first matching event per item (or compute the latest event per item via a Map keyed by item_id keeping the max id). This keeps result sets at trip scale, well under max_rows, and matches the `order by id desc limit 1` rule the migration uses."
+    ]
+   },
+   {
+    "file": "docs/acceptance/mvp-acceptance.md",
+    "line": 68,
+    "severity": "low",
+    "category": "docs-drift",
+    "title": "Acceptance doc says parse-import logs latency and token counts; the function logs neither",
+    "detail": "The acceptance report claims `parse-import` and `ask-trip` both record latency, token counts and status. ask-trip does (JSON console.log with latency_ms, model and usage). parse-import never reads `outcome.usage`, never measures elapsed time, and its only log line is `console.error(\"parse-import failed\", ...)` on the exception path; successful and model-failed parses produce no log at all, so the cost/observability claim in the doc (and the \"成本：日誌有 token 數\" line) is false for the import path.",
+    "evidence": "docs/acceptance/mvp-acceptance.md:68  - AI：`parse-import`、`ask-trip` 記錄延遲、token 數、狀態（不記 prompt，D11）\n\nsupabase/functions/parse-import/index.ts:81-87\n    await record(\"parsed\", { draft: outcome.result, issues: outcome.issues }, null, outcome.model);\n    return json({ status: \"parsed\" });\n  } catch (e) {\n    // Network or API errors: keep the raw text so the user can retry.\n    console.error(\"parse-import failed\", e instanceof Error ? e.message : e);",
+    "rule": "docs/acceptance/mvp-acceptance.md 可觀測性",
+    "fixes": [
+     "Either (a) add to supabase/functions/parse-import/index.ts a `const started = Date.now();` before the parseItinerary call and `console.log(JSON.stringify({ fn: \"parse-import\", status, latency_ms: Date.now() - started, model: outcome.model, ...outcome.usage }))` on the parsed/failed/error paths (mirroring ask-trip lines 131-141), or (b) amend docs/acceptance/mvp-acceptance.md:68-69 to state that only `ask-trip` logs latency/token counts and parse-import records status/model only (mark ⏳).",
+     "Either correct the doc (docs/acceptance/mvp-acceptance.md:68-69: state that only `ask-trip` logs latency/token counts, parse-import logs only provider errors) or, preferably, instrument parse-import to match ask-trip: in supabase/functions/parse-import/index.ts add `const started = Date.now();` before the try at line 69, then `console.log(JSON.stringify({ fn: \"parse-import\", status: \"failed\", reason: outcome.reason, latency_ms: Date.now() - started }))` in the failed branch (line 77-79), `console.log(JSON.stringify({ fn: \"parse-import\", status: \"parsed\", latency_ms: Date.now() - started, model: outcome.model, ...outcome.usage, issues: outcome.issues.length }))` before the return at line 82, and replace the console.error at line 85 with `console.log(JSON.stringify({ fn: \"parse-import\", status: \"error\", latency_ms: Date.now() - started, error: e instanceof Error ? e.name : \"unknown\" }))` (no prompt/raw text logged, per D11).",
+     "In supabase/functions/parse-import/index.ts add `const started = Date.now();` before the try at line 69, and log structured JSON in all three outcomes, mirroring ask-trip: after line 77 `console.log(JSON.stringify({ fn: \"parse-import\", status: \"failed\", reason: outcome.reason, latency_ms: Date.now() - started }));`; after line 81 `console.log(JSON.stringify({ fn: \"parse-import\", status: \"parsed\", latency_ms: Date.now() - started, model: outcome.model, ...outcome.usage, issues: outcome.issues.length }));`; replace line 85 with `console.log(JSON.stringify({ fn: \"parse-import\", status: \"error\", latency_ms: Date.now() - started, error: e instanceof Error ? e.name : \"unknown\" }));`. Alternatively, edit docs/acceptance/mvp-acceptance.md:68-69 to state that only ask-trip logs latency/tokens and mark parse-import as ⏳."
+    ]
+   },
+   {
+    "file": "ai/itinerary-parse/src/validate.ts",
+    "line": 72,
+    "severity": "low",
+    "category": "correctness",
+    "title": "Empty or whitespace-only place_name (and empty source_excerpt) pass validation as a clean stop",
+    "detail": "The presence checks are substring tests, and `squash(\"\")` / `squash(\"   \")` is the empty string, which `String.prototype.includes` always accepts. A model draft with `place_name: \"\"` or `\"   \"` therefore raises no issue, keeps `needs_confirmation: []`, and `isCleanStop()` returns true because `\"\" !== null`, so the app sends the stop straight to the Place lookup with a blank name (verified by running validateDraft: `{\"place_name\":\"\"} issues=[] clean=true`). Likewise `source_excerpt: \"\"` yields zero issues and confidence stays \"high\", so the side-by-side review has nothing to show and the fabricated-excerpt downgrade is bypassed. The schema (`z.string().nullable()`) does not reject empty strings either. This defeats the validator's purpose that anything unverifiable is downgraded to needs-confirmation.",
+    "evidence": "if (!haystack.includes(squash(stop.source_excerpt))) {\n ...\n      if (stop.place_name !== null && stop.category !== \"transport\" && !haystack.toLowerCase().includes(squash(stop.place_name).toLowerCase())) {\n ...\nexport function isCleanStop(stop: ParsedStop): boolean {\n  return stop.needs_confirmation.length === 0 && stop.place_name !== null;\n}",
+    "rule": "CLAUDE.md: 地點不確定時列候選並要求確認，不可猜一間寫入正式行程",
+    "fixes": [
+     "In ai/itinerary-parse/src/validate.ts, treat blank strings as missing: at the top of the per-stop loop add `if (stop.place_name !== null && squash(stop.place_name) === \"\") { issues.push({ path: `${path}.place_name`, issue: \"empty place name\" }); stop.place_name = null; }` so the existing `place_name === null` branch (line 78) adds `unknown_place`; and change line 64 to `const excerpt = squash(stop.source_excerpt); if (excerpt === \"\" || !haystack.includes(excerpt)) { ... }` so an empty excerpt is reported and downgrades confidence to \"low\". Optionally also use `z.string().trim().min(1).nullable()` for place_name and `z.string().trim().min(1)` for source_excerpt in schema.ts.",
+     "In ai/itinerary-parse/src/validate.ts, treat a blank string like a missing value:\n\n```ts\nconst excerpt = squash(stop.source_excerpt);\nif (excerpt === \"\" || !haystack.includes(excerpt)) {\n  issues.push({ path: `${path}.source_excerpt`, issue: \"excerpt not found in input\" });\n  stop.confidence = \"low\";\n}\n\nif (stop.place_name !== null && squash(stop.place_name) === \"\") {\n  issues.push({ path: `${path}.place_name`, issue: \"empty place name\" });\n  stop.place_name = null; // falls into the existing null branch → unknown_place\n}\n```\n(keep the existing `place_name !== null && category !== \"transport\" && !includes(...)` check and the `place_name === null` → `unknown_place` branch after it). Add a test with `place_name: \"  \"` / `source_excerpt: \"\"` asserting `unknown_place` and `!isCleanStop`. Optionally harden the app too: in ConfirmPlaces.swift make `needsSearch`/`label` treat a whitespace-only `placeName` as nil.",
+     "In ai/itinerary-parse/src/validate.ts, treat blank strings as missing before the substring checks:\n\n```ts\nconst excerpt = squash(stop.source_excerpt);\nif (excerpt === \"\" || !haystack.includes(excerpt)) { /* existing downgrade */ }\n\nif (stop.place_name !== null && squash(stop.place_name) === \"\") {\n  issues.push({ path: `${path}.place_name`, issue: \"empty place name\" });\n  stop.place_name = null; // falls through to the existing null branch → unknown_place\n}\n```\n\nand add a test for `place_name: \"\"`/`\"   \"` and `source_excerpt: \"\"` asserting `!isCleanStop` / confidence \"low\"."
+    ]
+   },
+   {
+    "file": "ai/itinerary-parse/eval/run.ts",
+    "line": 147,
+    "severity": "low",
+    "category": "test-gap",
+    "title": "Itinerary-parse eval runner never sets an exit code, so the CI dry-run self-check can never fail",
+    "detail": "main() prints WARN/PASS/FAIL and totals but never sets process.exitCode or calls process.exit; the process always exits 0 (grep for exitCode/process.exit in this file returns nothing, and `npm run eval:dry` exits 0). .github/workflows/ai-tests.yml:29 runs `npm run eval:dry` as a CI step and docs/acceptance/mvp-acceptance.md:18 lists the \"eval dry-run\" as a CI check, but a scorer regression that produced 0% on the perfect drafts would still be green. Compare ai/trip-assistant/eval/run.ts:72, which does `process.exitCode = passed === scores.length ? 0 : 1`. As written, the dry-run 'scorer self-check' can mask a broken scorer in CI.",
+    "evidence": "  if (!args[\"dry-run\"]) {\n    const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), \"results\");\n    mkdirSync(dir, { recursive: true });\n    const file = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, \"-\")}.json`);\n    writeFileSync(file, JSON.stringify({ options, totals, runs }, null, 2));\n    console.log(`\\nSaved ${file}`);\n  }\n}\n\nawait main();",
+    "rule": "docs/acceptance/mvp-acceptance.md §AI: eval dry-run in CI",
+    "fixes": [
+     "In ai/itinerary-parse/eval/run.ts, at the end of main() (after the results-writing block, before the closing brace at line 147), add:\n\n  if (args[\"dry-run\"] && (parsed !== runs.length || scored.some((s) => s.failures.length > 0))) {\n    process.exitCode = 1;\n  }\n\n(Optionally apply the same for non-dry runs if API-run regressions should also fail CI, but dry-run is the documented CI gate.)",
+     "In ai/itinerary-parse/eval/run.ts, at the end of main() (after the results block, before line 147), add:\n\n  const failed = runs.filter((r) => r.status !== \"parsed\" || (r.score?.failures.length ?? 0) > 0).length;\n  if (args[\"dry-run\"] && failed > 0) process.exitCode = 1;\n\n(Optionally apply the exit code in non-dry mode too, matching ai/trip-assistant/eval/run.ts:72, but the live eval is informational and may legitimately have WARN cases, so gating only the dry-run self-check is the minimal change.)",
+     "In ai/itinerary-parse/eval/run.ts, at the end of main() (after the failures loop at line 136-138), add:\n\n  if (args[\"dry-run\"]) {\n    process.exitCode = parsed === runs.length && scored.every((s) => s.failures.length === 0) ? 0 : 1;\n  }\n\n(Or mirror ai/trip-assistant/eval/run.ts:72 unconditionally if the real eval should also fail on non-perfect scores.)"
+    ]
+   },
+   {
+    "file": "ai/itinerary-parse/README.md",
+    "line": 38,
+    "severity": "low",
+    "category": "docs-drift",
+    "title": "README states the default effort is `high`; the code defaults to `medium`",
+    "detail": "README says 預設 `claude-opus-5-5`（effort `high`）, but src/parse.ts:14 sets `DEFAULT_EFFORT = \"medium\"` with a comment explaining high took 2-5 minutes. Anyone budgeting cost/latency from the README gets the wrong setting.",
+    "evidence": "預設 `claude-opus-5-5`（effort `high`）、adaptive thinking，並開啟伺服器端 refusal fallback（`fallbacks: \"default\"`）",
+    "rule": "",
+    "fixes": [
+     "In ai/itinerary-parse/README.md line 38, change `（effort `high`）` to `（effort `medium`；`high` 在真實 7 天行程上需 2–5 分鐘，接近 Edge Function 時限）`, and optionally change the line-23 example to `--effort high` so the comparison example does not duplicate the default.",
+     "In ai/itinerary-parse/README.md line 38, change `effort \\`high\\`` to `effort \\`medium\\`` (optionally add: high 在真實 7 天行程上需 2–5 分鐘，太慢，故預設 medium；可用 `--effort high` 比較).",
+     "In ai/itinerary-parse/README.md line 38, change `（effort `high`）` to `（effort `medium`）` and optionally add a short note that `high` was measured at 2-5 minutes on a real 7-day plan and is available via `--effort high` for comparison."
+    ]
+   },
+   {
+    "file": "ai/itinerary-parse/README.md",
+    "line": 13,
+    "severity": "low",
+    "category": "docs-drift",
+    "title": "README says the eval set has 22 cases (15 Seoul / 6 Hiroshima / 1 no-places); eval/cases.ts has 24",
+    "detail": "eval/cases.ts contains 24 cases (dry-run prints `valid output 100.0% (24/24)`): the two later additions `seoul-hiroshima-chatgpt-long` and `prompt-injection` are not reflected in the README counts.",
+    "evidence": "| `eval/cases.ts` | 評測集（22 份，**目前全為合成資料**） |",
+    "rule": "",
+    "fixes": [
+     "In ai/itinerary-parse/README.md change line 13 to `| eval/cases.ts | 評測集（24 份，目前絕大多數為合成資料） |` and line 30 to `- 首爾 15 份、廣島 6 份、首爾＋廣島跨城長行程 1 份、無地點 1 份、prompt injection 1 份；...`.",
+     "In ai/itinerary-parse/README.md:13 change 「評測集（22 份，**目前全為合成資料**）」 to 「評測集（24 份，除 1 份由真實 ChatGPT 行程濃縮外皆為合成資料）」, and in README.md:30 add the two later cases to the breakdown, e.g. 「首爾 15 份、廣島 6 份、首爾＋廣島長篇（濃縮自真實 ChatGPT 行程）1 份、無地點 1 份、prompt injection 1 份」.",
+     "In ai/itinerary-parse/README.md: line 13 change `22 份` to `24 份`; line 30 change to something like `首爾 15 份、廣島 6 份、首爾+廣島跨城市長文 1 份、無地點 1 份、prompt injection 1 份` (adjust the Seoul count to match however `seoul-unknown-place` is categorised)."
+    ]
+   },
+   {
+    "file": "ai/itinerary-parse/src/validate.ts",
+    "line": 39,
+    "severity": "low",
+    "category": "correctness",
+    "title": "Date validity check accepts non-existent calendar dates such as 2026-02-30",
+    "detail": "`Date.parse(\"2026-02-30\")` returns a valid timestamp in V8 (rolls to March 2; verified: 1772409600000), so a model-emitted day date like \"2026-02-30\" that lexically falls inside the trip range passes both `DATE_RE` and the `Number.isNaN` guard and is kept in the draft without an `ambiguous_date` flag. Downstream, that string will fail when cast to a Postgres date on commit or be misinterpreted by the app's date parsing.",
+    "evidence": "const valid = DATE_RE.test(day.date) && !Number.isNaN(Date.parse(day.date));\n      if (!valid || day.date < input.tripStart || day.date > input.tripEnd) {",
+    "rule": "",
+    "fixes": [
+     "In ai/itinerary-parse/src/validate.ts replace line 39 with a round-trip check so rolled-over dates are rejected:\n\nconst ts = Date.parse(day.date);\nconst valid = DATE_RE.test(day.date) && !Number.isNaN(ts) && new Date(ts).toISOString().slice(0, 10) === day.date;\n\nand add a test in ai/itinerary-parse/test/validate.test.ts asserting draft(\"2026-02-30\", [stop()]) with tripStart \"2026-02-25\"/tripEnd \"2026-03-05\" yields an issue and [\"ambiguous_date\"].",
+     "In ai/itinerary-parse/src/validate.ts:39 require a round-trip: `const valid = DATE_RE.test(day.date) && !Number.isNaN(Date.parse(day.date)) && new Date(day.date).toISOString().slice(0, 10) === day.date;` (optionally add a test with \"2026-02-30\" in test/validate.test.ts asserting `ambiguous_date`)."
+    ]
+   },
+   {
+    "file": "ai/trip-assistant/eval/run.ts",
+    "line": 28,
+    "severity": "low",
+    "category": "test-gap",
+    "title": "Trip-assistant scorer has no negative test; dry-run only feeds it answers built to pass",
+    "detail": "`reference()` constructs the answer directly from the expectations (same cannot_determine, exactly the must_cite ids, exactly the expected proposal), so the dry-run exercises only the pass path. test/validate.test.ts never imports eval/score.ts, so nothing checks that scoreCase() fails a wrong cannot_determine, a missing citation, an unexpected proposal, or a forbidden phrase. A scorer that returned pass=true unconditionally would make both `npm test` and `npm run eval:dry` green (contrast ai/itinerary-parse/test/validate.test.ts:92-118, which does assert scorer failures).",
+    "evidence": "function reference(c: EvalCase): AssistantAnswer {\n  return {\n    answer: c.expect.cannot_determine ? \"無法從目前的行程資料判斷。\" : \"依行程資料整理如下。\",\n    cannot_determine: c.expect.cannot_determine,\n    citations: (c.expect.must_cite ?? []).map((id) => ({",
+    "rule": "",
+    "fixes": [
+     "Add a negative scorer test in ai/trip-assistant/test/ (e.g. test/score.test.ts) that imports `scoreCase` from ../eval/score.ts and `CASES` from ../eval/cases.ts, and asserts pass=false plus the relevant note for each branch: (1) a case with expect.cannot_determine=true answered with cannot_determine=false -> cannotDetermineOK=false; (2) a case with must_cite answered with citations: [] -> citationsOK=false and notes include \"missing citations\"; (3) a case with expect.proposal=\"none\" answered with a non-null proposal (and a case with an expected proposal answered with a different saved_id) -> proposalOK=false; (4) a case with must_not_say answered with text containing that phrase -> phrasingOK=false. Optionally also assert the reference answer passes to keep the positive path covered.",
+     "Add negative scorer tests to ai/trip-assistant/test/validate.test.ts, e.g.:\n\nimport { CASES } from \"../eval/cases.ts\";\nimport { scoreCase } from \"../eval/score.ts\";\n\ntest(\"scorer: wrong cannot_determine / missing citation / unexpected proposal / forbidden phrase fail\", () => {\n  const c = CASES.find((x) => x.expect.must_cite?.length && x.expect.proposal === \"none\")!; // pick a suitable case id explicitly\n  const bad: AssistantAnswer = { answer: (c.expect.must_not_say ?? [\"\"])[0]!, cannot_determine: !c.expect.cannot_determine, citations: [], proposal: { day_id: \"day1\", saved_id: \"sv1\", reason: \"x\" } };\n  const s = scoreCase(c, bad);\n  assert.equal(s.cannotDetermineOK, false);\n  assert.equal(s.citationsOK, false);\n  assert.equal(s.proposalOK, false);\n  assert.equal(s.pass, false);\n});\n\n(plus one assertion that a correct answer for the same case yields pass=true). Optionally reword the run.ts:27 comment to say the dry-run checks the pass path only.",
+     "Add negative scorer tests to ai/trip-assistant/test/validate.test.ts, e.g. import { scoreCase } from \"../eval/score.ts\" and CASES from \"../eval/cases.ts\", then: (1) case \"stock\" with answer \"有庫存\" → assert !s.phrasingOK && !s.pass; (2) case \"amy-saved\" with citations [] → assert !s.citationsOK and notes mention \"sv2\"; (3) case \"weather\" with cannot_determine:false → assert !s.cannotDetermineOK; (4) a proposal case with proposal null (and a \"none\" case with a proposal set) → assert !s.proposalOK. Optionally also make run.ts dry-run score one deliberately wrong answer and assert it FAILs."
+    ]
+   }
+  ],
+  "unverified": [
+   {
+    "file": "Packages/AppCore/Sources/AppCore/Proposal.swift",
+    "line": 223,
+    "title": "Stale re-proposal recomputes with the old proposal's travel mode, not the day's current mode",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/AppCore/Proposal.swift",
+    "line": 161,
+    "title": "loadDayPlan reads route_revision and stops in two unrelated requests, so a proposal can carry a revision that does not match the stops it was computed on",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/AppCore/Routing.swift",
+    "line": 53,
+    "title": "Korea bounding-box fallback covers northern Kyushu/Tsushima, so transit legs there are declared unsupported without querying MapKit when country_code is missing",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/AppCore/RouteMatch.swift",
+    "line": 287,
+    "title": "ROUTE_UNAVAILABLE reason ignores why the candidate legs failed; a network outage is reported as .unknown",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/Features/SessionModel.swift",
+    "line": 45,
+    "title": "Expired local session is treated as signed-out, so offline cold launch lands on LoginView instead of the cached trip",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 29,
+    "title": "Stale dayIndex after switching trips leaves Today on an endless ProgressView",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 31,
+    "title": "Snapshot load failure is shown as 「尚未建立旅程」with a 建立旅程 CTA; TripStore.errorMessage is never rendered",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "project.yml",
+    "line": 107,
+    "title": "Share Extension still ships NSExtensionActivationRule = TRUEPREDICATE after WP6",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Config/Release.xcconfig",
+    "line": 4,
+    "title": "Release build silently inherits http://127.0.0.1:54321 when Cloud.xcconfig.local is absent",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/ShareCore/ShareFlowView.swift",
+    "line": 191,
+    "title": "Share extension offers 先收藏 / 確認加入 to Viewer-role trips and then shows a raw BackendError description",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/Features/ShoppingView.swift",
+    "line": 146,
+    "title": "Any non-PT server error is misreported as 「目前離線」and parked in the offline queue forever, blocking later queued ops",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Config/Base.xcconfig",
+    "line": 11,
+    "title": "NoAppGroup fallback breaks session persistence on device, contrary to the comment 「其餘功能不受影響」",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "App/Info.plist",
+    "line": 26,
+    "title": "MARKETING_VERSION / CURRENT_PROJECT_VERSION are dead: Info.plist hard-codes 1.0 / 1",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "ShareExtension/Sources/ShareViewController.swift",
+    "line": 60,
+    "title": "Extension UI is blocked until every registered type of every attachment has been loaded (10 s timeout each, sequential)",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": ".github/workflows/db-tests.yml",
+    "line": 6,
+    "title": "No CI job type-checks or runs the four Supabase Edge Functions, which import ai/ sources by relative path",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Config/Base.xcconfig",
+    "line": 8,
+    "title": "NoAppGroup.entitlements fallback documented as harmless, but the Supabase client still opens the Keychain with the App Group as access group",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Config/Release.xcconfig",
+    "line": 4,
+    "title": "Release/TestFlight archive silently falls back to the local 127.0.0.1 backend when Cloud.xcconfig.local is missing",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": ".github/workflows/ios.yml",
+    "line": 26,
+    "title": "Packages/AppCore/Package.resolved pins dependencies only for the `swift test` step; the xcodebuild step resolves fresh, unpinned versions",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": ".gitignore",
+    "line": 29,
+    "title": "ai/trip-assistant/eval/results/ is not gitignored although eval/run.ts writes full model outputs there and says it is",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "README.md",
+    "line": 22,
+    "title": "README and plan §6 still say decisions D1–D11 and 'start from Spike S1–S4' although D12 exists and MVP WP1–WP11 are done",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "supabase/demo/seoul-5-days.sql",
+    "line": 82,
+    "title": "Demo seed claims every write goes through the official RPCs, but it resets to superuser and updates app.trip_days directly; no guard prevents running it against the cloud project",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "docs/acceptance/mvp-acceptance.md",
+    "line": 13,
+    "title": "Acceptance report's evidence counts no longer match the repo (SQL: 9 files/159 assertions vs 10 files/169; UT: 89 vs 113 @Test)",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/AppCore/RouteMatch.swift",
+    "line": 239,
+    "title": "Route Match reports +0 minutes for a day with no confirmed stops and bestDay always prefers it",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 28,
+    "title": "Today tab shows a permanent spinner after switching to a trip with fewer days than the selected day index",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "supabase/migrations/20260924000005_saved_places.sql",
+    "line": 67,
+    "title": "Saved entry stays added_to_itinerary forever after the stop is removed from the itinerary",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "supabase/migrations/20260924000005_saved_places.sql",
+    "line": 193,
+    "title": "resolve_saved does not mark the entry added_to_itinerary when the chosen place is already a stop",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/Features/ShoppingView.swift",
+    "line": 296,
+    "title": "Merchant evidence for a scheduled purchase stop is recorded after confirmation and failures are swallowed",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "docs/acceptance/mvp-acceptance.md",
+    "line": 26,
+    "title": "Acceptance report claims Today/Trip/Map share TripSnapshot, but the Trip tab loads its own data without a revision consistency check",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "project.yml",
+    "line": 107,
+    "title": "Share Extension ships with NSExtensionActivationRule TRUEPREDICATE",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "supabase/migrations/20260925000010_place_chinese_name.sql",
+    "line": 48,
+    "title": "Any authenticated user can set name_zh / name_local on shared place rows displayed in every trip",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/AppCore/Backend.swift",
+    "line": 64,
+    "title": "Postgres check-constraint violations are reported to the user as a network error and treated as transient",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "docs/planning/mvp-technical-plan.md",
+    "line": 330,
+    "title": "Decision D9 (day can mark lodging as start/end, no endpoint insertion) is marked decided but not implemented",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "supabase/migrations/20260924000006_sharing.sql",
+    "line": 362,
+    "title": "save_place discards a confirmed place when an unresolved entry already exists for the same canonical URL",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "supabase/functions/ask-trip/index.ts",
+    "line": 44,
+    "title": "ask-trip ignores errors from the context queries and answers from partially empty trip data",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "supabase/migrations/20260924000007_shopping.sql",
+    "line": 259,
+    "title": "confirm_proposal accepts a second purchase stop for an item that is already scheduled, leaving item status inconsistent",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "supabase/migrations/20260924000005_saved_places.sql",
+    "line": 174,
+    "title": "resolve_saved does not require the entry to be unresolved, so any editor can silently re-point a confirmed Saved place",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "supabase/README.md",
+    "line": 27,
+    "title": "README RPC table no longer matches the migrations (upsert_place overwrites null names, signatures stale, update_day / record_parse_progress missing)",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/Features/TripStore.swift",
+    "line": 39,
+    "title": "Today/Map never learn about a trip created or joined in the same launch; first-run lands on a dead 尚未建立旅程 loop",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/Features/TripStore.swift",
+    "line": 52,
+    "title": "Signing out and into a different account keeps the old account's selectedTripID, so Today/Map show 尚未建立旅程 for the new account",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/Features/TripStore.swift",
+    "line": 33,
+    "title": "App Group caches (trip list and full TripSnapshots) survive sign-out and are served to whichever account launches offline next",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/AppCore/ConfirmPlaces.swift",
+    "line": 179,
+    "title": "Import auto-selects one branch when a sibling branch is in the same candidate list, because the 'close' filter only counts names ≥60% of the candidate's length",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/ShareCore/ShareAnalysis.swift",
+    "line": 31,
+    "title": "Shared URLs longer than 500 characters are truncated with an ellipsis before the share flow parses them",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/AppCore/Proposal.swift",
+    "line": 223,
+    "title": "Stale re-proposal drops created_by_ai, so an AI-suggested change is re-recorded as a human proposal",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "supabase/README.md",
+    "line": 27,
+    "title": "supabase/README RPC and error-code tables no longer match the migrations",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "supabase/config.toml",
+    "line": 44,
+    "title": "CI validates migrations on PostgreSQL 16 while config.toml pins the database to major version 17",
+    "realVotes": 0,
+    "reasons": []
+   },
+   {
+    "file": "Packages/AppCore/Sources/Features/RootView.swift",
+    "line": 62,
+    "title": "Tab bar order is 旅程／今天／地圖／收藏／購物, not the 今天／旅程／地圖／收藏／購物 fixed by the spec and CLAUDE.md",
+    "realVotes": 0,
+    "reasons": []
+   }
+  ]
+ },
+ "ux": {
+  "confirmed": [
+   {
+    "screen": "建立旅程 → 今天（首次使用流程結尾）",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 48,
+    "impact": "high",
+    "effort": "medium",
+    "issue": "建好第一個旅程後，「今天」與「地圖」分頁仍顯示「尚未建立旅程／建立旅程」，按鈕又把人送回「旅程」分頁，形成迴圈；要重開 App 才會看到新旅程。",
+    "why": "§3.1 流程終點是 Today；TripStore.trips 只在 RootView 的 .task 呼叫 start() 時載入一次，CreateTripView 的 onCreated 只把 trip 插進 TripListView 自己的 @State，沒有通知 TripStore；TodayView 第 31 行 store.snapshot == nil 就顯示空狀態。",
+    "suggestion": "讓 TripListView 直接使用 RootView 的 TripStore（或在 onCreated／JoinTripView.onJoined 後呼叫 store.start() 並設定 selectedTripID = 新 trip.id），建立完成後自動切到「今天」或推進新旅程的 TripDetailView。",
+    "spec_ref": "spec §3.1 Welcome → New Trip → … → Today",
+    "evidence": "CreateTripView(session: session) { trip in\n                    trips.insert(trip, at: 0)\n                }"
+   },
+   {
+    "screen": "Import → Parsing",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 122,
+    "impact": "high",
+    "effort": "medium",
+    "issue": "If the parse-import function call returns or throws before the server finishes (the UI itself says long itineraries take 1–2 minutes, longer than a default 60 s URLSession timeout), the session comes back with parseStatus == .parsing and the screen flips to 解析失敗「暫時無法連線到解析服務」while parsing is still running; tapping 重試 starts a second parse of the same text.",
+    "why": "Spec §3.1: Parsing must show clear progress and failure must be a real failure with retry; here a still-running parse is mislabelled as a failure, the progress view (with live stop counts) disappears, and retry doubles the AI cost.",
+    "suggestion": "In parse(): if `updated.parseStatus == .parsing` (or the invoke threw but the polled session says .parsing), stay in `.parsing` and keep polling `service.session` until it becomes .parsed/.failed (with a generous cap), only then apply or fail. Also let the poll loop drive the transition so the request timeout does not matter.",
+    "spec_ref": "§3.1 Parsing 顯示明確進度；失敗可重試",
+    "evidence": "if updated.parseStatus == .parsed { apply(updated) } else {\n                session = updated\n                phase = .failed\n            }"
+   },
+   {
+    "screen": "Confirm Places（無網路／地圖服務失敗）",
+    "file": "Packages/AppCore/Sources/AppCore/ConfirmPlaces.swift",
+    "line": 112,
+    "impact": "high",
+    "effort": "medium",
+    "issue": "When the device is offline or MapKit errors/throttles past the retry budget, PlaceSearch returns [] (PlaceSearch.swift line 68–69 `catch { return [] }`), so every item is auto-decided as 只保留名稱 with the note「Apple 地圖沒收錄，已保留名稱」and the summary says「全部已自動處理，可以直接建立」— the user is told the places don't exist and can create a trip with zero located stops.",
+    "why": "§6 requires a distinct 無網路 state; the claim「沒收錄」is false and there is no retry, so the user loses all route data without knowing why.",
+    "suggestion": "Have PlaceSearching return a result type (found / notFound / unavailable(reason)) or throw; on unavailable, leave `decision = nil`, show「地圖搜尋暫時無法使用（無網路）」with a 重新搜尋 button in ConfirmPlacesView, and do not set `autoDecided`. Only auto-decide pendingText on a genuine empty result.",
+    "spec_ref": "§6 已定方向：無網路、找不到店；AC-14",
+    "evidence": "if candidates.isEmpty {\n            // 無法辨識：不猜，保留為文字，之後可在行程裡再確認（常見於 Apple 地圖沒收錄的韓國小店）。\n            items[index].decision = .pendingText\n            items[index].autoDecided = true"
+   },
+   {
+    "screen": "旅程列表（空狀態／Welcome）",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 41,
+    "impact": "medium",
+    "effort": "small",
+    "issue": "沒有旅程時，空狀態只有「建立旅程」按鈕；「加入好友的旅程」只藏在右上角的人形圖示，被邀請的新使用者找不到次入口。",
+    "why": "§3.1 明定 Welcome 主 CTA 為建立旅行、次入口為加入好友 Trip；圖示按鈕沒有文字，首屏無法回答「我是被邀請的，該按哪裡」。",
+    "suggestion": "在 ContentUnavailableView 的 actions 加第二顆 Button(\"加入好友的旅程\") { showsJoin = true }，並把「建立旅程」設為 .borderedProminent；工具列圖示保留。",
+    "spec_ref": "spec §3.1 Welcome 主 CTA／次入口",
+    "evidence": "Button(\"加入好友的旅程\", systemImage: \"person.badge.plus\") { showsJoin = true }"
+   },
+   {
+    "screen": "旅程列表",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 62,
+    "impact": "medium",
+    "effort": "small",
+    "issue": "讀取失敗（含離線）時顯示「讀取失敗：The Internet connection appears to be offline.」這類系統原文，且錯誤存在時空狀態被隱藏、沒有重試按鈕，只能靠不易發現的下拉更新；同時「今天」分頁卻能顯示離線快取，兩個分頁對同一份旅程資料表現不一致。",
+    "why": "§6 要求無網路狀態可理解並有下一步；TripListView 自己再打一次 myTrips() 而不用 TripStore 的快取，錯誤訊息未經 BackendError.userMessage 轉換。",
+    "suggestion": "改用 BackendError.from(error).userMessage，離線時顯示 TripStore 快取的清單並沿用頂部離線橫幅；錯誤時用 ContentUnavailableView 加「重試」按鈕，而不是一行紅字。",
+    "spec_ref": "spec §6 無網路狀態",
+    "evidence": "errorMessage = \"讀取失敗：\\(error.localizedDescription)\""
+   },
+   {
+    "screen": "建立旅程表單",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 156,
+    "impact": "medium",
+    "effort": "small",
+    "issue": "建立失敗時顯示「資料不正確（INVALID_DATES）」或「建立失敗：other(\"…\")」——把後端錯誤碼與 Swift enum 原樣印給使用者；離線時也不會說「請檢查網路」。",
+    "why": "不可顯示 raw error code／enum；BackendError.userMessage 已有中文對應（INVALID_DATES → 結束日期不能早於開始日期、other → 無法連線）卻沒被用到。",
+    "suggestion": "改成 `catch let error as BackendError { errorMessage = error.userMessage }`，其他錯誤顯示「建立失敗，請稍後再試。」。",
+    "spec_ref": "spec §6 錯誤狀態可理解",
+    "evidence": "case .invalid(let reason): \"資料不正確（\\(reason)）\"\n            default: \"建立失敗：\\(error)\""
+   },
+   {
+    "screen": "登入／註冊",
+    "file": "Packages/AppCore/Sources/Features/SessionModel.swift",
+    "line": 98,
+    "impact": "medium",
+    "effort": "small",
+    "issue": "離線或後端非預期錯誤（例如 rate limit）時，登入頁顯示「登入失敗：The Internet connection appears to be offline.」或 Supabase 的英文訊息；且註冊時也用「登入失敗：」開頭。",
+    "why": "raw English 錯誤訊息；登入頁在 tabs() 之外，沒有離線橫幅，使用者不知道是網路問題還是帳密問題。",
+    "suggestion": "在 LoginError.init 先判斷 URLError／network（回傳「無法連線，請檢查網路後再試。」），其餘 .other 顯示「發生問題，請稍後再試。」並區分註冊／登入前綴；LoginView 也讀 session.network.isOnline 顯示離線提示並停用送出。",
+    "spec_ref": "spec §6 無網路狀態",
+    "evidence": "self = .other(error.localizedDescription)"
+   },
+   {
+    "screen": "App 啟動（已登入但 token 過期）",
+    "file": "Packages/AppCore/Sources/Features/SessionModel.swift",
+    "line": 42,
+    "impact": "medium",
+    "effort": "medium",
+    "issue": "冷啟動時若本機 session 已過期，state 先變成 signedOut → 閃現登入表單，SDK 自動更新後又跳回分頁；使用者可能已開始輸入。",
+    "why": "狀態閃爍讓人誤以為被登出，且輸入到一半被切換。",
+    "suggestion": "session 過期但存在時維持 .loading（顯示「正在確認登入…」），等 SDK refresh 結果（signedIn 或明確失敗）再切到 signedOut。",
+    "spec_ref": "",
+    "evidence": "if let session, !session.isExpired {\n                state = .signedIn(email: session.user.email)\n            } else {\n                state = .signedOut"
+   },
+   {
+    "screen": "加入好友的旅程",
+    "file": "Packages/AppCore/Sources/Features/MembersView.swift",
+    "line": 128,
+    "impact": "medium",
+    "effort": "small",
+    "issue": "貼入的文字不是合法邀請連結時「加入」按鈕只是灰掉，沒有說明原因；欄位也沒關閉自動修正／大寫，貼上 token 可能被鍵盤改字。",
+    "why": "disabled 狀態需解釋；邀請無效狀態應可理解（§6）。",
+    "suggestion": "text 非空且 InviteLink.token(from:) == nil 時在 footer 顯示「這不是 BearTravel 邀請連結，請貼上完整連結。」；TextField 加 .autocorrectionDisabled()、.textInputAutocapitalization(.never)、.keyboardType(.URL)。",
+    "spec_ref": "spec §6 邀請失效",
+    "evidence": ".disabled(joining || InviteLink.token(from: text) == nil)"
+   },
+   {
+    "screen": "從邀請連結開啟 App",
+    "file": "Packages/AppCore/Sources/Features/RootView.swift",
+    "line": 32,
+    "impact": "medium",
+    "effort": "medium",
+    "issue": "透過 beartravel://invite 加入成功後，只是關掉 sheet；沒有導向剛加入的旅程，「旅程」清單與「今天」分頁也不會更新，使用者不知道加入到哪。",
+    "why": "動作後缺乏回饋與去處；TripStore 不會重新載入（同上一個 TripStore 問題）。",
+    "suggestion": "onJoined 時呼叫 store.start()（或 reload trips）、設定 selectedTripID = joinedID、切到 .today 或推入 TripDetailView，並短暫顯示「已加入〈旅程名〉」。",
+    "spec_ref": "spec §2 好友共用",
+    "evidence": "JoinTripView(session: session, initialToken: session.pendingInviteToken) { _ in\n                            session.pendingInviteToken = nil\n                        }"
+   },
+   {
+    "screen": "Import → Confirm Places / 解析失敗（建立失敗、儲存失敗訊息）",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 170,
+    "impact": "medium",
+    "effort": "small",
+    "issue": "When commit, commitEmpty or saveAndParse fails, the user sees a raw Foundation string such as「建立失敗：The operation couldn’t be completed. (AppCore.BackendError error 4.)」, e.g. after a retry when the import was already committed (ALREADY_COMMITTED) or when offline.",
+    "why": "Copy rule: no raw error codes/English shown to users; every BackendError already has a Traditional-Chinese userMessage in Hardening.swift and the stop-editing screens use it, so this screen is inconsistent and gives no way forward.",
+    "suggestion": "Catch `BackendError` first and show `error.userMessage` (as PendingStopActions/RenameStopView do); keep the localizedDescription fallback only for non-backend errors. Apply to lines 148, 156 and 170. For `.conflict(\"ALREADY_COMMITTED\")` on commit, also offer 「前往旅程」 instead of leaving the user on a form that can never succeed.",
+    "spec_ref": "§6 已定方向（每個錯誤都要有對應 UI）; plan §3.5 via Hardening.swift",
+    "evidence": "errorMessage = \"建立失敗：\\(error.localizedDescription)\""
+   },
+   {
+    "screen": "Confirm Places（單一地點候選）",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 366,
+    "impact": "medium",
+    "effort": "medium",
+    "issue": "An item only shows up to 5 automatic candidates; if the right branch is missing (AC-01 case where Apple returns a different shop, or the parser's search_query was poor) the only options are 只保留名稱 or 移除. The user cannot type a refined query here, although the Share flow and ResolveStopSheet both provide a search field.",
+    "why": "Core action (confirming a place) is blocked and pushed to a later per-stop fix in the Trip screen, multiplying taps for long itineraries; inconsistent component between screens.",
+    "suggestion": "Add a compact 「換個關鍵字搜尋」 row per item (TextField prefilled with `stop.searchQuery ?? placeName` + 搜尋 button, same as ShareFlowView line 116–118) that re-runs `placeSearch.search` around the item's city centre and replaces `item.candidates`.",
+    "spec_ref": "§3.1 Confirm Places 列出歧義地點、分店；AC-01",
+    "evidence": "ForEach(item.candidates) { option in\n            Button {\n                item.decision = .place(option)"
+   },
+   {
+    "screen": "Confirm Places（已自動處理 N 項）",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 237,
+    "impact": "medium",
+    "effort": "small",
+    "issue": "Auto-handled items are listed without any date, and an item whose date the AI set (not nil, not ambiguous) has no date control at all, so a stop the parser put on the wrong day cannot be seen or corrected before the trip is created.",
+    "why": "AC-02: Today/Trip/Map all use the committed itinerary, so a wrong day silently becomes the official schedule; first viewport for the auto-handled group does not answer 'where did these go'.",
+    "suggestion": "Show the date (「第 N 天 · 2026-10-01」) on every ConfirmItemView row, and always render the 日期 Picker (or a compact menu) so the user can move an item; group the auto-handled list by date like the attention list.",
+    "spec_ref": "AC-02",
+    "evidence": "ForEach(handled, id: \\.self) { index in\n                            ConfirmItemView(item: $state.items[index], tripDates: state.tripDates, timeZone: timeZone)"
+   },
+   {
+    "screen": "Confirm Places（建立旅程按鈕）",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 247,
+    "impact": "medium",
+    "effort": "small",
+    "issue": "The primary action 建立旅程 and the only explanation of why it is disabled (「還有 N 項需要確認」) sit in the last section of a form that can hold 30+ items; from the top the user cannot tell whether they are done, and the New Trip step uses a toolbar 下一步 while this step does not.",
+    "why": "Hierarchy/affordance: primary action not visible; inconsistent placement with the previous step.",
+    "suggestion": "Put 建立旅程 as a `.confirmationAction` toolbar button (disabled with the same rule) and show the remaining count in the summary section; optionally keep the bottom button as well.",
+    "spec_ref": "",
+    "evidence": "Button(isCommitting ? \"建立中…\" : \"建立旅程\", action: onSubmit)\n                    .disabled(!state.canSubmit || isCommitting)"
+   },
+   {
+    "screen": "Confirm Places（搜尋中）",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 196,
+    "impact": "medium",
+    "effort": "small",
+    "issue": "「其餘 N 項先只保留名稱」is offered while place search is still running (undecidedCount counts unsearched items). Tapping it marks not-yet-searched items as pendingText, after which `applySearchResults` (`guard items[index].decision == nil else { return }`) skips the confident auto-match, so places that would have been located automatically end up unlocated.",
+    "why": "Bulk shortcut silently degrades the result and contradicts the summary text「搜尋地點中，名稱相符的會自動選定」shown at the same moment.",
+    "suggestion": "Hide the button until `searchDone == searchTotal`, or make it apply only to searched items (`decision == nil && searched`) and label it accordingly.",
+    "spec_ref": "§1 地點不確定時列候選並要求確認",
+    "evidence": "if state.undecidedCount > 0 {\n                    Button(\"其餘 \\(state.undecidedCount) 項先只保留名稱\") { state.keepUndecidedAsText() }"
+   },
+   {
+    "screen": "旅程列表",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 30,
+    "impact": "low",
+    "effort": "small",
+    "issue": "第一次進入「旅程」分頁時，資料載入完成前是一片空白的 List（沒有 spinner、沒有文字），loaded 之前空狀態也不出現。",
+    "why": "§6 要求 loading 狀態；新使用者首屏看到空白會以為壞掉。",
+    "suggestion": "在 overlay 加 `if !loaded { ProgressView(\"正在讀取旅程…\") }`，或用 TripStore.loaded 統一控制。",
+    "spec_ref": "spec §6 loading",
+    "evidence": "if loaded && trips.isEmpty && errorMessage == nil {"
+   },
+   {
+    "screen": "旅程列表",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 23,
+    "impact": "low",
+    "effort": "small",
+    "issue": "旅程列的副標顯示原始字串「2026-10-01 – 2026-10-05 · Asia/Seoul」；建立表單用的是「首爾（UTC+9）」，兩處時區呈現不一致，日期也沒有本地化格式或天數。",
+    "why": "copy 一致性：同一個物件在建立與列表用不同表示；英文時區識別碼對一般使用者不可讀。",
+    "suggestion": "改為 TripTimeZones.displayName(trip.timeZone) 並用 LocalDate 轉成「10/1 – 10/5（5 天）· 首爾」的格式。",
+    "spec_ref": "",
+    "evidence": "Text(\"\\(trip.startDate) – \\(trip.endDate) · \\(trip.timeZone)\")"
+   },
+   {
+    "screen": "建立旅程表單",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 125,
+    "impact": "low",
+    "effort": "small",
+    "issue": "按下「建立／下一步」後只有按鈕變灰，沒有任何進度文字或 spinner；貼了長文時 createImport 會等一段時間，使用者看不出是否已送出。登入畫面用「處理中…」、加入旅程用「加入中…」，這裡卻沒有。",
+    "why": "動作後回饋缺失，且與同流程其他表單不一致。",
+    "suggestion": "isSaving 時把按鈕標題改為「建立中…」／「送出中…」或在 toolbar 放 ProgressView，並在 Form 第一個 Section 顯示狀態。",
+    "spec_ref": "",
+    "evidence": "Button(hasText ? \"下一步\" : \"建立\") { Task { await save() } }\n                        .disabled(isSaving || name.trimmingCharacters(in: .whitespaces).isEmpty)"
+   },
+   {
+    "screen": "建立旅程表單",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 98,
+    "impact": "low",
+    "effort": "small",
+    "issue": "180pt 高的 TextEditor 沒有 placeholder 也沒有 accessibilityLabel；VoiceOver 只讀到「文字編輯區」，視覺上是一個空白框，要靠下方 footer 才知道用途。",
+    "why": "可及性：icon／無標籤的輸入元件需要標籤；空白框降低 affordance。",
+    "suggestion": "加 .accessibilityLabel(\"行程文字\")，並在 rawText 為空時 overlay 一段淡色 placeholder「貼上整段行程文字…」。",
+    "spec_ref": "",
+    "evidence": "TextEditor(text: $rawText).frame(height: 180)"
+   },
+   {
+    "screen": "登入／註冊",
+    "file": "Packages/AppCore/Sources/Features/LoginView.swift",
+    "line": 21,
+    "impact": "low",
+    "effort": "small",
+    "issue": "登入／註冊的 segmented Picker 標籤是空字串，VoiceOver 無法說明這組控制是什麼；頁面也沒有一句產品說明，首屏只是一個表單和「BeaRTravel」標題。",
+    "why": "可及性：無標籤控制；§3.1 的 Welcome 應讓人知道「建立旅行」是主要目的。",
+    "suggestion": "Picker(\"登入方式\", …) 並加 .accessibilityLabel；在表單上方放一行「貼上行程、確認地點，和旅伴一起規劃」的簡短說明。",
+    "spec_ref": "spec §3.1 Welcome",
+    "evidence": "Picker(\"\", selection: $mode) {"
+   },
+   {
+    "screen": "登入／註冊",
+    "file": "Packages/AppCore/Sources/Features/LoginView.swift",
+    "line": 35,
+    "impact": "low",
+    "effort": "small",
+    "issue": "輸入密碼後按鍵盤 return 不會送出，必須收鍵盤再捲到「登入」按鈕，多兩個操作。",
+    "why": "核心動作所需點擊數；標準登入表單預期 return = 送出。",
+    "suggestion": "為電子郵件加 .submitLabel(.next)，密碼（登入）／確認密碼（註冊）加 .submitLabel(.go) 與 .onSubmit { Task { await submit() } }，並用 @FocusState 依序切換。",
+    "spec_ref": "",
+    "evidence": "SecureField(\"密碼\", text: $password)\n                        .textContentType(mode == .signUp ? .newPassword : .password)"
+   },
+   {
+    "screen": "註冊",
+    "file": "Packages/AppCore/Sources/Features/SessionModel.swift",
+    "line": 115,
+    "impact": "low",
+    "effort": "small",
+    "issue": "註冊後若後端仍開著 Email 驗證，使用者看到「帳號已建立，但後端要求驗證電子郵件；請聯絡管理者關閉驗證。」——對一般使用者說「後端」「管理者」沒有意義，也沒有可執行的下一步。",
+    "why": "文案面向開發者而非使用者；狀態無出路。",
+    "suggestion": "改成「請到信箱點驗證連結後再登入。」並自動切回登入模式；把開發者提示留在 log。",
+    "spec_ref": "D7 Email＋密碼、關閉 Email 確認",
+    "evidence": "case .confirmationRequired: \"帳號已建立，但後端要求驗證電子郵件；請聯絡管理者關閉驗證。\""
+   },
+   {
+    "screen": "App 啟動",
+    "file": "Packages/AppCore/Sources/Features/RootView.swift",
+    "line": 25,
+    "impact": "low",
+    "effort": "small",
+    "issue": "檢查登入狀態期間只有一個沒有文字的 ProgressView 置中，Dynamic Type／VoiceOver 都得不到「正在做什麼」。",
+    "why": "loading 狀態要可理解（§6）；無標籤 spinner VoiceOver 只讀「進行中」。",
+    "suggestion": "ProgressView(\"正在確認登入狀態…\") 並置於與登入頁相同的背景，避免轉場閃白。",
+    "spec_ref": "spec §6 loading",
+    "evidence": "case .loading:\n                ProgressView()"
+   },
+   {
+    "screen": "設定（帳號）",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 48,
+    "impact": "low",
+    "effort": "small",
+    "issue": "帳號設定（改名、登出、刪除帳號）只能從「今天」分頁工具列進入；新使用者被停在「旅程」分頁，該分頁沒有任何帳號入口。",
+    "why": "首次使用時想改「旅伴看到的名稱」或登出找不到路徑；同一功能在不同分頁的可達性不一致。",
+    "suggestion": "在 TripListView 工具列也放同一顆「設定」person.crop.circle 按鈕，或把它移到 TabView 外層共用。",
+    "spec_ref": "",
+    "evidence": "Button(\"設定\", systemImage: \"person.crop.circle\") { showsAccount = true }"
+   },
+   {
+    "screen": "Trip 時間軸（示範資料）",
+    "file": "supabase/demo/seoul-5-days.sql",
+    "line": 47,
+    "impact": "low",
+    "effort": "small",
+    "issue": "示範旅程仍把「（地點待確認）」「（店名待確認）」寫進 Stop 文字，畫面上會同時出現舊詞「待確認」與新標籤「未定位，不計入路線」。",
+    "why": "上一個 commit 已把未定位地點的用語統一為「未定位（不計入路線）」，示範資料是唯一仍會顯示給使用者的舊詞。",
+    "suggestion": "把 raw_label 改成純店名（例如「明洞夜市逛逛」「IG 看到的選品店」），讓未定位標籤由 StopRow 統一顯示；StopEditingViews.swift 第 162 行的字串替換也可一併移除。",
+    "spec_ref": "commit 35d79b0 用語統一",
+    "evidence": "{\"raw_label\": \"明洞夜市逛逛（地點待確認）\"}"
+   }
+  ],
+  "unverified_count": 233
+ },
+ "style": {
+  "confirmed": [
+   {
+    "kind": "simplify",
+    "screen": "Today (stop list)",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 91,
+    "impact": "medium",
+    "issue": "TodayView re-implements the stop row inline instead of reusing `StopRow`. As a result the same stop looks different on Today vs Trip detail: time is body-size `.secondary` here vs `.subheadline.monospacedDigit()` with `.tertiary`-when-empty in StopRow; the lock/bag icons are `.caption` here vs `.caption2` there; and Today shows no `未定位，不計入路線` marker at all for unlocated stops (StopRow shows the `mappin.slash` label). `LegRow`'s hard-coded `.padding(.leading, 52)` is tuned to StopRow's subheadline time column + `spacing: 12`, so leg rows sit misaligned under Today's body-size time column.",
+    "suggestion": "Replace the inline `HStack` (lines 90–95) with `StopRow(stop: stop, place: stop.placeId.flatMap { snapshot.places[$0] })` inside the same `Button`. This removes the duplicate, restores the 未定位 marker on Today and makes LegRow indent line up.",
+    "evidence": "Text(stop.startTime.map(LocalTime.hourMinute) ?? \"--:--\").monospacedDigit().foregroundStyle(.secondary)"
+   },
+   {
+    "kind": "theme",
+    "screen": "Trip detail / Today (Fixed lock colour)",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 423,
+    "impact": "medium",
+    "issue": "Orange is the app's only accent besides system blue and is used for 14 unrelated meanings: the Fixed lock (here and TodayView.swift:93), the Food map pin (TripMapView.swift:136), `庫存未知` (ShoppingView.swift:242, TripMapView.swift:177), `未安排` (ShoppingView.swift:182), the offline-cache label (TodayView.swift:144), timezone mismatch (TripViews.swift:205), unavailable legs (StopEditingViews.swift:16), AI cannot-determine (AssistantView.swift:47), stale-revision notices (ProposalReviewView.swift:46, ShareFlowView.swift:169), parse failure (ImportFlowView.swift:64, 343), taxi warnings (TaxiCardView.swift:234) and missing share info (ShareFlowView.swift:86). A Fixed stop therefore reads like a warning.",
+    "suggestion": "Drop `.foregroundStyle(.orange)` from the two lock sites so the glyph inherits the row text colour exactly like the neighbouring purchase `bag` glyph (still visibly marked, still has the 固定 accessibility label). Reserve orange for one meaning: 'needs your attention / uncertain' (warnings, 無法估算, 庫存未知, 未安排).",
+    "evidence": "Image(systemName: \"lock.fill\").font(.caption2).foregroundStyle(.orange)"
+   },
+   {
+    "kind": "readability",
+    "screen": "Saved (row)",
+    "file": "Packages/AppCore/Sources/Features/SavedView.swift",
+    "line": 225,
+    "impact": "medium",
+    "issue": "A single Saved row can stack a headline, a capsule, a status label, a Link, and up to six caption-size borderless buttons (給計程車司機看, 在 Naver/Kakao/Google 地圖查看, N 人想去, 試算順路 or 補填地點) in two HStacks. Stop rows and map pins instead open a detail sheet for these actions (StopDetailView, PinDetailView).",
+    "suggestion": "Keep only title, category, status label and the 想去 button in the row; make the row tappable and move 給計程車司機看, 當地地圖, 試算順路 and 補填地點 into a `SavedDetailView` sheet built like StopDetailView (same Form sections). Removes 3–5 tap targets per row.",
+    "evidence": "TaxiCardButton(unlocatedName: entry.saved.rawLabel, countryCode: country)"
+   },
+   {
+    "kind": "theme",
+    "screen": "Global tint",
+    "file": "Tools/BrandArt/draw.swift",
+    "line": 114,
+    "impact": "medium",
+    "issue": "The brand assets define a warm palette (fur 0x9A6440 wordmark, hat 0xF6B83C, suitcase blue 0x2E9CCA, cream launch background) but the asset catalog has no `AccentColor` set, so every button, link, `.tint` checkmark and the `.accentColor` layer toggle fall back to system blue, which is not in the icon or launch art.",
+    "suggestion": "Add an `AccentColor.colorset` using the existing suitcase blue 0x2E9CCA (light and dark) so tappable elements and the today-route pin match the icon; this replaces system blue rather than adding a colour.",
+    "evidence": "c.setFillColor(rgb(0x2E9CCA))"
+   },
+   {
+    "kind": "simplify",
+    "screen": "Trip detail (toolbar)",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 246,
+    "impact": "medium",
+    "issue": "The Trip detail toolbar shows up to four icon-only items (成員, 更多, 試算順路, 除錯 in DEBUG) with an unusual `point.topleft.down.to.point.bottomright.curvepath` glyph; the `更多` menu only appears for owners and contains a single item.",
+    "suggestion": "Show the `更多` (ellipsis.circle) menu for all members and move 成員 into it (owners additionally get 刪除旅程), leaving 試算順路 as the one primary action button.",
+    "evidence": "NavigationLink { MembersView(session: session, trip: trip, myRole: myRole) } label: { Label(\"成員\", systemImage: \"person.2\") }"
+   },
+   {
+    "kind": "simplify",
+    "screen": "Map (layer picker)",
+    "file": "Packages/AppCore/Sources/Features/TripMapView.swift",
+    "line": 64,
+    "impact": "medium",
+    "issue": "Layer toggles are the app's only `.bordered` buttons, laid out in a horizontally scrolling row inside a `.regularMaterial` bottom bar together with the debug revision label — a second chrome band under the map controls.",
+    "suggestion": "Replace the bottom inset with a toolbar `Menu(\"圖層\", systemImage: \"square.3.layers.3d\")` of `Toggle`s (one per MapLayer) next to the existing `scope` button, and delete the `safeAreaInset`, `LayerPicker` and `.regularMaterial` bar.",
+    "evidence": ".background(.regularMaterial)"
+   },
+   {
+    "kind": "theme",
+    "screen": "今天（Today）／旅程時間軸",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 93,
+    "impact": "medium",
+    "issue": "Fixed Stop 的鎖頭用橘色，但橘色在同一畫面同時代表「路線無法估算」（LegRow）、「離線資料」、「時區不符」；全 App 橘色共 14 處、承載約 8 種意思，固定行程是唯一非警示的用法，卻出現在每一個固定行程列上。",
+    "suggestion": "TodayView.swift:93 與 TripViews.swift:423（StopRow）兩處把 `.foregroundStyle(.orange)` 改成 `.foregroundStyle(.secondary)`；lock.fill 圖示本身即為標記（仍符合「Fixed 明顯標示」）。橘色保留給「無法估算／未知／離線／需確認」這一類不確定狀態。",
+    "evidence": "if stop.fixed { Image(systemName: \"lock.fill\").font(.caption).foregroundStyle(.orange).accessibilityLabel(\"固定\") }"
+   },
+   {
+    "kind": "simplify",
+    "screen": "收藏（Saved）",
+    "file": "Packages/AppCore/Sources/Features/SavedView.swift",
+    "line": 220,
+    "impact": "medium",
+    "issue": "一張 SavedRow 卡片上有 4 個藍色可點元素分散在 3 行：來源 Link、「給計程車司機看」按鈕（帶 car.fill）、「N 人想去」愛心按鈕、「試算順路／補填地點」按鈕，加上 Capsule 類別標籤與狀態 Label，一眼無法分辨主要動作。",
+    "suggestion": "把 `TaxiCardButton` 從獨立一行移進最底下的 HStack（放在 試算順路／補填地點 旁），讓卡片固定為「標題列、一行狀態、一行動作」；來源 Link 若保留則併入狀態行尾端。",
+    "evidence": "TaxiCardButton(place: place, fallbackChineseLabel: entry.saved.rawLabel)"
+   },
+   {
+    "kind": "simplify",
+    "screen": "今天／旅程時間軸／地圖",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 146,
+    "impact": "medium",
+    "issue": "「資料版本 rN」是除錯資訊，卻在三個主分頁正式顯示：Today 佔一整個 Section、TripDetail（TripViews.swift:222）另佔一個 Section、地圖底部 material 條（TripMapView.swift:61）多一行。",
+    "suggestion": "三處都移除；需要時放到 DebugMenuView／TelemetryView。Today 與 TripDetail 的整個 `Section { Text(\"資料版本 …\") }` 一併刪除，少一個灰色群組。",
+    "evidence": "Text(\"資料版本 r\\(snapshot.revision)\").font(.caption2).foregroundStyle(.tertiary)"
+   },
+   {
+    "kind": "readability",
+    "screen": "給司機看（Taxi Card）",
+    "file": "Packages/AppCore/Sources/Features/TaxiCardView.swift",
+    "line": 18,
+    "impact": "medium",
+    "issue": "上半部四種自訂字級、三種字重（30 bold／40 heavy／26 semibold／24 semibold）；「請載我到」的請求句 30pt bold 與 40pt heavy 的地名互相搶眼，司機要先讀的其實只有地名與地址。",
+    "suggestion": "改成兩層：請求句用 `.font(.title2)`（一般字重），地名維持 40 heavy，地址與 extras 統一同一個字級（例如都 26 semibold，刪掉 24 那組）。",
+    "evidence": ".font(.system(size: 30, weight: .bold))"
+   },
+   {
+    "kind": "simplify",
+    "screen": "旅程時間軸（Trip detail）",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 450,
+    "impact": "medium",
+    "issue": "每一天的 Section 尾端有 2～3 列附註：RouteStatusRow「路線（大眾運輸）：全天約 N 分」、時區警示、gearshape 設定列「大眾運輸 · 首爾」；交通方式在相鄰兩列重複出現。",
+    "suggestion": "合併成一列：可編輯者只顯示 gearshape NavigationLink，label 改為「\\(mode) · \\(summary) · \\(tz)時間」；僅 viewer 才顯示 RouteStatusRow。交通方式只出現一次，每天少一列。",
+    "evidence": "LabeledContent(\"路線（\\(day.day.transportMode.displayName)）\") {"
+   },
+   {
+    "kind": "consistency",
+    "screen": "收藏（Saved）",
+    "file": "Packages/AppCore/Sources/Features/SavedView.swift",
+    "line": 42,
+    "impact": "medium",
+    "issue": "多旅程時的旅程 Picker 在 Saved 是清單內第一列，Today 與 Shopping 則放在 toolbar；三個分頁同一控制項位置不同，Saved 清單頂部因此堆了旅程 Picker、分段 Picker、Toggle 三個控制列才到內容。",
+    "suggestion": "把 `Picker(\"旅程\", selection: $tripID)` 移到 `.toolbar { }`，寫法比照 ShoppingTab；清單頂端只剩分段 Picker 與 Toggle。",
+    "evidence": "Picker(\"旅程\", selection: $tripID) {"
+   },
+   {
+    "kind": "consistency",
+    "screen": "全 App（錯誤訊息）",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 17,
+    "impact": "medium",
+    "issue": "24 處 `Text(errorMessage).foregroundStyle(.red)` 直接丟進 List／Form，有的在最上面（旅程列表、時間軸）、有的在最下面（成員、收藏）、有的夾在中間（購物清單）；未包 Section 時會自成一個灰色群組，位置與樣式不一。",
+    "suggestion": "抽一個共用 `ErrorRow(message)`（`Text(...).font(.callout).foregroundStyle(.red)`），固定放在清單第一個 Section；所有畫面改用它，紅色只在一個固定位置出現。",
+    "evidence": "Text(errorMessage).foregroundStyle(.red)"
+   },
+   {
+    "kind": "theme",
+    "screen": "給司機看（Taxi Card）",
+    "file": "Packages/AppCore/Sources/Features/TaxiCardView.swift",
+    "line": 34,
+    "impact": "medium",
+    "issue": "上半部整塊用 25% 黃色填滿大面積，是 App 內最大的色塊；黃色同時也是 RootView 離線橫幅的底色，兩者意思無關。40pt 字級已足以區分司機區與中文對照區。",
+    "suggestion": "改用與下半部相同的 `.background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 16))`，兩塊同色、同圓角，靠字級分層。",
+    "evidence": ".background(.yellow.opacity(0.25), in: RoundedRectangle(cornerRadius: 20))"
+   },
+   {
+    "kind": "theme",
+    "screen": "App 圖示（品牌）",
+    "file": "Tools/BrandArt/draw.swift",
+    "line": 95,
+    "impact": "medium",
+    "issue": "圖示在熊之外還疊了三段漸層天空、太陽、三朵雲、虛線航線與飛機；縮到 60pt 時虛線與飛機變成雜點，與熊搶焦點。",
+    "suggestion": "刪除第 92～98 行的雲、虛線航線與飛機（可留太陽），只保留天空／地面與戴帽子的熊；漸層可簡化為兩色。",
+    "evidence": "c.setStrokeColor(rgb(0xFFFFFF, 0.95)); c.setLineWidth(14); c.setLineCap(.round); c.setLineDash(phase: 0, lengths: [2, 34])"
+   },
+   {
+    "kind": "theme",
+    "screen": "全 App（所有按鈕、NavigationLink、Toggle、Tab bar、選取勾號）",
+    "file": "project.yml",
+    "line": 40,
+    "impact": "medium",
+    "issue": "沒有 AccentColor asset，也沒有 ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME；Assets.xcassets 只有 AppIcon、LaunchLogo、LaunchBackground。整個 App 的可互動元件（Button、NavigationLink、Toggle、segmented Picker、tab bar、.borderedProminent「建立旅程」、ImportFlow/ShareFlow 的 .tint 勾號、LayerPicker 的 .accentColor）都是 iOS 預設系統藍，與啟動畫面的熊毛棕字樣、圖示的熊完全無關；唯一引用 .accentColor 的地方是 TripMapView.swift:153。",
+    "suggestion": "新增 App/Resources/Assets.xcassets/AccentColor.colorset（light = 熊毛棕 #9A6440，即 draw.swift 的 fur／字樣色；dark = 提亮的 #C8925F），並在 project.yml BearTravel target 的 settings.base 加一行 ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor（放在 ASSETCATALOG_COMPILER_APPICON_NAME 旁）。不需改任何 View：所有 .tint／NavigationLink／Toggle／tab bar／勾號會自動換色。ShareExtension target 也加同一行，讓分享畫面一致。",
+    "evidence": "        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon"
+   },
+   {
+    "kind": "theme",
+    "screen": "今天／旅程時間軸（Fixed 標記）",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 93,
+    "impact": "medium",
+    "issue": "橘色同時代表三種意思：(1) Fixed 鎖頭（TodayView:93、TripViews:423），(2) 警示／不確定（庫存未知、無法估算、時區不符、離線、AI 無法判斷、待確認原因等十餘處），(3) 地圖「美食」圖釘（TripMapView:136）。固定行程是結構性標記、不是警告，卻和「會出問題」的東西同色，使用者無法一眼區分。",
+    "suggestion": "把鎖頭改成單色：TodayView:93 與 TripViews:423 的 .foregroundStyle(.orange) 改為 .foregroundStyle(.primary)（lock.fill 本身已足夠辨識，且仍保留 accessibilityLabel(\"固定\")）。橘色從此只代表「不確定／需要注意」。",
+    "evidence": "if stop.fixed { Image(systemName: \"lock.fill\").font(.caption).foregroundStyle(.orange).accessibilityLabel(\"固定\") }"
+   },
+   {
+    "kind": "consistency",
+    "screen": "地圖",
+    "file": "Packages/AppCore/Sources/Features/TripMapView.swift",
+    "line": 131,
+    "impact": "medium",
+    "issue": "圖釘用了五種顏色（.blue／.gray／.purple／.orange／.green）加上 .blue.opacity(0.5) 的虛線（第 35 行），是全 App 顏色最多的畫面；其中 .purple 只在這裡出現，.green 在這裡是「購物」但在匯入進度是「完成」，.orange 在這裡是「美食」但別處是警示。圖釘本身已用字形區分（數字／bookmark.fill／fork.knife／bag.fill），顏色是重複資訊。",
+    "suggestion": "color 改成兩種：case .todayRoute: .accentColor；其餘（.otherDays、.saved、.food、.shopping）一律 Color(.systemGray)，類別由既有字形表達，已購買仍用 pin.dimmed 的 0.35 透明度。第 35 行虛線 .blue.opacity(0.5) 改 .accentColor.opacity(0.5)。",
+    "evidence": "        case .todayRoute: .blue\n        case .otherDays: .gray\n        case .saved: .purple\n        case .food: .orange\n        case .shopping: .green"
+   },
+   {
+    "kind": "simplify",
+    "screen": "收藏（每一列）",
+    "file": "Packages/AppCore/Sources/Features/SavedView.swift",
+    "line": 220,
+    "impact": "medium",
+    "issue": "每一列收藏最多疊了 6 個 caption 大小的可點元素：來源 Link、「給計程車司機看」、「在 Naver 地圖查看」「在 Kakao 地圖查看」（未定位時）、「N 人想去」、「試算順路」或「補填地點」，全部同一種 accent 色、同一種 .caption .borderless 樣式，整列變成一片藍色小字，主要動作（想去／試算順路／補填地點）被淹沒。其他畫面（StopDetailView、PinDetailView）都是點列後在 sheet 裡才放司機卡與在地地圖按鈕。",
+    "suggestion": "把第 220–229 行的 TaxiCardButton 與 LocalMapSearchButtons 從 SavedRow 移除，改成點整列開一個與 PinDetailView 同構的詳情 sheet（標題、地址、司機卡、在地地圖、來源連結都放那裡）。列內只留：標題＋類別、狀態 Label（未定位／已加入行程）、「N 人想去」、一個主要動作（試算順路 或 補填地點）。",
+    "evidence": "                TaxiCardButton(place: place, fallbackChineseLabel: entry.saved.rawLabel)\n                    .font(.caption).buttonStyle(.borderless)"
+   },
+   {
+    "kind": "consistency",
+    "screen": "全 App 離線提示（頂部橫幅／今天／收藏）",
+    "file": "Packages/AppCore/Sources/Features/RootView.swift",
+    "line": 52,
+    "impact": "medium",
+    "issue": "同一個「離線」概念有三種呈現：RootView 頂部橫幅用 .yellow.opacity(0.25) 底色（黃色在 App 其他地方不存在，深色模式會變成混濁的橄欖色）、TodayView:143–144 的「離線資料：…」Label 用 .orange、SavedView:55 的「N 項變更等待連線後送出」Label 用 .secondary。",
+    "suggestion": "統一為「橘色文字＋中性底」：RootView:52 的 .background(.yellow.opacity(0.25)) 改成 .background(.regularMaterial)（與 TripMapView:64 底部工具列相同）並在 Label 加 .foregroundStyle(.orange)；SavedView:55 的 .foregroundStyle(.secondary) 改 .orange。這樣黃色從 App 消失，離線一律是橘色警示。",
+    "evidence": "                        .background(.yellow.opacity(0.25))"
+   },
+   {
+    "kind": "readability",
+    "screen": "給計程車司機看（全螢幕卡片）",
+    "file": "Packages/AppCore/Sources/Features/TaxiCardView.swift",
+    "line": 34,
+    "impact": "medium",
+    "issue": "給司機看的面板用 .yellow.opacity(0.25) 底色、圓角 20；下方中文對照面板用 .quaternary.opacity(0.5)、圓角 16（第 54 行）。黃色不在調色盤內，深色模式下黃色 25% 疊在黑底上會變成暗黃綠，反而降低黑字對比；兩個面板圓角也不一致。",
+    "suggestion": "兩個面板都改成 .background(.quaternary, in: RoundedRectangle(cornerRadius: 16))；司機面板的可讀性由 40pt heavy 的店名與 26pt 地址承擔，不需要底色提示。第 54 行順便拿掉 .opacity(0.5)。",
+    "evidence": "                .background(.yellow.opacity(0.25), in: RoundedRectangle(cornerRadius: 20))"
+   },
+   {
+    "kind": "simplify",
+    "screen": "旅程時間軸（工具列）",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 252,
+    "impact": "medium",
+    "issue": "TripDetailView 右上角同時放「成員」「更多」「試算順路」（DEBUG 再加「除錯」）三到四個圖示，其中 試算順路 用的 SF Symbol point.topleft.down.to.point.bottomright.curvepath 幾乎沒人認得；「更多」選單只在 owner 時出現，裡面只有一項「刪除旅程」。Today 也有 設定＋AI 助手（＋除錯）三個。",
+    "suggestion": "TripDetailView：把「更多」Menu 改成一律顯示，把「成員」與「刪除旅程」都收進去，工具列只留一個「試算順路」（改用較直覺的 \"arrow.triangle.turn.up.right.diamond\" 或直接用文字按鈕「試算順路」）。TodayView:52 的除錯按鈕加 ToolbarItem(placement: .topBarLeading)，確保 AI 助手（sparkles）在 DEBUG build 也維持在最右上角。",
+    "evidence": "Button(\"試算順路\", systemImage: \"point.topleft.down.to.point.bottomright.curvepath\") { showsRouteMatch = true }"
+   },
+   {
+    "kind": "simplify",
+    "screen": "成員",
+    "file": "Packages/AppCore/Sources/Features/MembersView.swift",
+    "line": 61,
+    "impact": "medium",
+    "issue": "成員頁底部有一個「我的顯示名稱」Section（TextField＋儲存），與 AccountView:603–613 的「顯示名稱」Section 是同一個欄位、同一個 API（setDisplayName），使用者在兩個地方看到兩個一樣的輸入框。",
+    "suggestion": "刪除 MembersView:61–67 的 Section 與 saveName()；成員頁只列成員與邀請，顯示名稱統一在「設定」改。",
+    "evidence": "            Section(\"我的顯示名稱\") {"
+   },
+   {
+    "kind": "readability",
+    "screen": "Saved 收藏（列表列）",
+    "file": "Packages/AppCore/Sources/Features/SavedView.swift",
+    "line": 221,
+    "impact": "medium",
+    "issue": "Every SavedRow stacks 5 rows: headline+capsule, status caption, source link caption, a caption-size 給計程車司機看 button (or 3 caption buttons: taxi + Naver + Kakao on one HStack), then another caption HStack with 你新增 / N 人想去 / 試算順路 or 補填地點. Three of five rows are interactive controls rendered at .caption with .borderless, so tap targets are ~13pt text tall and sit 16pt apart; the three-button line will wrap or truncate at larger Dynamic Type.",
+    "suggestion": "Cut the row to title, one caption line (category · status) and the N 人想去 button at body size. Remove TaxiCardButton and LocalMapSearchButtons from the row and reach them by tapping the row into a sheet (reuse the PinDetailView/StopDetailView pattern already used on Map/Trip: name, address, 給計程車司機看, 在地地圖, 試算順路 / 補填地點 as full-height Form rows). Delete the .font(.caption) modifiers on lines 221, 228 and 246.",
+    "evidence": "                    .font(.caption).buttonStyle(.borderless)"
+   },
+   {
+    "kind": "readability",
+    "screen": "Shopping 購物清單（列表列）",
+    "file": "Packages/AppCore/Sources/Features/ShoppingView.swift",
+    "line": 190,
+    "impact": "medium",
+    "issue": "Each ShoppingRow shows four lines in three sizes: body name, caption status, caption2 secondary 'N 人想買', caption NavigationLink 找可能販售的店…. caption2 secondary is the smallest, lightest text in the app and the caption-size NavigationLink inside a non-link row is a sub-44pt tap target.",
+    "suggestion": "Merge status and interest into one caption line ('未安排 · 2 人想買') at .caption/.secondary, delete the caption2 line, and make the 找可能販售的店… link body size (drop .font(.caption)) or make the whole row a NavigationLink when unscheduled so the chevron is the affordance.",
+    "evidence": "                Text(\"\\(entry.interestedUserIDs.count) 人想買\").font(.caption2).foregroundStyle(.secondary)"
+   },
+   {
+    "kind": "readability",
+    "screen": "Today（日期標頭）",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 72,
+    "impact": "medium",
+    "issue": "Previous/next day controls are icon-only buttons with a bare Image(systemName: \"chevron.left\") / \"chevron.right\", no accessibilityLabel, and no minimum frame; as .borderless in a list row the tap target is the glyph's ~17pt box.",
+    "suggestion": "Use Button(\"前一天\", systemImage: \"chevron.left\") { … }.labelStyle(.iconOnly) (and \"後一天\" for the right one) so VoiceOver gets the title, and add .frame(minWidth: 44, minHeight: 44) to each.",
+    "evidence": "                    Button { dayIndex = index - 1 } label: { Image(systemName: \"chevron.left\") }.disabled(index == 0)"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Today vs Trip 時間軸（行程點列）",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 91,
+    "impact": "medium",
+    "issue": "The same Stop is drawn two different ways: TodayView builds its own HStack (time in body .secondary, lock at .caption) while TripDetailView uses StopRow (time .subheadline.monospacedDigit, .tertiary when missing, lock at .caption2, address/未定位/停留 lines). Users see two row designs for one object across adjacent tabs.",
+    "suggestion": "Delete the ad-hoc HStack in TodayView and render StopRow(stop:place:) there too; if Today should stay lighter, add a `compact: Bool` to StopRow that hides the address/停留 lines rather than maintaining a second layout.",
+    "evidence": "                        Text(stop.startTime.map(LocalTime.hourMinute) ?? \"--:--\").monospacedDigit().foregroundStyle(.secondary)"
+   },
+   {
+    "kind": "simplify",
+    "screen": "Trip 時間軸（每日尾列）",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 213,
+    "impact": "medium",
+    "issue": "After the stops, every day section appends three meta rows: RouteStatusRow (LabeledContent 路線（大眾運輸）+ optional '未定位…未計入' caption), an orange time-zone mismatch caption, and a caption gear NavigationLink repeating '大眾運輸 · 首爾'. The transport mode is printed twice per day and the caption-size NavigationLink is a small tap target.",
+    "suggestion": "Merge RouteStatusRow and the DaySettings link into one body-size row: make the NavigationLink label `LabeledContent(\"路線（大眾運輸 · 首爾）\", value: summary)` and delete the separate gearshape Label; keep the pending-count caption and the mismatch warning beneath it.",
+    "evidence": "                            Label(\"\\(day.day.transportMode.displayName) · \\(TripTimeZones.displayName(day.day.timeZone))\", systemImage: \"gearshape\")"
+   },
+   {
+    "kind": "readability",
+    "screen": "Trip 時間軸 / Today（路段列）",
+    "file": "Packages/AppCore/Sources/Features/StopEditingViews.swift",
+    "line": 32,
+    "impact": "medium",
+    "issue": "Each LegRow reads '大眾運輸約 12 分到「광장시장」': the mode word repeats what the leading tram/walk/car icon already shows, and 到「…」 repeats the name of the very next row. On a day with 8 stops this adds 7 long caption lines between the stops.",
+    "suggestion": "Shorten the visible text to '約 12 分' (or '無法估算' / '無法估算（此地區不提供）'), keep the icon, and keep the full sentence only in .accessibilityLabel. TodayView already passes toName: nil, so TripDetailView can do the same for consistency.",
+    "evidence": "        case .minutes(let m): return \"\\(mode.displayName)約 \\(Int(m.rounded(.up))) 分\\(destination)\""
+   },
+   {
+    "kind": "simplify",
+    "screen": "Trip 時間軸（工具列）",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 252,
+    "impact": "medium",
+    "issue": "The navigation bar carries up to four icon-only items: 成員 (person.2), 更多 (ellipsis.circle), 試算順路 with the obscure 'point.topleft.down.to.point.bottomright.curvepath' glyph, and a ladybug in DEBUG. The curvepath icon does not communicate 試算順路 on its own.",
+    "suggestion": "Keep one primary action visible: make 試算順路 a text button (Button(\"試算順路\") without systemImage) and move 成員 and 刪除旅程 into the existing ellipsis Menu so the bar has two items.",
+    "evidence": "            Button(\"試算順路\", systemImage: \"point.topleft.down.to.point.bottomright.curvepath\") { showsRouteMatch = true }"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Trip 時間軸（行程點詳情 sheet）",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 242,
+    "impact": "medium",
+    "issue": "StopDetailView is presented with detents [.medium] here but [.medium, .large] from TodayView. For an unlocated stop the sheet holds name, 時間/停留/類型 rows, taxi button, 當地地圖 section with footer, and the 編輯 section (3 rows + footer); at .medium only the top half is visible and the user cannot drag it up.",
+    "suggestion": "Use .presentationDetents([.medium, .large]) in both places (or a shared constant) so the same sheet behaves the same on both tabs.",
+    "evidence": "                .presentationDetents([.medium])"
+   },
+   {
+    "kind": "readability",
+    "screen": "Saved 收藏",
+    "file": "Packages/AppCore/Sources/Features/SavedView.swift",
+    "line": 58,
+    "impact": "medium",
+    "issue": "Trip picker, segmented category picker, 顯示已加入行程 toggle, error/queued labels and the entry rows all live in one unnamed List section, so the filter controls and the content run together with no header separating them; the entries themselves are a flat, ungrouped list.",
+    "suggestion": "Put the picker/toggle rows in their own Section and the entries in Section(\"收藏（N）\"); when filter == .all, group entries by category into sections so the per-row category text becomes unnecessary.",
+    "evidence": "                ForEach(filter.apply(entries, includeAdded: includeAdded)) { entry in"
+   },
+   {
+    "kind": "readability",
+    "screen": "Shopping 購物清單",
+    "file": "Packages/AppCore/Sources/Features/ShoppingView.swift",
+    "line": 102,
+    "impact": "medium",
+    "issue": "Items are a flat list mixing 未安排, 已安排 and 已購買 entries; the state is communicated per row by an orange caption, strikethrough and a date string, which is why each row needs so many lines.",
+    "suggestion": "Group entries into Sections 未安排 / 已安排 / 已買 (purchased last). The section header then carries the state, so the per-row orange '未安排' text can be dropped and 已安排 rows only need the store/day.",
+    "evidence": "            ForEach(entries) { entry in"
+   },
+   {
+    "kind": "consistency",
+    "screen": "全 App（橙色語意）",
+    "file": "Packages/AppCore/Sources/Features/ShoppingView.swift",
+    "line": 182,
+    "impact": "medium",
+    "issue": ".orange is used 14 times for at least six meanings: the Fixed-stop lock, offline/cached data, an unestimable leg, time-zone mismatch, AI cannot-determine, missing share info, stale-proposal notice, parse failure, and plain statuses like 未安排 and 可能販售 · 庫存未知. When a status word and a warning share one colour the warning stops standing out.",
+    "suggestion": "Reserve orange for the Fixed lock and genuine warnings/uncertainty (offline, unestimable, conflicts, missing info). Render status text (未安排, 可能販售（…）· 庫存未知 on ShoppingView 242 and TripMapView 177) in .secondary; the required 庫存未知 wording stays, only the colour changes.",
+    "evidence": "                    case .unscheduled: Text(\"未安排\").foregroundStyle(.orange)"
+   },
+   {
+    "kind": "readability",
+    "screen": "Shopping 購物清單（列表列）",
+    "file": "Packages/AppCore/Sources/Features/ShoppingView.swift",
+    "line": 183,
+    "impact": "medium",
+    "issue": "Scheduled items print a raw ISO date next to the store ('已安排：2026-09-26 Olive Young 明洞') with no separator; elsewhere days are named '第 N 天'.",
+    "suggestion": "Format as '第 2 天 · Olive Young 明洞' (day number from the trip timeline) and use the same '·' separator used across the app.",
+    "evidence": "                    case .scheduled: Text(\"已安排：\\(entry.plannedDate ?? \"\") \\(entry.plannedStore ?? \"\")\")"
+   },
+   {
+    "kind": "theme",
+    "screen": "Map（圖釘與圖層）",
+    "file": "Packages/AppCore/Sources/Features/TripMapView.swift",
+    "line": 133,
+    "impact": "medium",
+    "issue": "Pins use five unrelated system colours (blue, gray, purple, orange, green) plus a half-transparent blue polyline, while each non-route pin already carries a distinct icon (bookmark / fork.knife / bag). Five colours on one map is the busiest palette in the app and none of them is a brand colour.",
+    "suggestion": "Reduce to three: today route = accent, other days = gray, all saved/food/shopping pins = one secondary colour differentiated by the existing icons. Drop the separate purple/orange/green cases.",
+    "evidence": "        case .todayRoute: .blue"
+   },
+   {
+    "kind": "readability",
+    "screen": "Map（圖層列）",
+    "file": "Packages/AppCore/Sources/Features/TripMapView.swift",
+    "line": 154,
+    "impact": "medium",
+    "issue": "The five layer toggles are .bordered buttons forced to .font(.caption), giving small tap targets in a horizontal scroller; beneath them sits the caption2 revision line, so the bottom bar has two rows of tiny text.",
+    "suggestion": "Remove .font(.caption) (default body size makes each chip taller than 44pt) and delete the 資料版本 Text below so the bar is a single row of toggles.",
+    "evidence": "                    .font(.caption)"
+   },
+   {
+    "kind": "readability",
+    "screen": "Map（圖釘）",
+    "file": "Packages/AppCore/Sources/Features/TripMapView.swift",
+    "line": 117,
+    "impact": "medium",
+    "issue": "PinMarker is a fixed 28×28 circle with a caption-bold order number; at accessibility text sizes the digits overflow the circle, and 28pt is under the 44pt tap minimum for the annotation button.",
+    "suggestion": "Use .frame(minWidth: 28, minHeight: 28) with .padding(6) around the label so the circle grows with the text, and add .contentShape(Circle()) plus padding on the Button so the hit area reaches 44pt.",
+    "evidence": "            Circle().fill(color).frame(width: 28, height: 28)"
+   },
+   {
+    "kind": "readability",
+    "screen": "給司機看（TaxiCard）",
+    "file": "Packages/AppCore/Sources/Features/TaxiCardView.swift",
+    "line": 20,
+    "impact": "medium",
+    "issue": "The driver block uses four hard-coded point sizes (30 bold, 40 heavy, 26 semibold, 24 semibold) that do not scale with Dynamic Type and give four different hierarchies in one card.",
+    "suggestion": "Collapse to two levels: name at a single large size and everything else (request, address, extras) at one size below it; express them via text styles (.largeTitle.bold() / .title2) or @ScaledMetric so they follow the user's text size.",
+    "evidence": "                        .font(.system(size: 40, weight: .heavy))"
+   },
+   {
+    "kind": "readability",
+    "screen": "全 App（離線橫幅）",
+    "file": "Packages/AppCore/Sources/Features/RootView.swift",
+    "line": 48,
+    "impact": "medium",
+    "issue": "The offline banner shown above every tab is a 33-character caption sentence with two clauses; at .caption on a yellow tint it wraps to 2–3 lines on a phone and pushes every screen down.",
+    "suggestion": "Shorten to '離線中：顯示最近一次的資料' at .footnote; the details about queued 收藏/購買 already appear as the '\\(queued) 項變更等待連線後送出' label in SavedView and the toast in ShoppingListView.",
+    "evidence": "                    Label(\"離線中：顯示最近一次的資料；行程修改需要連線，收藏與購買會在連線後送出。\", systemImage: \"wifi.slash\")"
+   },
+   {
+    "kind": "readability",
+    "screen": "匯入確認（ConfirmItemView）",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 406,
+    "impact": "medium",
+    "issue": "Each import item ends with a caption-size borderless HStack of 只保留名稱 and 移除 buttons, separated only by a Spacer; on a screen where the user must tap these for many items, they are sub-44pt targets.",
+    "suggestion": "Remove .font(.caption) from the HStack so the two Labels render at body size; keep them as the last row of the item.",
+    "evidence": "        .font(.caption)"
+   },
+   {
+    "kind": "simplify",
+    "screen": "試算順路（結果）",
+    "file": "Packages/AppCore/Sources/Features/RouteMatchView.swift",
+    "line": 79,
+    "impact": "medium",
+    "issue": "The 建議 section repeats the best day's position sentence and the three MatchNumbers rows that appear again in that day's own section directly below, so the best day is printed twice with 4–5 rows each.",
+    "suggestion": "Delete the 建議 section and instead mark the best day's section header ('第 2 天 · 2026-09-26（大眾運輸）· 最順路') or sort it first; one block per day.",
+    "evidence": "                        Section(\"建議\") {"
+   },
+   {
+    "kind": "simplify",
+    "screen": "Today（工具列）",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 48,
+    "impact": "medium",
+    "issue": "The Today navigation bar holds a trip Picker menu, a 設定 person icon, the AI sparkles button and (DEBUG) a ladybug; the confirmed AI entry competes with three other trailing items on the smallest screens.",
+    "suggestion": "Keep AI 助手 as the sole trailing icon: move 設定 to the 旅程 tab's toolbar (next to 建立旅程 / 加入好友的旅程) and, when there is more than one trip, place the trip Picker in the day-header row instead of the bar.",
+    "evidence": "                Button(\"設定\", systemImage: \"person.crop.circle\") { showsAccount = true }"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Map / Today / Trip detail (Fixed stop marker)",
+    "file": "Packages/AppCore/Sources/Features/TripMapView.swift",
+    "line": 120,
+    "impact": "low",
+    "issue": "The Fixed stop is marked three different ways: an orange `lock.fill` at `.caption` on Today (TodayView.swift:93), an orange `lock.fill` at `.caption2` in StopRow (TripViews.swift:423), and a white emoji 🔒 inside the map pin. The emoji renders with the platform emoji font (colour, weight and baseline differ from the SF glyphs used for the neighbouring `bookmark.fill` / `bag.fill` pins on lines 122 and 124).",
+    "suggestion": "Replace the emoji with `Image(systemName: \"lock.fill\").font(.caption).foregroundStyle(.white)` so the pin matches the two sibling pin glyphs, and use the same `.font(.caption2)` for the lock (and the purchase `bag`) in TodayView as StopRow already does.",
+    "evidence": "Text(fixed ? \"🔒\" : \"\\(order)\").font(.caption.bold()).foregroundStyle(.white)"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Stop detail sheet",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 379,
+    "impact": "low",
+    "issue": "`未定位，不計入路線` is a `Label` with `mappin.slash` in StopRow (TripViews.swift:431) and SavedRow (SavedView.swift:212), but a bare `Text` without the icon in the stop detail sheet.",
+    "suggestion": "Use the same `Label(\"未定位，不計入路線\", systemImage: \"mappin.slash\").font(.caption).foregroundStyle(.secondary)` here.",
+    "evidence": "if place == nil { Text(\"未定位，不計入路線\").font(.caption).foregroundStyle(.secondary) }"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Today / Shopping merchant search / Share flow / Route numbers",
+    "file": "Packages/AppCore/Sources/Features/ShoppingView.swift",
+    "line": 244,
+    "impact": "low",
+    "issue": "The detour number is worded and styled four ways: `+N 分路程 · 類別` caption `.secondary` on Today (TodayView.swift:113); `路程 +N 分` caption in primary colour here; `（+N 分）` inside a button title in the share flow (ShareFlowView.swift:180); and `LabeledContent(\"路程\", \"+N 分\")` at body size in MatchNumbers (MatchNumbers.swift:15). Word order flips between `+N 分路程` and `路程 +N 分`.",
+    "suggestion": "Use one phrasing, `路程 +N 分`, matching the MatchNumbers label, and one style for the inline form: `.font(.caption).foregroundStyle(.secondary)`. Change TodayView.swift:113 to `\"路程 +\\(…) 分 · …\"` and add `.foregroundStyle(.secondary)` to this line.",
+    "evidence": "Text(\"最適合 \\(dayTitles[best.dayID] ?? \"\")：路程 +\\(ins.addedTravelMinutes ?? 0) 分\").font(.caption)"
+   },
+   {
+    "kind": "theme",
+    "screen": "Map (pins and layer picker)",
+    "file": "Packages/AppCore/Sources/Features/TripMapView.swift",
+    "line": 135,
+    "impact": "low",
+    "issue": "Pins use five hard-coded colours (blue, gray, purple, orange, green). Purple and green appear nowhere else in the app, orange collides with the warning colour, and the LayerPicker buttons below (line 153) tint with `.accentColor`/`.gray` only, so the legend does not match the pins it toggles. The pin glyphs (`bookmark.fill`, `fork.knife`, `bag.fill`, number) already distinguish the layers.",
+    "suggestion": "Reduce to three fills: `.todayRoute: .blue`, `.otherDays: .gray`, and one shared colour for `.saved`, `.food`, `.shopping` (e.g. `.purple`, keeping the glyph as the differentiator). This removes green and orange from the map without adding any colour.",
+    "evidence": "case .saved: .purple"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Taxi card",
+    "file": "Packages/AppCore/Sources/Features/TaxiCardView.swift",
+    "line": 220,
+    "impact": "low",
+    "issue": "The two stacked cards on the same screen use two container styles: `.padding(24)` + `.yellow.opacity(0.25)` + `cornerRadius: 20` for the driver card vs `.padding(16)` + `.quaternary.opacity(0.5)` + `cornerRadius: 16` for the Chinese card (line 240). The yellow tint is also the colour of the offline banner (RootView.swift:52), so the same tint means 'show driver' here and 'offline' there.",
+    "suggestion": "Give both cards the same container: `.padding(16)`, `RoundedRectangle(cornerRadius: 16)`, `.quaternary.opacity(0.5)`. The driver card's hierarchy already comes from its 40pt heavy type; drop the yellow so it stays reserved for the offline banner.",
+    "evidence": ".background(.yellow.opacity(0.25), in: RoundedRectangle(cornerRadius: 20))"
+   },
+   {
+    "kind": "simplify",
+    "screen": "All forms (error message)",
+    "file": "Packages/AppCore/Sources/Features/StopEditingViews.swift",
+    "line": 69,
+    "impact": "low",
+    "issue": "`Text(errorMessage).foregroundStyle(.red)` is hand-written in 24 places; 22 are body size but this one and PayloadInspectorListView.swift:89 add `.font(.caption)`, so the same error concept has two sizes.",
+    "suggestion": "Add one `ErrorText(_ message: String)` view (`Text(message).foregroundStyle(.red)`) and use it at every site, removing the `.font(.caption)` variants.",
+    "evidence": "if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Today / Trip detail / Map (資料版本 footer)",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 146,
+    "impact": "low",
+    "issue": "The `資料版本 rN` debug footer is `.caption2 .tertiary` on Today but `.caption2 .secondary` on Trip detail (TripViews.swift:222) and inside the map's bottom material bar (TripMapView.swift:61), where it competes with the layer buttons.",
+    "suggestion": "Use `.tertiary` in all three places and remove the line from the map's bottom inset (the version is already visible on Today and Trip detail).",
+    "evidence": "Text(\"資料版本 r\\(snapshot.revision)\").font(.caption2).foregroundStyle(.tertiary)"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Global banner / Today / Saved (offline state)",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 144,
+    "impact": "low",
+    "issue": "Offline state is shown with three treatments and two icons: a yellow `wifi.slash` banner (RootView.swift:48–52), an orange `icloud.slash` label here, and a `.secondary` `icloud.slash` label on Saved (SavedView.swift:55).",
+    "suggestion": "Keep the global banner as the single coloured signal and make the two informational labels identical: `icloud.slash` + `.font(.caption).foregroundStyle(.secondary)` (change `.orange` to `.secondary` here).",
+    "evidence": ".font(.caption).foregroundStyle(.orange)"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Proposal review / Share flow / Import / Assistant (attention icons)",
+    "file": "Packages/AppCore/Sources/Features/ProposalReviewView.swift",
+    "line": 46,
+    "impact": "low",
+    "issue": "Orange 'needs attention' messages use six different SF Symbols: `arrow.triangle.2.circlepath` here, `questionmark.circle` (AssistantView.swift:47, ImportFlowView.swift:343), `exclamationmark.circle` (ShareFlowView.swift:86), `exclamationmark.triangle` (ImportFlowView.swift:64, TaxiCardView.swift:234), `clock.badge.exclamationmark` (TripViews.swift:204), `person.crop.circle.badge.exclamationmark` (ShareFlowView.swift:55).",
+    "suggestion": "Use two icons only: `exclamationmark.triangle` for failures/warnings (this notice, timezone mismatch, sign-in problem) and `questionmark.circle` for 'needs your decision' (missing share info, import reasons, AI cannot determine).",
+    "evidence": "Label(notice, systemImage: \"arrow.triangle.2.circlepath\").foregroundStyle(.orange)"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Share flow vs Proposal review (stale-revision notice)",
+    "file": "Packages/AppCore/Sources/ShareCore/ShareFlowView.swift",
+    "line": 169,
+    "impact": "low",
+    "issue": "The same AC-13 message ('行程剛被其他人修改…請再確認') is a body-size orange `Label` with icon in its own Section in ProposalReviewView (line 46) but a caption-size orange `Text` without icon inline here.",
+    "suggestion": "Render both as `Label(notice, systemImage: \"exclamationmark.triangle\").font(.caption).foregroundStyle(.orange)` placed inside the route section (drop the separate Section in ProposalReviewView).",
+    "evidence": "if let notice { Text(notice).font(.caption).foregroundStyle(.orange) }"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Import parsing progress",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 464,
+    "impact": "low",
+    "issue": "This is the only `.green` in the app. Every other 'done / selected' checkmark uses `.tint` (ImportFlowView.swift:376, ShareFlowView.swift:134) or the default colour (ShoppingView.swift:171).",
+    "suggestion": "Change `.foregroundStyle(.green)` to `.foregroundStyle(.tint)` so completed steps use the same colour as selected candidates, removing green from the palette.",
+    "evidence": "Image(systemName: \"checkmark.circle.fill\").foregroundStyle(.green)"
+   },
+   {
+    "kind": "simplify",
+    "screen": "Saved / Stop detail / Share flow / Shopping merchant / Route match (search field)",
+    "file": "Packages/AppCore/Sources/Features/RouteMatchView.swift",
+    "line": 345,
+    "impact": "low",
+    "issue": "The place search field is hand-built six times: `HStack { TextField(\"店名或地點\"); Button(\"搜尋\").buttonStyle(.borderless) }` in SavedView.swift:296–300 and 360–367, StopEditingViews.swift:143–147, ShareFlowView.swift:115–119, ShoppingView.swift:223–227 — while RouteMatchView has a TextField with no button at all. Only ShareFlow disables the button when empty.",
+    "suggestion": "Extract one `PlaceSearchField(text:onSearch:)` with a single behaviour (borderless 搜尋 button disabled when empty, submit on return) and use it in all six places.",
+    "evidence": "TextField(\"搜尋店名或地點\", text: $query)"
+   },
+   {
+    "kind": "simplify",
+    "screen": "Candidate rows (Saved, Stop detail, Share flow, Import, Route match, Shopping merchant)",
+    "file": "Packages/AppCore/Sources/Features/ShoppingView.swift",
+    "line": 240,
+    "impact": "low",
+    "issue": "The candidate-place row (`Text(title)` over `Text(address).font(.caption).foregroundStyle(.secondary)`) is duplicated seven times (SavedView.swift:305 and 377, StopEditingViews.swift:151, ShareFlowView.swift:129, ImportFlowView.swift:371, RouteMatchView.swift:352, here). Six use a body-size title; this one uses `.headline`.",
+    "suggestion": "Extract `PlaceOptionRow(title:address:)` with a body-size title and use it everywhere; drop `.font(.headline)` here.",
+    "evidence": "Text(option.place.displayTitle).font(.headline)"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Local map buttons (Stop detail, Saved, Import, Route match)",
+    "file": "Packages/AppCore/Sources/Features/RouteMatchView.swift",
+    "line": 581,
+    "impact": "low",
+    "issue": "`LocalMapSearchButtons` labels carry a `map` icon while `LocalMapButtons` (lines 551–553) show the identical text `在 Naver 地圖查看` with no icon; the two appear on the same screens (StopDetailView shows one or the other depending on whether the place is located).",
+    "suggestion": "Remove the `systemImage: \"map\"` from the three LocalMapSearchButtons buttons so both components render as plain text buttons.",
+    "evidence": "Button(\"在 Naver 地圖查看\", systemImage: \"map\") { open(.naver) }"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Saved / Trip detail / Shopping (row title weight)",
+    "file": "Packages/AppCore/Sources/Features/SavedView.swift",
+    "line": 206,
+    "impact": "low",
+    "issue": "List-row titles differ in weight across the three main lists: Saved uses `.headline`, StopRow uses body (TripViews.swift:421), ShoppingRow uses body (ShoppingView.swift:179). `.headline` is otherwise used for sheet/detail first lines (StopDetailView, PinDetailView, TripListView).",
+    "suggestion": "Drop `.font(.headline)` from SavedRow's title so all row titles are body weight; keep `.headline` for detail-sheet titles only.",
+    "evidence": "Text(entry.title).font(.headline)"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Saved vs Today (category)",
+    "file": "Packages/AppCore/Sources/Features/SavedView.swift",
+    "line": 208,
+    "impact": "low",
+    "issue": "The saved category is shown as the app's only capsule badge here (`.quaternary` Capsule) but as plain caption text `· 類別` after the detour on Today (TodayView.swift:113).",
+    "suggestion": "Remove the capsule and show the category as `Text(entry.saved.category.displayName).font(.caption).foregroundStyle(.secondary)` under the title, matching Today.",
+    "evidence": ".background(.quaternary, in: Capsule())"
+   },
+   {
+    "kind": "consistency",
+    "screen": "地圖（Map）",
+    "file": "Packages/AppCore/Sources/Features/TripMapView.swift",
+    "line": 120,
+    "impact": "low",
+    "issue": "地圖 Pin 的固定行程用 emoji「🔒」，全 App 其他地方同一事實都用 SF Symbol lock.fill；emoji 是彩色點陣字，不吃 `.foregroundStyle(.white)`，在藍色圓內風格突兀。",
+    "suggestion": "改成 `Image(systemName: \"lock.fill\").font(.caption).foregroundStyle(.white)`，與 saved／merchant Pin 的 SF Symbol 一致。",
+    "evidence": "Text(fixed ? \"🔒\" : \"\\(order)\").font(.caption.bold()).foregroundStyle(.white)"
+   },
+   {
+    "kind": "theme",
+    "screen": "地圖（Map）",
+    "file": "Packages/AppCore/Sources/Features/TripMapView.swift",
+    "line": 135,
+    "impact": "low",
+    "issue": "Pin 用 5 種填色（blue／gray／purple／orange／green），其中 orange＝食物、green＝購物，與 App 其他地方 orange＝警示、green＝完成的語意衝突；Pin 內已有 fork.knife／bookmark／bag 圖示區分類別，顏色是重複資訊。",
+    "suggestion": "縮成 3 色：todayRoute 維持 .blue、otherDays 維持 .gray、saved／food／shopping 統一用現有的 .purple，靠圖示分類；移除 `.orange` 與 `.green` 兩個 case 的專屬顏色。",
+    "evidence": "case .saved: .purple"
+   },
+   {
+    "kind": "consistency",
+    "screen": "收藏（Saved）",
+    "file": "Packages/AppCore/Sources/Features/SavedView.swift",
+    "line": 209,
+    "impact": "low",
+    "issue": "類別以 Capsule 底色標籤呈現，是全 App 唯一的 Capsule；Today 的順路收藏列同一資訊只用純文字「· 類別」。同卡片上另有狀態 Label 與「你新增」文字，標籤數過多。",
+    "suggestion": "移除 `.padding` 與 `.background(.quaternary, in: Capsule())`，改為 `.font(.caption).foregroundStyle(.secondary)` 純文字，與 TodayView.swift:113 的寫法一致。",
+    "evidence": ".background(.quaternary, in: Capsule())"
+   },
+   {
+    "kind": "theme",
+    "screen": "購物清單（Shopping）",
+    "file": "Packages/AppCore/Sources/Features/ShoppingView.swift",
+    "line": 182,
+    "impact": "low",
+    "issue": "「未安排」是每個新商品的預設狀態，卻用橘色；清單裡多數列都亮橘，同列還有 title2 大小的藍色勾選圈與藍色「找可能販售的店…」連結，一列三色。",
+    "suggestion": "`Text(\"未安排\")` 改 `.foregroundStyle(.secondary)`，與 .scheduled／.purchased 兩個 case 同色；橘色只留給不確定狀態。",
+    "evidence": "case .unscheduled: Text(\"未安排\").foregroundStyle(.orange)"
+   },
+   {
+    "kind": "theme",
+    "screen": "找可能販售的店／地圖 Pin 詳情",
+    "file": "Packages/AppCore/Sources/Features/ShoppingView.swift",
+    "line": 242,
+    "impact": "low",
+    "issue": "「可能販售 · 庫存未知」在每一張店家卡片都以橘色出現，且 Section footer 已寫「一律只表示可能販售，庫存未知」；每張卡都橘等於沒有區別，只是把畫面染色。TripMapView.swift:177 同樣。",
+    "suggestion": "文字保留（規則要求顯示庫存未知），顏色改 `.foregroundStyle(.secondary)`；兩處同改。卡片內只剩「最適合 第N天：路程 +N 分」一行是各店不同的資訊，讀起來更快。",
+    "evidence": "Text(\"可能販售（\\(evidence.displayName)）· 庫存未知\").font(.caption).foregroundStyle(.orange)"
+   },
+   {
+    "kind": "readability",
+    "screen": "旅程時間軸／今天",
+    "file": "Packages/AppCore/Sources/Features/StopEditingViews.swift",
+    "line": 32,
+    "impact": "low",
+    "issue": "每一段 LegRow 都是「圖示 + 交通方式名稱 + 分鐘」，例如 tram.fill 後面再寫「大眾運輸約 12 分」；圖示與文字重述同一事實，且整天交通方式相同，每列開頭都是一樣的四個字。",
+    "suggestion": "有分鐘時文字改為「約 \\(m) 分\\(destination)」，由圖示表達交通方式；只有 `.unavailable` 分支保留交通方式名稱（那裡需要說明是哪種方式算不出）。",
+    "evidence": "case .minutes(let m): return \"\\(mode.displayName)約 \\(Int(m.rounded(.up))) 分\\(destination)\""
+   },
+   {
+    "kind": "simplify",
+    "screen": "試算順路（Route Match）",
+    "file": "Packages/AppCore/Sources/Features/RouteMatchView.swift",
+    "line": 81,
+    "impact": "low",
+    "issue": "「建議」Section 列出最佳日的位置句與 MatchNumbers（路程／停留／固定行程三列），緊接著該天自己的 Section 又完整顯示同一組三列數字，同一資訊出現兩次。",
+    "suggestion": "「建議」Section 只保留一行「第 N 天，插在…之間」，刪除這裡的 `MatchNumbers(...)`；數字看各天 Section 即可。",
+    "evidence": "MatchNumbers(insertion: insertion, stopName: stopName)"
+   },
+   {
+    "kind": "readability",
+    "screen": "旅程列表（Trip list）",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 23,
+    "impact": "low",
+    "issue": "副標直接顯示 IANA 識別字「Asia/Seoul」，其他畫面（Today 標頭、日設定）都用 TripTimeZones.displayName 顯示「首爾」。",
+    "suggestion": "改為 `TripTimeZones.displayName(trip.timeZone)`。",
+    "evidence": "Text(\"\\(trip.startDate) – \\(trip.endDate) · \\(trip.timeZone)\")"
+   },
+   {
+    "kind": "consistency",
+    "screen": "今天（Today）",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 143,
+    "impact": "low",
+    "issue": "離線快取提示用橘色，而 SavedView.swift:55 同一個 icloud.slash 離線佇列提示用 .secondary；RootView 頂部另有黃底離線橫幅，同一狀態三種樣式。",
+    "suggestion": "Today 這列改 `.foregroundStyle(.secondary)`，與 Saved 一致；警示色由頂部橫幅一處負責。",
+    "evidence": "Label(\"離線資料：\\(cachedAt.formatted(date: .abbreviated, time: .shortened))\", systemImage: \"icloud.slash\")"
+   },
+   {
+    "kind": "theme",
+    "screen": "全域離線橫幅",
+    "file": "Packages/AppCore/Sources/Features/RootView.swift",
+    "line": 52,
+    "impact": "low",
+    "issue": "離線橫幅用黃色底，成為 orange／red 之外第三種警示色，且是整寬色帶。",
+    "suggestion": "底色改 `.background(.bar)`（與 AssistantView 輸入列同一材質），Label 與 wifi.slash 圖示不變；警示色集合維持 orange／red 兩種。",
+    "evidence": ".background(.yellow.opacity(0.25))"
+   },
+   {
+    "kind": "consistency",
+    "screen": "匯入確認（Confirm Places）",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 340,
+    "impact": "low",
+    "issue": "自動選定的說明用 wand.and.stars 圖示加 tint 色，同一張卡片上被選中的候選已有 tint 色 checkmark.circle.fill，需確認原因又是橘色 questionmark.circle，再加藍色地圖按鈕與紅色「移除」，一張卡三色兩種強調圖示；App 其他地方「AI／自動」都用 sparkles。",
+    "suggestion": "這行改成純文字 `Text(note).font(.caption).foregroundStyle(.secondary)`，去掉圖示與 tint；選定狀態由候選列的勾勾表達即可。",
+    "evidence": "Label(note, systemImage: \"wand.and.stars\").font(.caption).foregroundStyle(.tint)"
+   },
+   {
+    "kind": "theme",
+    "screen": "解析中（Parsing progress）",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 464,
+    "impact": "low",
+    "issue": "完成步驟的勾勾用綠色，是 UI 內唯一的綠色；其他畫面「已選定／完成」的 checkmark.circle.fill 都用 .tint（ImportFlowView:376、ShareFlowView:134）。",
+    "suggestion": "改 `.foregroundStyle(.tint)`，語意色集合不再多一個綠色。",
+    "evidence": "Image(systemName: \"checkmark.circle.fill\").foregroundStyle(.green)"
+   },
+   {
+    "kind": "simplify",
+    "screen": "匯入確認（Confirm Places）",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 230,
+    "impact": "low",
+    "issue": "搜尋進行中同時有三個指示：summary 副標「搜尋地點中…」、ProgressView「搜尋地點 x/y」（第 192 行）、以及這個獨立 Section 的 magnifyingglass Label「還有 N 個地點搜尋中…」。",
+    "suggestion": "刪除這個 Section（含 Label）；ProgressView 已帶數字，足夠說明進度。",
+    "evidence": "Label(\"還有 \\(searchTotal - searchDone) 個地點搜尋中…\", systemImage: \"magnifyingglass\")"
+   },
+   {
+    "kind": "consistency",
+    "screen": "解析中（Parsing progress）",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 442,
+    "impact": "low",
+    "issue": "分隔符用全形「・」（第 455 行同），App 其他地方一律用「 · 」（Today、Trip list、Shopping）。",
+    "suggestion": "兩處改成「 · 」。",
+    "evidence": "Text(\"已經過 \\(seconds / 60):\\(String(format: \"%02d\", seconds % 60))・長行程約需 1～2 分鐘\")"
+   },
+   {
+    "kind": "consistency",
+    "screen": "旅程列表／收藏／購物清單（空狀態）",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 32,
+    "impact": "low",
+    "issue": "同一個「還沒有旅程」狀態，Trip list、Saved（SavedView:72）、Shopping（ShoppingView:23）寫「尚未建立行程」，Today 與 Map 寫「尚未建立旅程」，而按鈕都叫「建立旅程」；分頁名稱也是「旅程」。",
+    "suggestion": "三處統一改成「尚未建立旅程」。",
+    "evidence": "Label(\"尚未建立行程\", systemImage: \"calendar\")"
+   },
+   {
+    "kind": "consistency",
+    "screen": "旅程時間軸（Trip detail）",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 189,
+    "impact": "low",
+    "issue": "空日子的提示帶 calendar.badge.plus 圖示，看起來像可點的新增入口但沒有動作；Today 同一狀態只用純文字「今天沒有行程」。",
+    "suggestion": "改為 `Text(\"尚無行程\").foregroundStyle(.secondary)`，去掉圖示。",
+    "evidence": "Label(\"尚無行程\", systemImage: \"calendar.badge.plus\")"
+   },
+   {
+    "kind": "consistency",
+    "screen": "行程點詳情（Stop detail）",
+    "file": "Packages/AppCore/Sources/Features/RouteMatchView.swift",
+    "line": 284,
+    "impact": "low",
+    "issue": "LocalMapSearchButtons 的 2～3 個相鄰按鈕都掛同一個 map 圖示，而同一張 sheet 裡的 LocalMapButtons（第 254 行）三個按鈕沒有圖示；相同圖示連續出現不帶資訊。",
+    "suggestion": "移除 LocalMapSearchButtons 三個 Button 的 `systemImage: \"map\"`，與 LocalMapButtons 一致成純文字按鈕。",
+    "evidence": "Button(\"在 Naver 地圖查看\", systemImage: \"map\") { open(.naver) }"
+   },
+   {
+    "kind": "readability",
+    "screen": "購物清單（Shopping）",
+    "file": "Packages/AppCore/Sources/Features/ShoppingView.swift",
+    "line": 190,
+    "impact": "low",
+    "issue": "狀態列是 .caption，下一行「N 人想買」是 .caption2，兩行次要資訊用兩種字級疊在一起。",
+    "suggestion": "改 `.font(.caption)`，或併進狀態同一行「未安排 · 2 人想買」，卡片少一行。",
+    "evidence": "Text(\"\\(entry.interestedUserIDs.count) 人想買\").font(.caption2).foregroundStyle(.secondary)"
+   },
+   {
+    "kind": "simplify",
+    "screen": "成員（Members）",
+    "file": "Packages/AppCore/Sources/Features/MembersView.swift",
+    "line": 61,
+    "impact": "low",
+    "issue": "「我的顯示名稱」TextField＋儲存 與 AccountView 的「顯示名稱」Section 完全相同，同一設定在兩個畫面各有一份。",
+    "suggestion": "從 MembersView 移除此 Section，只留 AccountView 一處編輯。",
+    "evidence": "Section(\"我的顯示名稱\") {"
+   },
+   {
+    "kind": "simplify",
+    "screen": "分享流程（Share）",
+    "file": "Packages/AppCore/Sources/ShareCore/ShareFlowView.swift",
+    "line": 78,
+    "impact": "low",
+    "issue": "來源列以 LabeledContent 顯示「Instagram — instagram.com」，label 與 value 是同一件事。",
+    "suggestion": "只顯示平台名稱（`Text(platformName)`），僅 `.web` 時才用 host 當 value。",
+    "evidence": "LabeledContent(platformName, value: url.host ?? url.absoluteString)"
+   },
+   {
+    "kind": "simplify",
+    "screen": "今天／旅程時間軸／地圖",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 146,
+    "impact": "low",
+    "issue": "「資料版本 rN」這種除錯性質的中繼資料同時出現在三個主畫面：Today 最後一個 Section（.caption2 .tertiary）、TripDetailView 最後一個 Section（TripViews:222，.caption2 .secondary）、地圖底部工具列（TripMapView:61，.caption2 .secondary），樣式還不一致。對使用者沒有可操作意義，卻在每頁多一個 Section／多一行。",
+    "suggestion": "從 TodayView:146 與 TripMapView:61 移除；TripViews:222 的 Section 也改用 #if DEBUG 包住（或整個刪掉）。Today 底部只留離線資料的 Label（有離線時才出現）。",
+    "evidence": "Text(\"資料版本 r\\(snapshot.revision)\").font(.caption2).foregroundStyle(.tertiary)"
+   },
+   {
+    "kind": "consistency",
+    "screen": "地圖（固定行程圖釘）",
+    "file": "Packages/AppCore/Sources/Features/TripMapView.swift",
+    "line": 120,
+    "impact": "low",
+    "issue": "全 App 唯一的 emoji：固定行程圖釘顯示「🔒」，會以平台 emoji 的黃色鎖頭渲染在藍色圓形上，與時間軸的 SF Symbol lock.fill 不一致，也不跟隨 .foregroundStyle(.white)。",
+    "suggestion": "改成 if fixed { Image(systemName: \"lock.fill\").font(.caption).foregroundStyle(.white) } else { Text(\"\\(order)\").font(.caption.bold()).foregroundStyle(.white) }，與 StopRow 的鎖頭同一個符號。",
+    "evidence": "Text(fixed ? \"🔒\" : \"\\(order)\").font(.caption.bold()).foregroundStyle(.white)"
+   },
+   {
+    "kind": "theme",
+    "screen": "購物清單",
+    "file": "Packages/AppCore/Sources/Features/ShoppingView.swift",
+    "line": 182,
+    "impact": "low",
+    "issue": "每個新加入、尚未安排店家的商品狀態「未安排」都是橘色，清單裡多數項目一開始就是橘色，讓真正需要注意的「可能販售 · 庫存未知」（第 242 行，也是橘色）失去對比。另外第 171 行的已購買勾號用 accent 色（目前是系統藍），與匯入進度的「完成」用 .green（ImportFlowView:464）不一致。",
+    "suggestion": "第 182 行 Text(\"未安排\").foregroundStyle(.orange) 改 .foregroundStyle(.secondary)（未安排是預設狀態，不是警示）。第 171 行改 Image(systemName: entry.isPurchased ? \"checkmark.circle.fill\" : \"circle\").font(.title2).foregroundStyle(entry.isPurchased ? .green : .secondary)，讓「已完成／已買」在全 App 都是綠色。",
+    "evidence": "                    case .unscheduled: Text(\"未安排\").foregroundStyle(.orange)"
+   },
+   {
+    "kind": "readability",
+    "screen": "匯入行程（確認地點）",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 340,
+    "impact": "low",
+    "issue": "「名稱相符，已自動選定：…」這行說明文字用 .foregroundStyle(.tint)（accent 色），和同一列中真正可點的候選勾號（第 376 行，同樣 .tint）長得一樣，看起來像可以點；而下一行的待確認原因用 .orange，形成一列裡三種顏色的小字。",
+    "suggestion": "第 340 行改 .foregroundStyle(.secondary)，讓 accent 色只留給可互動元素；wand.and.stars 圖示保留即可辨識「自動處理」。",
+    "evidence": "Label(note, systemImage: \"wand.and.stars\").font(.caption).foregroundStyle(.tint)"
+   },
+   {
+    "kind": "consistency",
+    "screen": "收藏（類別標籤）",
+    "file": "Packages/AppCore/Sources/Features/SavedView.swift",
+    "line": 208,
+    "impact": "low",
+    "issue": "收藏列的類別用 Capsule 膠囊（.quaternary 底＋padding），是全 App 唯一的 chip 樣式；Today 的順路收藏把同一個類別當作 caption 文字放在「+N 分路程 · 類別」（TodayView:113），購物與地圖詳情也都是純文字。",
+    "suggestion": "第 208–209 行改為 Text(entry.saved.category.displayName).font(.caption).foregroundStyle(.secondary)，移除 .padding 與 .background(.quaternary, in: Capsule())，與 Today 一致。",
+    "evidence": "Text(entry.saved.category.displayName).font(.caption).padding(.horizontal, 6).padding(.vertical, 2)\n                    .background(.quaternary, in: Capsule())"
+   },
+   {
+    "kind": "consistency",
+    "screen": "全 App 錯誤訊息列",
+    "file": "Packages/AppCore/Sources/Features/StopEditingViews.swift",
+    "line": 69,
+    "impact": "low",
+    "issue": "「Text(errorMessage).foregroundStyle(.red)」在 Features／ShareCore 約 20 處手寫，字級不一：這裡是 .caption，TripViews:17、SavedView:53、ShoppingView:101、LoginView:55 等是內文大小，LoginView 還另外包一個 Section。同一種錯誤在不同畫面大小不同。",
+    "suggestion": "新增一個極小的 ErrorText(message) view（Text(message).foregroundStyle(.red)，不加 icon、不加底色），全部改呼叫它並移除各處的 .font(.caption)；LoginView:55 拿掉多餘的 Section 包裝。紅色仍然只代表「錯誤／衝突」（含 MatchNumbers:21 的「會遲到」）。",
+    "evidence": "if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }"
+   },
+   {
+    "kind": "simplify",
+    "screen": "Today / Trip 時間軸 / Map（頁尾）",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 146,
+    "impact": "low",
+    "issue": "A developer-facing revision number ('資料版本 r12') is rendered as caption2 tertiary/secondary text at the bottom of three user screens (TodayView line 146, TripDetailView line 222, TripMapView line 61). It is the lightest text style in the app and carries no user meaning; on Map it is stacked under the layer picker inside the material bar.",
+    "suggestion": "Remove the 資料版本 row from Today, Trip detail and Map; expose the revision only in DebugMenuView (or TelemetryView). Keep the 離線資料 label on Today since it is actionable.",
+    "evidence": "            Text(\"資料版本 r\\(snapshot.revision)\").font(.caption2).foregroundStyle(.tertiary)"
+   },
+   {
+    "kind": "readability",
+    "screen": "Today（日期標頭）",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 77,
+    "impact": "low",
+    "issue": "The day header VStack uses three sizes on three lines: .headline trip name, .subheadline secondary '第 N 天 · date', and .caption2 tertiary '首爾時間'. The third line is caption2 + tertiary, the hardest-to-read combination on a plain list background, and the trip name repeats the trip picker already in the toolbar.",
+    "suggestion": "Collapse to two lines: '第 N 天 · 2026-09-26' (.headline) and '首爾時間' appended to the same subheadline line as '… · 首爾時間' in .secondary; drop the caption2/tertiary line. Show the trip name only when store.trips.count > 1 (it is then also in the picker) or drop it.",
+    "evidence": "                        Text(TripTimeZones.displayName(day.day.timeZone) + \"時間\").font(.caption2).foregroundStyle(.tertiary)"
+   },
+   {
+    "kind": "simplify",
+    "screen": "Today（今天可買）",
+    "file": "Packages/AppCore/Sources/Features/TodayView.swift",
+    "line": 136,
+    "impact": "low",
+    "issue": "Under the header 今天可買 a row '已買 3／10' shows the whole-trip purchase count, which reads as today's count, and duplicates the ProgressView already at the top of the Shopping tab.",
+    "suggestion": "Drop this LabeledContent row from Today (progress lives in the Shopping tab), or if kept, relabel it '全程已買' so the number matches its section.",
+    "evidence": "                if progress.total > 0 { LabeledContent(\"已買\", value: \"\\(progress.purchased)／\\(progress.total)\") }"
+   },
+   {
+    "kind": "readability",
+    "screen": "Trip 旅程列表",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 23,
+    "impact": "low",
+    "issue": "The trip row subtitle prints the raw IANA identifier ('2026-09-25 – 2026-09-30 · Asia/Seoul'); every other screen shows the localized name via TripTimeZones.displayName. The identifier is English, long, and can truncate the dates at larger type.",
+    "suggestion": "Use TripTimeZones.displayName(trip.timeZone) or omit the time zone from the list row entirely (it is per-day anyway and shown in each day header); keep just the date range.",
+    "evidence": "                            Text(\"\\(trip.startDate) – \\(trip.endDate) · \\(trip.timeZone)\")"
+   },
+   {
+    "kind": "readability",
+    "screen": "Trip 時間軸 / Today（路段列）",
+    "file": "Packages/AppCore/Sources/Features/StopEditingViews.swift",
+    "line": 17,
+    "impact": "low",
+    "issue": "LegRow indents with a hard-coded 52pt leading padding to line up under the stop name, assuming the time column is ~40pt wide. With larger Dynamic Type the '10:30' column widens and the leg text no longer aligns; in TodayView the time column has no fixed width at all, so alignment differs between the two screens.",
+    "suggestion": "Remove .padding(.leading, 52) and let the icon lead the row, or move LegRow inside StopRow's trailing VStack so it inherits the same column without a magic number.",
+    "evidence": "        .padding(.leading, 52)"
+   },
+   {
+    "kind": "simplify",
+    "screen": "行程點詳情",
+    "file": "Packages/AppCore/Sources/Features/TripViews.swift",
+    "line": 378,
+    "impact": "low",
+    "issue": "A '類型: 彈性' row appears on every stop even though 彈性 is the default and fixed stops are already marked by the lock icon in the list; it is one more line in a header block that already has name, address, 時間, 停留 and 未定位.",
+    "suggestion": "Show the row only when stop.fixed is true (e.g. Label(\"固定行程\", systemImage: \"lock.fill\")) and drop it for flexible stops.",
+    "evidence": "                    LabeledContent(\"類型\", value: stop.fixed ? \"固定\" : \"彈性\")"
+   },
+   {
+    "kind": "simplify",
+    "screen": "Saved 收藏（列表列）",
+    "file": "Packages/AppCore/Sources/Features/SavedView.swift",
+    "line": 208,
+    "impact": "low",
+    "issue": "The category is rendered as a caption capsule (the only pill in the app) on every row; when the segmented filter is set to 吃/買/咖啡/景點 the capsule repeats the active filter on each row.",
+    "suggestion": "Delete the capsule and its padding/background; fold the category into the existing status caption line ('美食 · 未定位，不計入路線') as plain .caption/.secondary text, and omit it when filter != .all.",
+    "evidence": "                Text(entry.saved.category.displayName).font(.caption).padding(.horizontal, 6).padding(.vertical, 2)"
+   },
+   {
+    "kind": "consistency",
+    "screen": "Map（圖釘）",
+    "file": "Packages/AppCore/Sources/Features/TripMapView.swift",
+    "line": 120,
+    "impact": "low",
+    "issue": "Fixed stops on the map are marked with the 🔒 emoji, the only emoji in the UI; it renders in full colour, ignores .foregroundStyle(.white) and looks different from the SF Symbol lock.fill used on Today and Trip rows.",
+    "suggestion": "Replace the emoji with Image(systemName: \"lock.fill\").font(.caption).foregroundStyle(.white) so the fixed marker matches the list rows (the marker itself stays).",
+    "evidence": "                Text(fixed ? \"🔒\" : \"\\(order)\").font(.caption.bold()).foregroundStyle(.white)"
+   },
+   {
+    "kind": "simplify",
+    "screen": "給司機看（TaxiCard 中文對照）",
+    "file": "Packages/AppCore/Sources/Features/TaxiCardView.swift",
+    "line": 43,
+    "impact": "low",
+    "issue": "The 地址 row's value is a sentence ('以當地語言顯示，供司機閱讀') rather than data, so the LabeledContent reads as a label pointing at an explanation; the address itself is already visible in the yellow block above.",
+    "suggestion": "Delete the 地址 row when card.address != nil and only show LabeledContent(\"地址\", value: \"（沒有地址）\") when it is missing.",
+    "evidence": "                    LabeledContent(\"地址\", value: card.address == nil ? \"（沒有地址）\" : \"以當地語言顯示，供司機閱讀\")"
+   },
+   {
+    "kind": "consistency",
+    "screen": "給司機看（TaxiCard）",
+    "file": "Packages/AppCore/Sources/Features/TaxiCardView.swift",
+    "line": 34,
+    "impact": "low",
+    "issue": "Two stacked cards on one screen use different corner radii (20 and 16) and two different fills (.yellow.opacity(0.25) and .quaternary.opacity(0.5)); the same yellow tint is used for the offline warning banner in RootView, so the driver card borrows a warning colour.",
+    "suggestion": "Use one radius (16) for both cards and .quaternary for both fills; if the driver block needs emphasis, rely on its larger type rather than a tinted background.",
+    "evidence": "                .background(.yellow.opacity(0.25), in: RoundedRectangle(cornerRadius: 20))"
+   },
+   {
+    "kind": "simplify",
+    "screen": "匯入確認（ConfirmItemView）",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 338,
+    "impact": "low",
+    "issue": "The quoted source excerpt is printed under every item, including the auto-handled ones inside the DisclosureGroup, adding a caption line to items that need no decision.",
+    "suggestion": "Show the excerpt only when item.stop.needsConfirmation is non-empty (the user needs context to decide); hide it for auto-decided items.",
+    "evidence": "            Text(\"「\\(item.stop.sourceExcerpt)」\").font(.caption).foregroundStyle(.secondary)"
+   },
+   {
+    "kind": "consistency",
+    "screen": "匯入確認 / 解析中",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 442,
+    "impact": "low",
+    "issue": "Elapsed time is shown as '1:05' with no unit and the line uses the katakana middle dot '・' as a separator, while every other screen uses '·' with spaces; line 455 repeats the '・'.",
+    "suggestion": "Render '已經過 1 分 05 秒 · 長行程約需 1～2 分鐘' and replace '・' with ' · ' here and on line 455.",
+    "evidence": "                Text(\"已經過 \\(seconds / 60):\\(String(format: \"%02d\", seconds % 60))・長行程約需 1～2 分鐘\")"
+   },
+   {
+    "kind": "consistency",
+    "screen": "匯入確認（ConfirmItemView）",
+    "file": "Packages/AppCore/Sources/Features/ImportFlowView.swift",
+    "line": 340,
+    "impact": "low",
+    "issue": "The auto-decision note uses 'wand.and.stars' in accent colour, while the AI is represented by 'sparkles' in three other places (AI 助手 button, proposal Label, ProposalReview banner).",
+    "suggestion": "Use systemImage: \"sparkles\" here and render it .secondary like the other captions so the AI icon is a single glyph app-wide.",
+    "evidence": "                Label(note, systemImage: \"wand.and.stars\").font(.caption).foregroundStyle(.tint)"
+   },
+   {
+    "kind": "consistency",
+    "screen": "試算順路（候選地點）",
+    "file": "Packages/AppCore/Sources/Features/RouteMatchView.swift",
+    "line": 45,
+    "impact": "low",
+    "issue": "The chosen candidate is shown as LabeledContent with the place name as the label and the address as the trailing value, so a long name and a long address fight for one line and both truncate; the search results just below use a VStack of name + caption address.",
+    "suggestion": "Render the chosen candidate with the same VStack (Text(name) / Text(address).font(.caption).foregroundStyle(.secondary)) used for the results so the two states look identical.",
+    "evidence": "                        LabeledContent(candidate.draft.displayTitle, value: candidate.address ?? \"\")"
+   },
+   {
+    "kind": "simplify",
+    "screen": "成員",
+    "file": "Packages/AppCore/Sources/Features/MembersView.swift",
+    "line": 259,
+    "impact": "low",
+    "issue": "A 我的顯示名稱 text field + 儲存 row is repeated on the Members screen although the identical control exists under 設定 → 顯示名稱 (AccountView), so the name can be edited from two places with two different footers.",
+    "suggestion": "Remove the 我的顯示名稱 section from MembersView; if discoverability matters, show a single NavigationLink or footer text pointing to 設定.",
+    "evidence": "            Section(\"我的顯示名稱\") {"
+   }
+  ]
+ }
+}
