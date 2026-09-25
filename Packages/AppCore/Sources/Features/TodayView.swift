@@ -7,6 +7,8 @@ struct TodayView: View {
     let session: SessionModel
     let store: TripStore
     let onDebug: (() -> Void)?
+    /// 還沒有旅程時，帶使用者到「旅程」分頁。
+    var goToTrips: () -> Void = {}
 
     @State private var dayIndex: Int?
     @State private var nearby: [(SavedEntry, DayMatch)] = []
@@ -27,7 +29,11 @@ struct TodayView: View {
                    snapshot.timeline.indices.contains(index) {
                     content(snapshot, index)
                 } else if store.loaded && store.snapshot == nil {
-                    ContentUnavailableView("尚未建立行程", systemImage: "sun.max")
+                    ContentUnavailableView {
+                        Label("尚未建立旅程", systemImage: "sun.max")
+                    } actions: {
+                        Button("建立旅程", action: goToTrips).buttonStyle(.borderedProminent)
+                    }
                 } else {
                     ProgressView()
                 }
@@ -68,6 +74,7 @@ struct TodayView: View {
                     VStack {
                         Text(snapshot.trip.name).font(.headline)
                         Text("第 \(index + 1) 天 · \(day.day.localDate)").font(.subheadline).foregroundStyle(.secondary)
+                        Text(TripTimeZones.displayName(day.day.timeZone) + "時間").font(.caption2).foregroundStyle(.tertiary)
                     }
                     Spacer()
                     Button { dayIndex = index + 1 } label: { Image(systemName: "chevron.right") }.disabled(index >= snapshot.timeline.count - 1)

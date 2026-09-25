@@ -115,6 +115,7 @@ public struct ShareFlowView: View {
             HStack {
                 TextField("店名或地點", text: $query).onSubmit { Task { await search() } }
                 Button("搜尋") { Task { await search() } }.disabled(query.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .buttonStyle(.borderless)
             }
             Picker("類別", selection: $category) {
                 ForEach(SavedCategory.allCases, id: \.self) { Text($0.displayName).tag($0) }

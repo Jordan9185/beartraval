@@ -22,6 +22,7 @@ public final class NetworkMonitor {
 struct AccountView: View {
     let session: SessionModel
     @State private var name = ""
+    @State private var savedName = false
     @State private var confirmDelete = false
     @State private var deleting = false
     @State private var errorMessage: String?
@@ -33,11 +34,16 @@ struct AccountView: View {
                 if case .signedIn(let email) = session.state {
                     Section("帳號") { LabeledContent("電子郵件", value: email ?? "") }
                 }
-                Section("顯示名稱") {
+                Section {
                     HStack {
                         TextField("旅伴看到的名稱", text: $name)
                         Button("儲存") { Task { await saveName() } }.disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .buttonStyle(.borderless)
                     }
+                } header: {
+                    Text("顯示名稱")
+                } footer: {
+                    Text(savedName ? "已儲存。" : "旅伴在成員列表和收藏裡看到的名字。")
                 }
                 Section {
                     Button("登出") { Task { await session.signOut(); dismiss() } }
@@ -51,6 +57,8 @@ struct AccountView: View {
             }
             .navigationTitle("設定")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("關閉") { dismiss() } } }
+            .task { if name.isEmpty { name = await session.trips.myDisplayName() ?? "" } }
+            .onChange(of: name) { savedName = false }
             .confirmationDialog("確定要刪除帳號？此動作無法復原。", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("刪除帳號", role: .destructive) { Task { await deleteAccount() } }
             }
@@ -58,7 +66,15 @@ struct AccountView: View {
     }
 
     private func saveName() async {
-        do { try await session.trips.setDisplayName(name) } catch let e as BackendError { errorMessage = e.userMessage } catch {}
+        do {
+            try await session.trips.setDisplayName(name)
+            savedName = true
+            errorMessage = nil
+        } catch let e as BackendError {
+            errorMessage = e.userMessage
+        } catch {
+            errorMessage = "儲存失敗，請稍後再試。"
+        }
     }
 
     private func deleteAccount() async {

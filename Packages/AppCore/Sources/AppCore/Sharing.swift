@@ -96,6 +96,15 @@ extension TripRepository {
         catch { throw BackendError.from(error) }
     }
 
+    /// 自己目前的顯示名稱。
+    public func myDisplayName() async -> String? {
+        struct Row: Decodable { let display_name: String }
+        guard let me = currentUserID,
+              let rows: [Row] = try? await client.from("profiles").select("display_name").eq("user_id", value: me).execute().value
+        else { return nil }
+        return rows.first?.display_name
+    }
+
     public func setDisplayName(_ name: String) async throws {
         struct Params: Encodable { let p_name: String }
         do { try await client.rpc("set_display_name", params: Params(p_name: name)).execute() }

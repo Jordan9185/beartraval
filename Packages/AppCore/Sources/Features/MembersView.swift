@@ -62,6 +62,7 @@ struct MembersView: View {
                 HStack {
                     TextField("名稱", text: $myName)
                     Button("儲存") { Task { await saveName() } }.disabled(myName.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .buttonStyle(.borderless)
                 }
             }
             if let errorMessage { Text(errorMessage).foregroundStyle(.red) }

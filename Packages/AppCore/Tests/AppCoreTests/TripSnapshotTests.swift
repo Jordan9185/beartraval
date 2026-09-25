@@ -68,3 +68,39 @@ extension JSONDecoder {
         return d
     }
 }
+
+struct TimeZoneTests {
+    let tripID = UUID()
+
+    func day(_ order: Int, _ date: String, _ tz: String) -> TripDay {
+        TripDay(id: UUID(), tripId: tripID, localDate: date, transportMode: .walking, displayOrder: order, routeRevision: 0, timeZone: tz)
+    }
+
+    @Test func todayUsesEachDaysTimeZone() {
+        // 第 2 天在倫敦：UTC 2026-10-02 23:30 = 首爾 10/03 08:30、倫敦 10/03 00:30
+        let timeline = [DayTimeline(day: day(0, "2026-10-02", "Asia/Seoul"), stops: []),
+                        DayTimeline(day: day(1, "2026-10-03", "Europe/London"), stops: [])]
+        let s = TripSnapshot(trip: Trip(id: tripID, name: "x", startDate: "2026-10-02", endDate: "2026-10-03", timeZone: "Asia/Seoul", revision: 0),
+                             revision: 0, timeline: timeline, places: [:], saved: [], shopping: [])
+        #expect(s.todayIndex(now: Date(timeIntervalSince1970: 1_791_027_000)) == 1)
+    }
+
+    @Test func suggestsTimeZoneFromPlaces() {
+        let tokyo = Place(id: UUID(), provider: "apple_mapkit", providerPlaceId: "t", name: "東京鐵塔", nameLocal: "東京タワー", address: nil,
+                          latitude: 35.66, longitude: 139.75, countryCode: "JP")
+        let stop = Stop(id: UUID(), tripId: tripID, dayId: UUID(), placeId: tokyo.id, rawLabel: "東京鐵塔", resolutionStatus: .resolved,
+                        startTime: nil, endTime: nil, dwellMinutes: nil, fixed: false, kind: .standard, sortOrder: 0, revision: 0)
+        let seoulDay = DayTimeline(day: day(2, "2026-10-04", "Asia/Seoul"), stops: [stop])
+        #expect(TripTimeZones.suggested(for: seoulDay, places: [tokyo.id: tokyo]) == "Asia/Tokyo")
+        #expect(TripTimeZones.mismatch(for: seoulDay, places: [tokyo.id: tokyo]) == "Asia/Tokyo")
+        let tokyoDay = DayTimeline(day: day(2, "2026-10-04", "Asia/Tokyo"), stops: [stop])
+        #expect(TripTimeZones.mismatch(for: tokyoDay, places: [tokyo.id: tokyo]) == nil)
+        #expect(TripTimeZones.mismatch(for: DayTimeline(day: day(0, "2026-10-01", "Asia/Seoul"), stops: []), places: [:]) == nil)
+    }
+
+    @Test func displayNames() {
+        let summer = Date(timeIntervalSince1970: 1_790_000_000)
+        #expect(TripTimeZones.displayName("Asia/Tokyo", at: summer) == "東京（UTC+9）")
+        #expect(TripTimeZones.displayName("Asia/Kolkata", at: summer) == "Kolkata（UTC+5:30）")
+    }
+}

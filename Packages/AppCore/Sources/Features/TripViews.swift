@@ -78,7 +78,7 @@ struct CreateTripView: View {
     @State private var errorMessage: String?
     @State private var isSaving = false
 
-    static let timeZones = ["Asia/Seoul", "Asia/Tokyo", "Asia/Taipei"]
+    static let timeZones = TripTimeZones.common
 
     var body: some View {
         NavigationStack {
@@ -87,9 +87,11 @@ struct CreateTripView: View {
                     TextField("名稱（例如：首爾 5 天）", text: $name)
                     DatePicker("開始", selection: $start, displayedComponents: .date)
                     DatePicker("結束", selection: $end, in: start..., displayedComponents: .date)
-                    Picker("旅行地時區", selection: $timeZoneID) {
-                        ForEach(Self.timeZones, id: \.self) { Text($0) }
+                    Picker("第一天的時區", selection: $timeZoneID) {
+                        ForEach(Self.timeZones, id: \.self) { Text(TripTimeZones.displayName($0)).tag($0) }
                     }
+                } footer: {
+                    Text("跨國旅程建好後，可以在每一天的設定改時區。")
                 }
                 Section {
                     TextEditor(text: $rawText).frame(minHeight: 160)
@@ -189,13 +191,28 @@ struct TripDetailView: View {
                         }
                     }
                     RouteStatusRow(day: day, base: baseRoutes[day.id])
+                    if let suggestion = TripTimeZones.mismatch(for: day, places: places) {
+                        Label("這天的地點在\(TripTimeZones.displayName(suggestion))一帶，時區仍是\(TripTimeZones.displayName(day.day.timeZone))。",
+                              systemImage: "clock.badge.exclamationmark")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                    if myRole?.canEdit == true {
+                        NavigationLink {
+                            DaySettingsView(session: session, day: day, suggestion: TripTimeZones.suggested(for: day, places: places)) {
+                                Task { await reload() }
+                            }
+                        } label: {
+                            Label("\(day.day.transportMode.displayName) · \(TripTimeZones.displayName(day.day.timeZone))", systemImage: "gearshape")
+                                .font(.caption)
+                        }
+                    }
                 } header: {
                     Text("第 \(day.day.displayOrder + 1) 天 · \(day.day.localDate)")
                 }
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            if let revision { Text("資料版本 r\(revision)").font(.caption2).foregroundStyle(.secondary).padding(4) }
+            if let revision {
+                Section { Text("資料版本 r\(revision)").font(.caption2).foregroundStyle(.secondary) }
+            }
         }
         .confirmationDialog("刪除「\(trip.name)」？所有旅伴都會失去這個旅程，匯入原文與 AI 紀錄也會刪除。", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("刪除旅程", role: .destructive) {

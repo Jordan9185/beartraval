@@ -143,6 +143,7 @@ struct ResolveStopSheet: View {
                     HStack {
                         TextField("店名或地點", text: $query).onSubmit { Task { await search() } }
                         Button("搜尋") { Task { await search() } }
+                            .buttonStyle(.borderless)
                     }
                     if searching { ProgressView() }
                     ForEach(results) { option in

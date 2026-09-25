@@ -22,11 +22,12 @@ public struct TripSnapshot: Codable, Equatable, Sendable {
         self.merchants = merchants
     }
 
-    /// 旅程中的今天（旅行地時區）；不在旅程期間時為第一天。
+    /// 旅程中的今天：每一天用各自的時區判斷（跨國旅程）；不在旅程期間時為第一天。
     public func todayIndex(now: Date = Date()) -> Int {
-        guard let tz = TimeZone(identifier: trip.timeZone) else { return 0 }
-        let today = LocalDate.string(from: now, timeZone: tz)
-        return timeline.firstIndex { $0.day.localDate == today } ?? 0
+        timeline.firstIndex { day in
+            guard let tz = TimeZone(identifier: day.day.timeZone) else { return false }
+            return LocalDate.string(from: now, timeZone: tz) == day.day.localDate
+        } ?? 0
     }
 
     /// 可以試算順路的 Saved：地點已確認、尚未加入行程。

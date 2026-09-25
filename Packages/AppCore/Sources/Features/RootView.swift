@@ -7,6 +7,11 @@ public struct RootView: View {
     let session: SessionModel?
     @State private var showsDebug = false
     @State private var store: TripStore?
+    /// 還沒有旅程時先停在「旅程」；有旅程時停在「今天」。
+    @State private var tab: Tab = .trip
+    @State private var choseInitialTab = false
+
+    enum Tab: Hashable { case trip, today, map, saved, shopping }
 
     /// `session` 為 nil 表示後端設定缺漏（Info.plist 沒有 SupabaseURL／SupabaseAnonKey）。
     public init(session: SessionModel?) {
@@ -53,17 +58,27 @@ public struct RootView: View {
     }
 
     private func tabView(_ session: SessionModel) -> some View {
-        TabView {
-            TodayView(session: session, store: tripStore(session), onDebug: debugAction)
-                .tabItem { Label("今天", systemImage: "sun.max") }
+        TabView(selection: $tab) {
             TripListView(session: session)
                 .tabItem { Label("旅程", systemImage: "calendar") }
-            TripMapView(session: session, store: tripStore(session))
+                .tag(Tab.trip)
+            TodayView(session: session, store: tripStore(session), onDebug: debugAction) { tab = .trip }
+                .tabItem { Label("今天", systemImage: "sun.max") }
+                .tag(Tab.today)
+            TripMapView(session: session, store: tripStore(session)) { tab = .trip }
                 .tabItem { Label("地圖", systemImage: "map") }
+                .tag(Tab.map)
             SavedView(session: session)
                 .tabItem { Label("收藏", systemImage: "bookmark") }
+                .tag(Tab.saved)
             ShoppingTab(session: session)
                 .tabItem { Label("購物", systemImage: "bag") }
+                .tag(Tab.shopping)
+        }
+        .onChange(of: store?.loaded) {
+            guard !choseInitialTab, let store, store.loaded else { return }
+            choseInitialTab = true
+            tab = store.trips.isEmpty ? .trip : .today
         }
         .sheet(isPresented: $showsDebug) { DebugMenuView(session: session) }
         .task {

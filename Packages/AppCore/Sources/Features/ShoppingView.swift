@@ -92,6 +92,7 @@ public struct ShoppingListView<MerchantScreen: View>: View {
                         TextField("新增想買的商品", text: $newName).onSubmit { Task { await add() } }
                             .accessibilityIdentifier("newItemField")
                         Button("新增") { Task { await add() } }
+                            .buttonStyle(.borderless)
                             .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
                             .accessibilityIdentifier("addItem")
                     }
@@ -222,6 +223,7 @@ struct MerchantSearchView: View {
                 HStack {
                     TextField("品牌或店名", text: $query).onSubmit { Task { await search() } }
                     Button("搜尋") { Task { await search() } }
+                            .buttonStyle(.borderless)
                 }
                 TextField("官方店鋪查詢頁網址（選填）", text: $officialURL)
                     .textContentType(.URL)

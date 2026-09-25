@@ -7,6 +7,7 @@ import SwiftUI
 struct TripMapView: View {
     let session: SessionModel
     let store: TripStore
+    var goToTrips: () -> Void = {}
     @State private var layers: Set<MapLayer> = Set(MapLayer.allCases)
     @State private var selected: TripMapPin?
 
@@ -43,7 +44,11 @@ struct TripMapView: View {
                             .presentationDetents([.medium, .large])
                     }
                 } else if store.loaded {
-                    ContentUnavailableView("尚無已確認的地點", systemImage: "map")
+                    ContentUnavailableView {
+                        Label("尚未建立旅程", systemImage: "map")
+                    } actions: {
+                        Button("建立旅程", action: goToTrips).buttonStyle(.borderedProminent)
+                    }
                 } else {
                     ProgressView()
                 }
