@@ -278,7 +278,9 @@ struct TripDetailView: View {
 
     private func editingContext(for stop: Stop) -> StopEditingContext? {
         guard myRole?.canEdit == true, let day = timeline.first(where: { $0.id == stop.dayId }) else { return nil }
-        return StopEditingContext(session: session, day: day, searchCenter: Coordinate.center(of: Array(places.values))) {
+        let areas = SearchAreas(places: Array(places.values), timeZones: timeline.map(\.day.timeZone),
+                                preferred: day.stops.compactMap { $0.placeId.flatMap { places[$0] } })
+        return StopEditingContext(session: session, day: day, searchAreas: areas) {
             selectedStop = nil
             Task { await reload() }
         }
@@ -377,8 +379,10 @@ struct StopDetailView: View {
                     if place == nil { Text("未定位，不計入路線").font(.caption).foregroundStyle(.secondary) }
                 }
                 if place == nil {
+                    let country = LocalMapCountry.guess(name: stop.rawLabel, timeZone: timeZone)
+                    Section { TaxiCardButton(unlocatedName: stop.rawLabel, countryCode: country) }
                     Section {
-                        LocalMapSearchButtons(name: stop.rawLabel, countryCode: LocalMapCountry.guess(name: stop.rawLabel, timeZone: timeZone))
+                        LocalMapSearchButtons(name: stop.rawLabel, countryCode: country)
                     } header: {
                         Text("當地地圖")
                     } footer: {

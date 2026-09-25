@@ -72,14 +72,22 @@ struct TaxiCardView: View {
 
 /// 「給司機看」按鈕；需要有已確認的地點。
 struct TaxiCardButton: View {
-    let place: Place
-    var fallbackChineseLabel: String? = nil
+    let card: TaxiCard
     @State private var showing = false
+
+    init(place: Place, fallbackChineseLabel: String? = nil) {
+        card = TaxiCard(place: place, fallbackChineseLabel: fallbackChineseLabel)
+    }
+
+    /// 未定位的地點：只用名稱。
+    init(unlocatedName name: String, countryCode: String?) {
+        card = TaxiCard(unlocatedName: name, countryCode: countryCode)
+    }
 
     var body: some View {
         Button("給計程車司機看", systemImage: "car.fill") { showing = true }
             .fullScreenCoverCompat(isPresented: $showing) {
-                TaxiCardView(card: TaxiCard(place: place, fallbackChineseLabel: fallbackChineseLabel))
+                TaxiCardView(card: card)
             }
     }
 }

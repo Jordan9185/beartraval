@@ -275,7 +275,7 @@ struct MerchantSearchView: View {
     private func search() async {
         searching = true
         defer { searching = false }
-        let found = await session.placeSearch.search(query, around: await session.trips.center(of: tripID), limit: 5)
+        let found = await session.placeSearch.search(query, in: await session.trips.searchAreas(of: tripID), limit: 5)
         guard let days = try? await session.trips.days(of: tripID) else { return }
         for day in days { dayTitles[day.id] = "第 \(day.displayOrder + 1) 天" }
         var computed: [Option] = []

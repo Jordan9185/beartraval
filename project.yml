@@ -67,6 +67,8 @@ targets:
         AppGroupIdentifier: $(APP_GROUP_ID)
         # 外開韓國在地地圖（§4.3.1）
         LSApplicationQueriesSchemes: [nmap, kakaomap, comgooglemaps]
+        # 只在使用 App 時：地圖上顯示你的位置（不做背景定位，規格 §2 範圍外）。
+        NSLocationWhenInUseUsageDescription: 在地圖上顯示你目前的位置，方便對照今天的行程。
   ShareExtension:
     type: app-extension
     platform: iOS

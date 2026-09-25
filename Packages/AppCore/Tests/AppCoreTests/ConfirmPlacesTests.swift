@@ -184,3 +184,29 @@ struct LocalMapSearchTests {
         #expect(LocalMapLink.googleSearchURL(query: "尾道", appInstalled: true).absoluteString.hasPrefix("comgooglemaps://?q="))
     }
 }
+
+struct SearchAreasTests {
+    func place(_ name: String, _ lat: Double, _ lng: Double, _ cc: String) -> Place {
+        Place(id: UUID(), provider: "apple_mapkit", providerPlaceId: name, name: name, nameLocal: nil, address: nil,
+              latitude: lat, longitude: lng, countryCode: cc)
+    }
+
+    /// 首爾＋廣島：平均中心在海上，要分成兩區。
+    @Test func multiCountryTripGetsOneAreaPerRegion() {
+        let seoul = [place("ORA", 37.45, 126.42, "KR"), place("明洞", 37.56, 126.98, "KR")]
+        let hiroshima = [place("嚴島神社", 34.30, 132.32, "JP"), place("廣島機場", 34.44, 132.92, "JP"), place("尾道", 34.41, 133.21, "JP")]
+        let areas = SearchAreas(places: seoul + hiroshima, timeZones: ["Asia/Seoul", "Asia/Tokyo"])
+        #expect(areas.centers.count == 2)
+        #expect(abs(areas.centers[0].latitude - 34.38) < 0.1)  // 地點多的區域在前
+        #expect(areas.countries == ["KR", "JP"])
+
+        let dayFirst = SearchAreas(places: seoul + hiroshima, preferred: seoul)
+        #expect(abs(dayFirst.centers[0].latitude - 37.5) < 0.1)
+        #expect(dayFirst.centers.count == 2)
+    }
+
+    @Test func timeZonesAddCountriesWithoutPlaces() {
+        #expect(SearchAreas(places: [], timeZones: ["Asia/Tokyo"]).countries == ["JP"])
+        #expect(SearchAreas(places: [], timeZones: ["Asia/Tokyo"]).centers.isEmpty)
+    }
+}

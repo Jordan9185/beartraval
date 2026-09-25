@@ -19,6 +19,7 @@ struct SavedView: View {
     @State private var myRole: TripRole?
     @State private var sync: TripSync?
     @State private var queued = 0
+    @State private var adding = false
 
     var body: some View {
         NavigationStack {
@@ -75,6 +76,22 @@ struct SavedView: View {
                 }
             }
             .navigationTitle("收藏")
+            .toolbar {
+                if myRole?.canEdit == true, tripID != nil {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("新增地點", systemImage: "plus") { adding = true }
+                            .accessibilityIdentifier("addSaved")
+                    }
+                }
+            }
+            .sheet(isPresented: $adding) {
+                if let tripID {
+                    AddSavedPlaceView(session: session, tripID: tripID) {
+                        adding = false
+                        Task { await reload() }
+                    }
+                }
+            }
             .refreshable { await reload() }
             .task { await loadTrips() }
             .onChange(of: tripID) { Task { await switchTrip() } }
@@ -202,6 +219,13 @@ struct SavedRow: View {
             if let place = entry.place {
                 TaxiCardButton(place: place, fallbackChineseLabel: entry.saved.rawLabel)
                     .font(.caption).buttonStyle(.borderless)
+            } else {
+                let country = LocalMapCountry.guess(name: entry.saved.rawLabel, timeZone: nil)
+                HStack(spacing: 16) {
+                    TaxiCardButton(unlocatedName: entry.saved.rawLabel, countryCode: country)
+                    LocalMapSearchButtons(name: entry.saved.rawLabel, countryCode: country)
+                }
+                .font(.caption).buttonStyle(.borderless)
             }
             HStack(spacing: 16) {
                 Text(entry.saved.addedBy == nil ? "已刪除帳號的成員新增" : entry.saved.addedBy == me ? "你新增" : "旅伴新增").font(.caption).foregroundStyle(.secondary)
@@ -294,7 +318,7 @@ struct ResolvePlaceSheet: View {
     }
 
     private func search() async {
-        results = await session.placeSearch.search(query, around: await session.trips.center(of: entry.saved.tripId), limit: 6)
+        results = await session.placeSearch.search(query, in: await session.trips.searchAreas(of: entry.saved.tripId), limit: 6)
         errorMessage = results.isEmpty ? "找不到符合的地點" : nil
     }
 
@@ -307,6 +331,98 @@ struct ResolvePlaceSheet: View {
             errorMessage = "這個地點已經在收藏清單裡。"
         } catch {
             errorMessage = "補填失敗：\(error.localizedDescription)"
+        }
+    }
+}
+
+/// 直接在收藏頁新增地點：搜尋 Apple 地圖選一個，或只保留名稱（之後可補定位）。
+/// 收藏只進共同的收藏清單，不改正式行程。
+struct AddSavedPlaceView: View {
+    let session: SessionModel
+    let tripID: UUID
+    let onDone: () -> Void
+    @State private var query = ""
+    @State private var category: SavedCategory = .place
+    @State private var results: [PlaceOption] = []
+    @State private var searched = false
+    @State private var searching = false
+    @State private var saving = false
+    @State private var areas: SearchAreas?
+    @State private var errorMessage: String?
+    @Environment(\.dismiss) private var dismiss
+
+    private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack {
+                        TextField("店名或地點", text: $query)
+                            .onSubmit { Task { await search() } }
+                            .accessibilityIdentifier("savedQuery")
+                        Button("搜尋") { Task { await search() } }
+                            .buttonStyle(.borderless)
+                            .disabled(trimmed.isEmpty || searching)
+                    }
+                    Picker("類別", selection: $category) {
+                        ForEach(SavedCategory.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    }
+                }
+                if searching { ProgressView("搜尋中…") }
+                if !results.isEmpty {
+                    Section("Apple 地圖") {
+                        ForEach(results) { option in
+                            Button { Task { await save(option) } } label: {
+                                VStack(alignment: .leading) {
+                                    Text(option.displayTitle)
+                                    if let address = option.address { Text(address).font(.caption).foregroundStyle(.secondary) }
+                                }
+                            }
+                            .disabled(saving)
+                        }
+                    }
+                }
+                if searched && !trimmed.isEmpty {
+                    Section {
+                        Button("只收藏名稱「\(trimmed)」") { Task { await save(nil) } }
+                            .disabled(saving)
+                        LocalMapSearchButtons(name: trimmed, countryCode: LocalMapCountry.guess(name: trimmed, timeZone: nil)
+                                              ?? (areas?.countries.count == 1 ? areas?.countries.first : nil))
+                    } header: {
+                        Text(results.isEmpty ? "Apple 地圖沒找到" : "都不是？")
+                    } footer: {
+                        Text("只收藏名稱時不計入路線，之後可以再補定位。")
+                    }
+                }
+                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            }
+            .navigationTitle("新增收藏")
+            .navigationBarTitleDisplayModeInline()
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
+        }
+    }
+
+    private func search() async {
+        guard !trimmed.isEmpty else { return }
+        searching = true
+        defer { searching = false; searched = true }
+        if areas == nil { areas = await session.trips.searchAreas(of: tripID) }
+        results = await session.placeSearch.search(trimmed, in: areas ?? .none, limit: 6)
+    }
+
+    private func save(_ option: PlaceOption?) async {
+        saving = true
+        defer { saving = false }
+        do {
+            let placeID = if let option { try await session.trips.upsertPlace(option.draft).id } else { UUID?.none }
+            _ = try await session.trips.savePlace(tripID: tripID, label: option?.name ?? trimmed, category: category,
+                                                  placeID: placeID, source: nil)
+            onDone()
+        } catch let error as BackendError {
+            errorMessage = error.userMessage
+        } catch {
+            errorMessage = "收藏失敗：\(error.localizedDescription)"
         }
     }
 }

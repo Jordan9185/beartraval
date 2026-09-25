@@ -40,8 +40,8 @@ struct LegRow: View {
 struct StopEditingContext {
     let session: SessionModel
     let day: DayTimeline
-    /// 搜尋範圍的中心（旅程已確認地點的中心）。
-    var searchCenter: Coordinate? = nil
+    /// 搜尋範圍：同一天的地點優先，其次旅程其他區域。
+    var searchAreas: SearchAreas = .none
     let onChanged: () -> Void
 }
 
@@ -167,7 +167,7 @@ struct ResolveStopSheet: View {
     private func search() async {
         searching = true
         defer { searching = false }
-        results = await context.session.placeSearch.search(query, around: context.searchCenter, limit: 6)
+        results = await context.session.placeSearch.search(query, in: context.searchAreas, limit: 6)
         errorMessage = results.isEmpty ? "找不到符合的地點，可以換個關鍵字。" : nil
     }
 

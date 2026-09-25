@@ -151,7 +151,9 @@ struct TodayView: View {
             StopDetailView(stop: stop, place: stop.placeId.flatMap { snapshot.places[$0] }, mode: day.day.transportMode,
                            previous: day.stops.prefix { $0.id != stop.id }.last(where: \.isRoutable)?.placeId.flatMap { snapshot.places[$0] },
                            editing: store.myRole?.canEdit == true ? StopEditingContext(session: session, day: day,
-                                                                                       searchCenter: Coordinate.center(of: Array(snapshot.places.values))) {
+                                                                                       searchAreas: SearchAreas(places: Array(snapshot.places.values),
+                                                                                                                timeZones: snapshot.timeline.map(\.day.timeZone),
+                                                                                                                preferred: day.stops.compactMap { $0.placeId.flatMap { snapshot.places[$0] } })) {
                                selectedStop = nil
                                Task { await store.reload() }
                            } : nil,

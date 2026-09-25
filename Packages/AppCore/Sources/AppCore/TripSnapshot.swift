@@ -120,7 +120,82 @@ extension Coordinate {
     }
 }
 
+/// 地點搜尋範圍。跨國旅程（首爾＋廣島）的平均中心會落在兩國之間的海上，
+/// 所以分成幾個區域各自搜尋，並只接受旅程所在國家的結果。
+public struct SearchAreas: Equatable, Sendable {
+    /// 各區域中心；`preferred` 所在的區域在最前面，其次是地點多的區域。
+    public var centers: [Coordinate]
+    public var countries: Set<String>
+
+    public static let none = SearchAreas(centers: [], countries: [])
+
+    public init(centers: [Coordinate], countries: Set<String>) {
+        self.centers = centers
+        self.countries = countries
+    }
+
+    /// - Parameters:
+    ///   - places: 旅程已定位的地點。
+    ///   - timeZones: 各天時區，用來補上還沒有定位地點的國家。
+    ///   - preferred: 優先搜尋的地點（例如同一天的行程點）。
+    public init(places: [Place], timeZones: [String] = [], preferred: [Place] = []) {
+        var clusters: [[Place]] = []
+        for place in places {
+            if let i = clusters.firstIndex(where: { Self.distanceKm(Coordinate.center(of: $0)!, Coordinate(latitude: place.latitude, longitude: place.longitude)) < 150 }) {
+                clusters[i].append(place)
+            } else {
+                clusters.append([place])
+            }
+        }
+        var centers = clusters.sorted { $0.count > $1.count }.compactMap { Coordinate.center(of: $0) }
+        if let first = Coordinate.center(of: preferred) {
+            centers.removeAll { Self.distanceKm($0, first) < 50 }
+            centers.insert(first, at: 0)
+        }
+        self.centers = centers
+        var countries = Set(places.compactMap { $0.countryCode?.uppercased() })
+        for zone in timeZones {
+            if let code = TripTimeZones.byCountry.first(where: { $0.value == zone })?.key { countries.insert(code) }
+        }
+        self.countries = countries
+    }
+
+    public static func distanceKm(_ a: Coordinate, _ b: Coordinate) -> Double {
+        let r = 6371.0, rad = Double.pi / 180
+        let dLat = (b.latitude - a.latitude) * rad, dLon = (b.longitude - a.longitude) * rad
+        let h = sin(dLat / 2) * sin(dLat / 2) + cos(a.latitude * rad) * cos(b.latitude * rad) * sin(dLon / 2) * sin(dLon / 2)
+        return 2 * r * asin(min(1, sqrt(h)))
+    }
+}
+
+extension PlaceSearching {
+    /// 依序在各區域搜尋（最多三區）並合併；都找不到時不限區域，只留旅程所在國家的結果。
+    public func search(_ query: String, in areas: SearchAreas, limit: Int) async -> [PlaceOption] {
+        var results: [PlaceOption] = []
+        for center in areas.centers.prefix(3) {
+            for option in await search(query, around: center, limit: limit) where !results.contains(where: { $0.id == option.id }) {
+                results.append(option)
+            }
+        }
+        if results.isEmpty {
+            // 各天時區可能還沒改（整趟都是首爾），過濾後沒結果就全部列出，由使用者自己挑。
+            let anywhere = await search(query, near: nil, limit: limit * 2)
+            let inTrip = anywhere.filter { $0.draft.countryCode.map { areas.countries.contains($0.uppercased()) } ?? false }
+            results = inTrip.isEmpty ? anywhere : inTrip
+        }
+        return Array(results.prefix(limit))
+    }
+}
+
 extension TripRepository {
+    /// 旅程的搜尋範圍（見 `SearchAreas`）。
+    public func searchAreas(of tripID: UUID) async -> SearchAreas {
+        guard let stops = try? await stops(of: tripID),
+              let list = try? await places(ids: Array(Set(stops.compactMap(\.placeId)))) else { return .none }
+        let zones = (try? await days(of: tripID))?.map(\.timeZone) ?? []
+        return SearchAreas(places: list, timeZones: zones)
+    }
+
     /// 旅程已確認地點的中心；還沒有地點時為 nil。
     public func center(of tripID: UUID) async -> Coordinate? {
         guard let stops = try? await stops(of: tripID),

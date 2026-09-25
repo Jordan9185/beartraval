@@ -84,4 +84,25 @@ public struct TaxiCard: Equatable, Sendable {
         }
         self.warnings = warnings
     }
+
+    /// 還沒在 Apple 地圖定位的地點：只有名稱，沒有地址（常見於 Apple 地圖沒收錄的韓國小店）。
+    public init(unlocatedName name: String, countryCode: String?) {
+        let lang = Self.language(for: countryCode)
+        let (request, requestZh, extras) = Self.phrases(lang)
+        self.language = lang
+        self.request = request
+        self.requestZh = requestZh
+        self.name = name
+        self.nameZh = nil
+        self.address = nil
+        self.extras = extras
+        var warnings = ["這個地點還沒定位，卡片上沒有地址；建議先用當地地圖查到位置，再給司機看地圖。"]
+        if lang == .korean && !PlaceNaming.hasHangul(name) {
+            warnings.append("店名不是韓文，司機可能看不懂。")
+        }
+        if lang == .japanese && !(PlaceNaming.hasKana(name) || PlaceNaming.hasHan(name)) {
+            warnings.append("店名不是日文，司機可能看不懂。")
+        }
+        self.warnings = warnings
+    }
 }

@@ -48,6 +48,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>在地圖上顯示你目前的位置，方便對照今天的行程。</string>
 	<key>SupabaseAnonKey</key>
 	<string>$(SUPABASE_ANON_KEY)</string>
 	<key>SupabaseURL</key>

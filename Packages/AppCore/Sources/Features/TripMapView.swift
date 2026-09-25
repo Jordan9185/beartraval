@@ -10,6 +10,9 @@ struct TripMapView: View {
     var goToTrips: () -> Void = {}
     @State private var layers: Set<MapLayer> = Set(MapLayer.allCases)
     @State private var selected: TripMapPin?
+    @State private var position: MapCameraPosition = .automatic
+    @State private var framedRevision: Int?
+    private let locationManager = CLLocationManager()
 
     var body: some View {
         NavigationStack {
@@ -17,7 +20,8 @@ struct TripMapView: View {
                 if let snapshot = store.snapshot {
                     let dayIndex = snapshot.todayIndex()
                     let pins = snapshot.pins(dayIndex: dayIndex, layers: layers)
-                    Map {
+                    Map(position: $position) {
+                        UserAnnotation()
                         ForEach(pins) { pin in
                             Annotation(pin.title, coordinate: CLLocationCoordinate2D(latitude: pin.place.latitude, longitude: pin.place.longitude)) {
                                 Button { selected = pin } label: { PinMarker(pin: pin) }
@@ -29,6 +33,26 @@ struct TripMapView: View {
                         }
                         if route.count > 1 {
                             MapPolyline(coordinates: route).stroke(.blue.opacity(0.5), style: StrokeStyle(lineWidth: 3, dash: [6, 6]))
+                        }
+                    }
+                    .mapControls {
+                        MapUserLocationButton()
+                        MapCompass()
+                        MapScaleView()
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .primaryAction) {
+                            Button("今天的行程", systemImage: "scope") { position = Self.frame(pins) }
+                                .accessibilityIdentifier("frameToday")
+                        }
+                    }
+                    // 開啟時只框今天的行程（其他天與其他國家的圖釘不算），不要一打開就縮到整個東北亞。
+                    .onAppear {
+                        guard framedRevision != snapshot.revision else { return }
+                        framedRevision = snapshot.revision
+                        position = Self.frame(pins)
+                        if locationManager.authorizationStatus == .notDetermined {
+                            locationManager.requestWhenInUseAuthorization()
                         }
                     }
                     .safeAreaInset(edge: .bottom) {
@@ -56,6 +80,22 @@ struct TripMapView: View {
             .navigationTitle("地圖")
             .navigationBarTitleDisplayModeInline()
         }
+    }
+}
+
+extension TripMapView {
+    /// 今天行程的範圍；今天沒有已定位地點時，框圖釘最多的區域。
+    static func frame(_ pins: [TripMapPin]) -> MapCameraPosition {
+        let today = pins.filter { $0.layer == .todayRoute }.map(\.place)
+        let places = today.isEmpty ? pins.map(\.place) : today
+        guard let center = SearchAreas(places: places).centers.first else { return .automatic }
+        let nearby = places.filter {
+            SearchAreas.distanceKm(center, Coordinate(latitude: $0.latitude, longitude: $0.longitude)) < 150
+        }
+        let lats = nearby.map(\.latitude), lngs = nearby.map(\.longitude)
+        guard let minLat = lats.min(), let maxLat = lats.max(), let minLng = lngs.min(), let maxLng = lngs.max() else { return .automatic }
+        let span = MKCoordinateSpan(latitudeDelta: max(0.01, (maxLat - minLat) * 1.4), longitudeDelta: max(0.01, (maxLng - minLng) * 1.4))
+        return .region(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2, longitude: (minLng + maxLng) / 2), span: span))
     }
 }
 
