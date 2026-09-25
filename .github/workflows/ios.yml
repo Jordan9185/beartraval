@@ -24,6 +24,9 @@ jobs:
         run: |
           brew install xcodegen
           xcodegen generate
+          # 與 `swift test` 用同一份套件版本：沿用 Packages/AppCore/Package.resolved。
+          mkdir -p BearTravel.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+          cp Packages/AppCore/Package.resolved BearTravel.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
       - name: Build and test on iOS Simulator
         run: |
@@ -34,4 +37,5 @@ jobs:
             -project BearTravel.xcodeproj \
             -scheme BearTravel \
             -destination "platform=iOS Simulator,id=$UDID" \
+            -onlyUsePackageVersionsFromResolvedFile \
             CODE_SIGNING_ALLOWED=NO

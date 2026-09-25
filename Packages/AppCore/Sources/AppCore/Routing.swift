@@ -49,8 +49,12 @@ public struct RoutePoint: Hashable, Sendable {
 
     public var isInKorea: Bool {
         if let countryCode { return countryCode.uppercased() == "KR" }
-        // 國碼缺漏時以南韓範圍粗判。
-        return (33.0...38.7).contains(coordinate.latitude) && (124.5...131.0).contains(coordinate.longitude)
+        // 國碼缺漏時以南韓範圍粗判；排除同一方框內的對馬、九州北部與五島（日本）。
+        let lat = coordinate.latitude, lng = coordinate.longitude
+        guard (33.0...38.7).contains(lat), (124.5...131.0).contains(lng) else { return false }
+        if lat < 35.0 && lng > 128.8 { return false }
+        if lat < 34.0 && lng > 127.5 { return false }
+        return true
     }
 }
 

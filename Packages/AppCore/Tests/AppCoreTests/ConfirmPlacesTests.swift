@@ -150,6 +150,9 @@ struct ConfirmPlacesTests {
         // 分店不明、信心不足：不自動選（AC-01）。
         #expect(PlaceMatch.confident(for: stop("XXX Shoes", nil, reasons: [.ambiguousBranch]), in: [option("a", "XXX Shoes")]) == nil)
         #expect(PlaceMatch.confident(for: stop("Beidelli", nil, confidence: "medium"), in: [option("a", "Beidelli")]) == nil)
+        // 同名的其他分店也在候選裡：分店不明（審查）。
+        #expect(PlaceMatch.confident(for: stop("Matin Kim", nil), in: [option("a", "Matin Kim"), option("b", "Matin Kim 명동점")]) == nil)
+        #expect(PlaceMatch.confident(for: stop("XXX Shoes", nil), in: [option("a", "XXX Shoes 성수점")]) == nil)
         // 兩個候選都相符（兩間分店）。
         #expect(PlaceMatch.confident(for: stop("Matin Kim", nil), in: [option("a", "Matin Kim"), option("b", "Matin Kim")]) == nil)
     }

@@ -10,7 +10,8 @@ struct BackendTests {
         ("PT409", .conflict("INVITE_EXPIRED")),
         ("PT410", .gone("INVITE_EXPIRED")),
         ("PT422", .invalid("INVITE_EXPIRED")),
-        ("42501", .other("INVITE_EXPIRED")),
+        ("42501", .forbidden),
+        ("XX000", .other("INVITE_EXPIRED")),
     ])
     func mapsSQLStateToError(code: String, expected: BackendError) {
         #expect(BackendError(code: code, message: "INVITE_EXPIRED") == expected)

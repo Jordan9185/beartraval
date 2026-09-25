@@ -66,3 +66,11 @@ private extension JSONDecoder {
         return decoder
     }
 }
+
+struct PayloadURLTests {
+    /// 長網址（例如 Google 地圖分享）不可截斷（審查）。
+    @Test func longURLsAreKeptWhole() {
+        let long = URL(string: "https://www.google.com/maps/place/" + String(repeating: "a", count: 700))!
+        #expect(PayloadInspector.describe(item: long as NSURL, typeIdentifier: "public.url").preview == long.absoluteString)
+    }
+}

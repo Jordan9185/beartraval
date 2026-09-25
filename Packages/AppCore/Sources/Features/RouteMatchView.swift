@@ -42,20 +42,16 @@ struct RouteMatchView: View {
             Form {
                 Section("候選地點") {
                     if let candidate {
-                        LabeledContent(candidate.draft.displayTitle, value: candidate.address ?? "")
+                        PlaceOptionRow(title: candidate.draft.displayTitle, address: candidate.address)
                         Button("換一個") { self.candidate = nil; matches = [] }
                     } else {
-                        TextField("搜尋店名或地點", text: $query)
-                            .onSubmit { Task { await search() } }
+                        PlaceSearchField(text: $query, isSearching: isWorking) { Task { await search() } }
                         ForEach(results) { result in
                             Button {
                                 candidate = result
                                 Task { await compute() }
                             } label: {
-                                VStack(alignment: .leading) {
-                                    Text(result.draft.displayTitle)
-                                    if let address = result.address { Text(address).font(.caption).foregroundStyle(.secondary) }
-                                }
+                                PlaceOptionRow(title: result.draft.displayTitle, address: result.address)
                             }
                         }
                     }
@@ -75,14 +71,15 @@ struct RouteMatchView: View {
                 if let message { Text(message).foregroundStyle(.secondary) }
 
                 if let candidate, !matches.isEmpty {
-                    if let best = RouteMatcher.bestDay(matches), let insertion = best.best {
-                        Section("建議") {
-                            Text("\(dayTitle(best.dayID))，\(positionText(insertion, dayID: best.dayID))")
-                            MatchNumbers(insertion: insertion, stopName: stopName)
+                    // 建議只寫一句，數字在該天的區塊裡看，不重複列兩次。
+                    let best = RouteMatcher.bestDay(matches)
+                    if let best, let insertion = best.best {
+                        Section {
+                            Label("建議\(dayTitle(best.dayID))：\(positionText(insertion, dayID: best.dayID))", systemImage: "hand.thumbsup")
                         }
                     }
                     ForEach(matches, id: \.dayID) { match in
-                        Section(dayTitle(match.dayID) + "（\(match.mode.displayName)）") {
+                        Section(dayTitle(match.dayID) + " · \(match.mode.displayName)" + (match.dayID == best?.dayID ? " · 建議" : "")) {
                             DayMatchRow(match: match, candidate: candidate, previousStop: previousPoint(match),
                                         positionText: { positionText($0, dayID: match.dayID) }, stopName: stopName)
                             if match.best != nil && canEdit {
@@ -281,10 +278,10 @@ struct LocalMapSearchButtons: View {
 
     var body: some View {
         if countryCode == "KR" {
-            Button("在 Naver 地圖查看", systemImage: "map") { open(.naver) }
-            Button("在 Kakao 地圖查看", systemImage: "map") { open(.kakao) }
+            Button("在 Naver 地圖查看") { open(.naver) }
+            Button("在 Kakao 地圖查看") { open(.kakao) }
         } else {
-            Button("在 Google 地圖查看", systemImage: "map") {
+            Button("在 Google 地圖查看") {
                 openURL(LocalMapLink.googleSearchURL(query: name, appInstalled: installed("comgooglemaps")))
             }
         }

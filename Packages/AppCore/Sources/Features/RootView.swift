@@ -22,7 +22,7 @@ public struct RootView: View {
         if let session {
             switch session.state {
             case .loading:
-                ProgressView()
+                ProgressView("確認登入中…")
             case .signedOut:
                 LoginView(session: session)
                     // 換帳號時重建今天／地圖用的資料，不沿用上一個帳號的旅程。

@@ -4,10 +4,12 @@ on:
   push:
     paths:
       - "ai/**"
+      - "supabase/functions/**"
       - ".github/workflows/ai-tests.yml"
   pull_request:
     paths:
       - "ai/**"
+      - "supabase/functions/**"
       - ".github/workflows/ai-tests.yml"
 
 jobs:
@@ -44,3 +46,36 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run eval:dry
+
+  product-extract:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ai/product-extract
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ai/product-extract/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  # The Edge Functions import the ai/ packages by relative path; type-check them
+  # together with Deno, each with its own import map (deno.json).
+  edge-functions:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: deno check
+        run: |
+          for dir in supabase/functions/*/; do
+            echo "::group::${dir}"
+            deno check --config "${dir}deno.json" "${dir}index.ts"
+            echo "::endgroup::"
+          done

@@ -40,7 +40,7 @@ struct TaxiCardView: View {
                         .font(.body.weight(.semibold))
                     LabeledContent("請求", value: card.requestZh)
                     LabeledContent("目的地", value: card.nameZh ?? "（沒有中文名稱）")
-                    LabeledContent("地址", value: card.address == nil ? "（沒有地址）" : "以當地語言顯示，供司機閱讀")
+                    if card.address == nil { LabeledContent("地址", value: "（沒有地址）") }
                     ForEach(Array(card.extras.enumerated()), id: \.offset) { _, extra in
                         LabeledContent("補充", value: extra.zh)
                     }

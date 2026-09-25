@@ -84,3 +84,44 @@ select id as pai from app.create_proposal(:'day_id', (select route_revision from
   format('{"place_id": %s, "raw_label": "AI 建議"}', to_json(:'pa'::text))::jsonb, null, true) \gset
 select tests.ok((select created_by_ai and status = 'proposed' from app.change_proposals where id = :'pai'), 'AI proposal recorded, not applied');
 select tests.ok((select count(*) from app.stops where raw_label = 'AI 建議') = 0, 'AI proposal wrote no stop');
+
+-- Anchors, kind and dwell are checked when proposing, so every shown proposal can be confirmed.
+select route_revision as rev from app.trip_days where id = :'day_id' \gset
+select id as only_stop from app.stops where day_id = :'day_id' and deleted_at is null \gset
+select id as gone_stop from app.stops where day_id = :'day_id' and raw_label = 'A' and deleted_at is not null \gset
+select tests.throws(format($$select app.create_proposal(%L, %s, '{"place_id": %s, "raw_label": "x", "before_stop_id": %s}')$$,
+                           :'day_id', :'rev', to_json(:'pc'::text), to_json(:'gone_stop'::text)), 'PT422', 'deleted anchor rejected');
+select tests.throws(format($$select app.create_proposal(%L, %s, '{"place_id": %s, "raw_label": "x", "after_stop_id": %s}')$$,
+                           :'day_id', :'rev', to_json(:'pc'::text), to_json(gen_random_uuid()::text)), 'PT422', 'unknown anchor rejected');
+select tests.throws(format($$select app.create_proposal(%L, %s, '{"place_id": %s, "raw_label": "x", "before_stop_id": "nope"}')$$,
+                           :'day_id', :'rev', to_json(:'pc'::text)), 'PT422', 'malformed anchor rejected');
+select tests.throws(format($$select app.create_proposal(%L, %s, '{"place_id": %s, "raw_label": "x", "kind": "bogus"}')$$,
+                           :'day_id', :'rev', to_json(:'pc'::text)), 'PT422', 'unknown kind rejected');
+select tests.throws(format($$select app.create_proposal(%L, %s, '{"place_id": %s, "raw_label": "x", "dwell_minutes": 2000}')$$,
+                           :'day_id', :'rev', to_json(:'pc'::text)), 'PT422', 'dwell over a day rejected');
+select tests.throws(format($$select app.create_proposal(%L, %s, '{"place_id": %s, "raw_label": "x", "dwell_minutes": 30.5}')$$,
+                           :'day_id', :'rev', to_json(:'pc'::text)), 'PT422', 'fractional dwell rejected');
+select tests.throws(format($$select app.create_proposal(%L, %s, '{"place_id": %s, "raw_label": "x", "dwell_minutes": "30"}')$$,
+                           :'day_id', :'rev', to_json(:'pc'::text)), 'PT422', 'dwell as text rejected');
+
+-- after_stop_id inserts right after the anchor.
+select app.commit_itinerary(:'day_id', :'rev', format('[{"id": %s, "raw_label": "only this"}, {"place_id": %s, "raw_label": "B2"}]',
+       to_json(:'only_stop'::text), to_json(:'pb'::text))::jsonb) as rev \gset
+select id as p_after from app.create_proposal(:'day_id', :'rev',
+  format('{"place_id": %s, "raw_label": "after anchor", "after_stop_id": %s, "kind": "standard", "dwell_minutes": 0}',
+         to_json(:'pc'::text), to_json(:'only_stop'::text))::jsonb) \gset
+select tests.ok((app.confirm_proposal(:'p_after')) ->> 'status' = 'confirmed', 'after-anchor proposal confirmed');
+select tests.ok((select string_agg(raw_label, ',' order by sort_order) from app.stops where day_id = :'day_id' and deleted_at is null)
+                = 'only this,after anchor,B2', 'inserted after the chosen stop');
+
+-- Rejecting: open proposals close, confirmed ones stay confirmed, viewers can't.
+select route_revision as rev from app.trip_days where id = :'day_id' \gset
+select id as p_open from app.create_proposal(:'day_id', :'rev', format('{"place_id": %s, "raw_label": "maybe"}', to_json(:'pa'::text))::jsonb) \gset
+select tests.login(:'viewer');
+select tests.throws(format($$select app.reject_proposal(%L)$$, :'p_open'), 'PT403', 'viewer cannot reject');
+select tests.login(:'editor');
+select app.reject_proposal(:'p_open');
+select tests.ok((select status = 'rejected' and decided_by = :'editor' from app.change_proposals where id = :'p_open'), 'open proposal rejected');
+select tests.throws(format($$select app.confirm_proposal(%L)$$, :'p_open'), 'PT409', 'rejected proposal cannot be confirmed');
+select app.reject_proposal(:'p_after');
+select tests.ok((select status = 'confirmed' from app.change_proposals where id = :'p_after'), 'rejecting a confirmed proposal changes nothing');

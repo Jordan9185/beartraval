@@ -150,3 +150,33 @@ test("SDK parse errors become parse failures, other errors don't", () => {
   assert.equal(structuredOutputFailure(parseError, "end_turn")?.reason, "invalid_output");
   assert.equal(structuredOutputFailure(new Error("fetch failed"), null), null);
 });
+
+test("blank place name is treated as missing", () => {
+  const { result, issues } = validateDraft(input, draft("2026-10-02", [stop({ place_name: "   " })]));
+  const s = result.days[0]!.stops[0]!;
+  assert.equal(s.place_name, null);
+  assert.ok(s.needs_confirmation.includes("unknown_place"));
+  assert.ok(!isCleanStop(s));
+  assert.ok(issues.some((i) => i.issue === "empty place name"));
+});
+
+test("empty place name on a transport leg is cleared without asking for a place", () => {
+  const leg = stop({ place_name: "", category: "transport", search_query: null });
+  const { result } = validateDraft(input, draft("2026-10-02", [leg]));
+  assert.equal(result.days[0]!.stops[0]!.place_name, null);
+  assert.deepEqual(result.days[0]!.stops[0]!.needs_confirmation, []);
+});
+
+test("empty excerpt lowers confidence", () => {
+  const { result, issues } = validateDraft(input, draft("2026-10-02", [stop({ source_excerpt: "  " })]));
+  assert.equal(result.days[0]!.stops[0]!.confidence, "low");
+  assert.ok(issues.some((i) => i.issue === "empty excerpt"));
+});
+
+test("impossible calendar date is flagged ambiguous_date", () => {
+  const winter: ParseInput = { ...input, tripStart: "2026-02-25", tripEnd: "2026-03-05" };
+  const { result, issues } = validateDraft(winter, draft("2026-02-30", [stop()]));
+  assert.ok(issues.some((i) => i.path === "days[0].date"));
+  assert.deepEqual(result.days[0]!.stops[0]!.needs_confirmation, ["ambiguous_date"]);
+  assert.deepEqual(validateDraft(winter, draft("2026-02-28", [stop()])).issues, []);
+});

@@ -22,7 +22,7 @@ struct ShoppingTab: View {
                         MerchantSearchView(session: session, tripID: tripID, entry: entry) { reloadToken += 1 }
                     }
                 } else {
-                    ContentUnavailableView("尚未建立行程", systemImage: "bag")
+                    ContentUnavailableView("還沒有旅程", systemImage: "bag", description: Text("先到「旅程」建立或加入旅程。"))
                 }
             }
             .navigationTitle("購物清單")
@@ -127,22 +127,30 @@ public struct ShoppingListView<MerchantScreen: View>: View {
                 }
             }
             if let errorMessage { ErrorText(errorMessage) }
-            ForEach(entries) { entry in
-                NavigationLink {
-                    ShoppingItemDetailView(service: service, tripID: tripID, entry: entry, canEdit: canEdit,
-                                           merchantScreen: canEdit && entry.status == .unscheduled ? AnyView(merchantScreen(entry)) : nil) {
-                        Task { await reload() }
+            // 依狀態分組：未安排、已安排、已購買（每列不必再靠顏色分辨）。
+            ForEach(ShoppingGroup.allCases, id: \.self) { group in
+                let members = entries.filter { group.contains($0) }
+                if !members.isEmpty {
+                    Section(group.title) {
+                        ForEach(members) { entry in
+                            NavigationLink {
+                                ShoppingItemDetailView(service: service, tripID: tripID, entry: entry, canEdit: canEdit,
+                                                       merchantScreen: canEdit && entry.status == .unscheduled ? AnyView(merchantScreen(entry)) : nil) {
+                                    Task { await reload() }
+                                }
+                            } label: {
+                                ShoppingRow(entry: entry, me: service.currentUserID, canEdit: canEdit, service: service,
+                                            toggle: { Task { await togglePurchased(entry) } },
+                                            merchantScreen: { merchantScreen(entry) })
+                            }
+                        }
                     }
-                } label: {
-                    ShoppingRow(entry: entry, me: service.currentUserID, canEdit: canEdit, service: service,
-                                toggle: { Task { await togglePurchased(entry) } },
-                                merchantScreen: { merchantScreen(entry) })
                 }
             }
         }
         .overlay {
             if loaded && entries.isEmpty {
-                ContentUnavailableView("尚未新增商品", systemImage: "bag", description: canEdit ? Text("在上方輸入想買的東西。") : nil)
+                ContentUnavailableView("還沒有想買的東西", systemImage: "bag", description: canEdit ? Text("在上方輸入，或從貼文、截圖加入。") : nil)
             }
         }
         .refreshable { await reload() }
@@ -231,7 +239,9 @@ struct ShoppingRow<MerchantScreen: View>: View {
                     Group {
                         switch entry.status {
                         case .unscheduled: Text("未安排")
-                        case .scheduled: Text("已安排：\(entry.plannedDate ?? "") \(entry.plannedStore ?? "")")
+                        case .scheduled:
+                            Text("已安排：" + [entry.plannedDayNumber.map { "第 \($0) 天" } ?? entry.plannedDate, entry.plannedStore]
+                                .compactMap { $0 }.joined(separator: " · "))
                         case .purchased(let by, let at):
                             Text("\(by == nil ? "已刪除帳號的成員" : by == me ? "你" : "旅伴")已購買 · \(at.formatted(date: .abbreviated, time: .shortened))")
                         }
@@ -266,16 +276,13 @@ struct MerchantSearchView: View {
     @State private var searching = false
     @State private var dayTitles: [UUID: String] = [:]
     @State private var scheduling: Option?
+    @State private var errorMessage: String?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         Form {
             Section {
-                HStack {
-                    TextField("品牌或店名", text: $query).onSubmit { Task { await search() } }
-                    Button("搜尋") { Task { await search() } }
-                            .buttonStyle(.borderless)
-                }
+                PlaceSearchField(text: $query, placeholder: "品牌或店名", isSearching: searching) { Task { await search() } }
                 TextField("官方店鋪查詢頁網址（選填）", text: $officialURL)
                     .textContentType(.URL)
                     #if os(iOS)
@@ -284,6 +291,7 @@ struct MerchantSearchView: View {
             } footer: {
                 Text("有官方店鋪頁時會作為證據附上；否則標為「地圖搜尋結果」。一律只表示可能販售，庫存未知。")
             }
+            if let errorMessage { ErrorText(errorMessage) }
             if searching { ProgressView("搜尋並計算順路…") }
             ForEach(options) { option in
                 Section {
@@ -298,7 +306,10 @@ struct MerchantSearchView: View {
                         }
                     }
                     if option.best?.best != nil {
-                        Button("安排在\(dayTitles[option.best!.dayID] ?? "這天")…") { scheduling = option }
+                        Button("安排在\(dayTitles[option.best!.dayID] ?? "這天")…") {
+                            // 先記下「可能販售」的證據，成功才進入確認；失敗要讓使用者知道（審查）。
+                            Task { if await recordEvidence(option) { scheduling = option } }
+                        }
                     }
                 }
             }
@@ -310,11 +321,8 @@ struct MerchantSearchView: View {
                                mode: option.best!.mode, candidate: SearchResult(draft: option.place.draft), dwellMinutes: 30,
                                shoppingItemID: entry.id) {
                 scheduling = nil
-                Task {
-                    await recordEvidence(option)
-                    onScheduled()
-                    dismiss()
-                }
+                onScheduled()
+                dismiss()
             }
         }
     }
@@ -344,11 +352,18 @@ struct MerchantSearchView: View {
         options = computed.sorted { ($0.best?.best?.addedTravelMinutes ?? .max) < ($1.best?.best?.addedTravelMinutes ?? .max) }
     }
 
-    private func recordEvidence(_ option: Option) async {
-        guard let place = try? await session.trips.upsertPlace(option.place.draft) else { return }
-        let url = officialURL.trimmingCharacters(in: .whitespaces)
-        try? await session.trips.addMerchant(itemID: entry.id, placeID: place.id, evidence: evidence,
-                                             url: url.isEmpty ? nil : url, note: "Apple 地圖搜尋「\(query)」")
+    private func recordEvidence(_ option: Option) async -> Bool {
+        do {
+            let place = try await session.trips.upsertPlace(option.place.draft)
+            let url = officialURL.trimmingCharacters(in: .whitespaces)
+            try await session.trips.addMerchant(itemID: entry.id, placeID: place.id, evidence: evidence,
+                                                url: url.isEmpty ? nil : url, note: "Apple 地圖搜尋「\(query)」")
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = "無法記錄販售店：\(userMessage(for: error))"
+            return false
+        }
     }
 }
 
@@ -434,6 +449,25 @@ struct ShoppingItemDetailView: View {
                     errorMessage = "上傳失敗：\(userMessage(for: error))"
                 }
             }
+        }
+    }
+}
+
+enum ShoppingGroup: CaseIterable {
+    case unscheduled, scheduled, purchased
+
+    var title: String {
+        switch self {
+        case .unscheduled: "未安排"
+        case .scheduled: "已安排"
+        case .purchased: "已購買"
+        }
+    }
+
+    func contains(_ entry: ShoppingEntry) -> Bool {
+        switch (self, entry.status) {
+        case (.unscheduled, .unscheduled), (.scheduled, .scheduled), (.purchased, .purchased): true
+        default: false
         }
     }
 }

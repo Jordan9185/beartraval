@@ -75,7 +75,7 @@ public struct ShareFlowView: View {
     private var sourceSection: some View {
         Section("分享內容") {
             if let url = analysis.sourceURL {
-                LabeledContent(platformName, value: url.host ?? url.absoluteString)
+                Text(url.host.map { platformName == "網頁" ? $0 : "\(platformName) · \($0)" } ?? url.absoluteString)
             } else {
                 LabeledContent("來源", value: "文字")
             }
@@ -83,7 +83,7 @@ public struct ShareFlowView: View {
                 Text(excerpt).font(.subheadline).lineLimit(4)
             }
             ForEach(Array(analysis.missing.enumerated()), id: \.offset) { _, missing in
-                Label(missingText(missing), systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.orange)
+                Label(missingText(missing), systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
             }
         }
     }
@@ -112,11 +112,7 @@ public struct ShareFlowView: View {
 
     private var placeSection: some View {
         Section {
-            HStack {
-                TextField("店名或地點", text: $query).onSubmit { Task { await search() } }
-                Button("搜尋") { Task { await search() } }.disabled(query.trimmingCharacters(in: .whitespaces).isEmpty)
-                            .buttonStyle(.borderless)
-            }
+            PlaceSearchField(text: $query) { Task { await search() } }
             Picker("類別", selection: $category) {
                 ForEach(SavedCategory.allCases, id: \.self) { Text($0.displayName).tag($0) }
             }
@@ -125,14 +121,7 @@ public struct ShareFlowView: View {
                     selected = option
                     Task { await computeMatches() }
                 } label: {
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(option.displayTitle)
-                            if let address = option.address { Text(address).font(.caption).foregroundStyle(.secondary) }
-                        }
-                        Spacer()
-                        if selected == option { Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint) }
-                    }
+                    PlaceOptionRow(title: option.displayTitle, address: option.address, selected: selected == option)
                 }
             }
             if searched && candidates.isEmpty {
@@ -150,7 +139,7 @@ public struct ShareFlowView: View {
     private var tripSection: some View {
         Section("加入哪個旅程") {
             if trips.isEmpty {
-                Text(signedIn == nil ? "載入中…" : "還沒有旅程，請先在 App 建立。").foregroundStyle(.secondary)
+                Text(signedIn == nil ? "載入中…" : "沒有可以新增的旅程。請先在 App 建立旅程，或請擁有者給你編輯權限。").foregroundStyle(.secondary)
             } else {
                 Picker("旅程", selection: $tripID) {
                     ForEach(trips) { Text($0.name).tag(Optional($0.id)) }
@@ -166,7 +155,7 @@ public struct ShareFlowView: View {
             if let pending {
                 Text("\(dayTitles[pending.proposal.dayId] ?? "")，\(pending.positionText)")
                 MatchNumbers(insertion: pending.insertion) { $0.flatMap { pending.stopLabels[$0] } }
-                if let notice { Text(notice).font(.caption).foregroundStyle(.orange) }
+                if let notice { Label(notice, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
                 Button(busy ? "加入中…" : "確認加入") { Task { await confirm() } }.disabled(busy)
                 Button("不加入") { self.pending = nil }
             } else if let best = RouteMatcher.bestDay(matches), let insertion = best.best {
@@ -208,7 +197,7 @@ public struct ShareFlowView: View {
         }
         guard let repository, await repository.isSignedIn() else { signedIn = false; return }
         do {
-            trips = try await repository.myTrips()
+            trips = try await repository.editableTrips()
             signedIn = true
             tripID = Self.defaultTrip(trips)?.id
         } catch {

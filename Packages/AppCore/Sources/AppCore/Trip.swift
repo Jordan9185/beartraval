@@ -75,6 +75,22 @@ public struct TripRepository: Sendable {
         }
     }
 
+    /// 自己是擁有者或編輯者的旅程（分享、加入購物清單只列這些；檢視者不能新增）。
+    public func editableTrips() async throws -> [Trip] {
+        struct Membership: Decodable { let trip_id: UUID }
+        guard let me = currentUserID else { return [] }
+        let trips = try await myTrips()
+        do {
+            let rows: [Membership] = try await client.from("trip_members").select("trip_id")
+                .eq("user_id", value: me).eq("status", value: "active").in("role", values: ["owner", "editor"])
+                .execute().value
+            let editable = Set(rows.map(\.trip_id))
+            return trips.filter { editable.contains($0.id) }
+        } catch {
+            throw BackendError.from(error)
+        }
+    }
+
     public func days(of tripID: UUID) async throws -> [TripDay] {
         do {
             return try await client.from("trip_days").select()

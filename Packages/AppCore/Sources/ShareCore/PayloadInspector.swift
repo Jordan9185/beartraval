@@ -16,10 +16,17 @@ public enum PayloadInspector {
         for extensionItem in extensionItems {
             var attachments: [PayloadRecord.Attachment] = []
             for provider in extensionItem.attachments ?? [] {
-                var loads: [PayloadRecord.Load] = []
-                for type in provider.registeredTypeIdentifiers {
-                    loads.append(await load(provider, type: type, timeout: timeout))
+                // 同一個附件的各種型別同時載入：總等待時間是最慢的那個，而不是全部加總（審查）。
+                let types = provider.registeredTypeIdentifiers
+                nonisolated(unsafe) let shared = provider
+                var ordered = [PayloadRecord.Load?](repeating: nil, count: types.count)
+                await withTaskGroup(of: (Int, PayloadRecord.Load).self) { group in
+                    for (index, type) in types.enumerated() {
+                        group.addTask { @MainActor in (index, await load(shared, type: type, timeout: timeout)) }
+                    }
+                    for await (index, result) in group { ordered[index] = result }
                 }
+                let loads = ordered.compactMap { $0 }
                 attachments.append(.init(
                     registeredTypeIdentifiers: provider.registeredTypeIdentifiers,
                     suggestedName: provider.suggestedName,
@@ -102,14 +109,14 @@ public enum PayloadInspector {
     static func describe(item: (any NSSecureCoding)?, typeIdentifier: String? = nil) -> Described {
         // URL 型別有時以 Data 送來（純文字、bplist 或 NSKeyedArchiver），盡量解回 URL 方便閱讀。
         if let data = item as? Data, let typeIdentifier, UTType(typeIdentifier)?.conforms(to: .url) == true, let url = decodeURL(data) {
-            return Described(kind: .url, preview: truncate(url.absoluteString), byteCount: data.count)
+            return Described(kind: .url, preview: truncateURL(url.absoluteString), byteCount: data.count)
         }
         switch item {
         case let url as URL where url.isFileURL:
             let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
             return Described(kind: .fileURL, preview: url.lastPathComponent, byteCount: size)
         case let url as URL:
-            return Described(kind: .url, preview: truncate(url.absoluteString))
+            return Described(kind: .url, preview: truncateURL(url.absoluteString))
         case let text as String:
             return Described(kind: .text, preview: truncate(text), byteCount: text.utf8.count)
         case let data as Data:
@@ -144,6 +151,13 @@ public enum PayloadInspector {
     static func describe(_ error: any Error) -> String {
         let ns = error as NSError
         return "\(ns.domain) \(ns.code): \(ns.localizedDescription)"
+    }
+
+    /// 網址不能截斷（截斷後就打不開、也解析不出地點）；只擋異常長的。
+    static let urlLimit = 4000
+
+    static func truncateURL(_ text: String) -> String {
+        text.count > urlLimit ? String(text.prefix(urlLimit)) : text
     }
 
     static func truncate(_ text: String) -> String {

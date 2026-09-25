@@ -89,3 +89,17 @@ actor SlowExecutor: QueuedOperationExecutor {
         executed.append(item.id)
     }
 }
+
+struct BackendErrorTests {
+    /// 伺服器拒絕（約束、格式、權限）不是網路問題，不可排入離線佇列一直重送。
+    @Test func serverRejectionsAreNotTransient() {
+        #expect(BackendError(code: "23514", message: "check violation") == .invalid("23514"))
+        #expect(BackendError(code: "22P02", message: "bad uuid") == .invalid("22P02"))
+        #expect(BackendError(code: "42501", message: "denied") == .forbidden)
+        #expect(BackendError(code: "PGRST116", message: "no rows") == .notFound)
+        #expect(!BackendError(code: "23505", message: "dup").isTransient)
+        #expect(BackendError(code: nil, message: "offline").isTransient)
+        #expect(BackendError(httpStatus: 503).isTransient)
+        #expect(BackendError(httpStatus: 429) == .invalid("RATE_LIMITED"))
+    }
+}

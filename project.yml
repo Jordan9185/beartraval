@@ -41,6 +41,24 @@ targets:
         # 品牌主色：熊毛棕（D13，2026-09-25）。按鈕、連結、分頁列一起換色。
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_ENTITLEMENTS: $(APP_ENTITLEMENTS)
+    preBuildScripts:
+      # Release（TestFlight）缺 Config/Cloud.xcconfig.local 時會沿用 Base 的本機位址，
+      # 包出一個連不到後端的 App；直接讓 build 失敗。
+      - name: Check Release backend
+        basedOnDependencyAnalysis: false
+        showEnvVars: false
+        script: |
+          if [ "${CONFIGURATION}" = "Release" ]; then
+            case "${SUPABASE_URL}" in
+              ""|*://127.0.0.1*|*://localhost*|*://0.0.0.0*)
+                echo "error: Release build 的 SUPABASE_URL 是本機位址（${SUPABASE_URL:-空白}）。請建立 Config/Cloud.xcconfig.local（格式見 Config/Release.xcconfig）。"
+                exit 1 ;;
+            esac
+            if [ -z "${SUPABASE_ANON_KEY}" ]; then
+              echo "error: Release build 缺少 SUPABASE_ANON_KEY（Config/Cloud.xcconfig.local）。"
+              exit 1
+            fi
+          fi
     entitlements:
       path: App/BearTravel.entitlements
       properties:
@@ -50,6 +68,9 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: BeaRTravel
+        # 版本號只在 settings.base 的 MARKETING_VERSION／CURRENT_PROJECT_VERSION 改。
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDevelopmentRegion: zh-Hant
         CFBundleLocalizations: [zh-Hant]
         SupabaseURL: $(SUPABASE_URL)
@@ -96,6 +117,9 @@ targets:
       path: ShareExtension/Info.plist
       properties:
         CFBundleDisplayName: BeaRTravel
+        # 須與主 App 相同版本。
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDevelopmentRegion: zh-Hant
         CFBundleLocalizations: [zh-Hant]
         SupabaseURL: $(SUPABASE_URL)
@@ -107,8 +131,11 @@ targets:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
           NSExtensionAttributes:
-            # S2 Payload Inspector：接受所有型別以記錄 payload。正式版（WP6）要收斂成明確規則。
-            NSExtensionActivationRule: TRUEPREDICATE
+            # 只在分享一個網址（Threads／IG／Safari）、文字，或一張圖片（貼文截圖、商品照）時出現。
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsImageWithMaxCount: 1
   BearTravelUITests:
     type: bundle.ui-testing
     platform: iOS

@@ -29,7 +29,8 @@ final class ShareModel {
     let matcher = RouteMatcher(provider: AppleMapKitProvider())
 
     func start(_ items: [NSExtensionItem]) {
-        Task { record = await PayloadInspector.inspect(items) }
+        // 分享面板要快：每個型別最多等 5 秒（同時載入）。
+        Task { record = await PayloadInspector.inspect(items, timeout: 5) }
     }
 }
 

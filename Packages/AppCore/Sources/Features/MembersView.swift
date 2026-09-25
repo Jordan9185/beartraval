@@ -11,7 +11,6 @@ struct MembersView: View {
     @State private var inviteRole: TripRole = .editor
     @State private var inviteURL: URL?
     @State private var appURL: URL?
-    @State private var myName = ""
     @State private var errorMessage: String?
 
     var body: some View {
@@ -59,13 +58,6 @@ struct MembersView: View {
                 }
             }
 
-            Section("我的顯示名稱") {
-                HStack {
-                    TextField("名稱", text: $myName)
-                    Button("儲存") { Task { await saveName() } }.disabled(myName.trimmingCharacters(in: .whitespaces).isEmpty)
-                            .buttonStyle(.borderless)
-                }
-            }
             if let errorMessage { ErrorText(errorMessage) }
         }
         .navigationTitle("成員")
@@ -75,7 +67,6 @@ struct MembersView: View {
     private func reload() async {
         do {
             members = try await session.trips.members(of: trip.id)
-            myName = members.first { $0.userID == session.trips.currentUserID }?.displayName ?? myName
         } catch {
             errorMessage = "讀取失敗：\(userMessage(for: error))"
         }
@@ -101,10 +92,6 @@ struct MembersView: View {
         catch { errorMessage = "移除失敗：\(userMessage(for: error))" }
     }
 
-    private func saveName() async {
-        do { try await session.trips.setDisplayName(myName); await reload() }
-        catch { errorMessage = "儲存失敗：\(userMessage(for: error))" }
-    }
 }
 
 /// 加入好友的 Trip：貼上邀請連結，或從 beartravel://invite 開啟。

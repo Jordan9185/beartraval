@@ -25,32 +25,32 @@ struct TodayView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if let snapshot = store.snapshot, let index = dayIndex ?? Optional(snapshot.todayIndex()),
-                   snapshot.timeline.indices.contains(index) {
-                    content(snapshot, index)
-                } else if store.loaded && store.snapshot == nil {
-                    ContentUnavailableView {
-                        Label("尚未建立旅程", systemImage: "sun.max")
-                    } actions: {
-                        Button("建立旅程", action: goToTrips).buttonStyle(.borderedProminent)
-                    }
+                // 換旅程後原本的第 N 天可能不存在：夾在範圍內，不會一直轉圈。
+                if let snapshot = store.snapshot, !snapshot.timeline.isEmpty {
+                    content(snapshot, min(max(dayIndex ?? snapshot.todayIndex(), 0), snapshot.timeline.count - 1))
+                } else if store.loaded {
+                    TripUnavailableView(store: store, systemImage: "sun.max", goToTrips: goToTrips)
                 } else {
-                    ProgressView()
+                    ProgressView("載入中…")
                 }
             }
             .navigationTitle("今天")
+            // toolbar 只留一個主要動作（AI 助手）；換旅程、帳號、除錯收進「更多」。
             .toolbar {
-                if store.trips.count > 1 {
-                    Picker("旅程", selection: Binding(get: { store.selectedTripID }, set: { store.selectedTripID = $0 })) {
-                        ForEach(store.trips) { Text($0.name).tag(Optional($0.id)) }
-                    }
-                }
-                Button("設定", systemImage: "person.crop.circle") { showsAccount = true }
                 if store.snapshot != nil {
                     Button("AI 助手", systemImage: "sparkles") { showsAssistant = true }
                 }
-                if let onDebug { Button("除錯", systemImage: "ladybug", action: onDebug) }
+                Menu("更多", systemImage: "ellipsis.circle") {
+                    if store.trips.count > 1 {
+                        Picker("旅程", selection: Binding(get: { store.selectedTripID }, set: { store.selectedTripID = $0 })) {
+                            ForEach(store.trips) { Text($0.name).tag(Optional($0.id)) }
+                        }
+                    }
+                    Button("帳號設定", systemImage: "person.crop.circle") { showsAccount = true }
+                    if let onDebug { Button("除錯", systemImage: "ladybug", action: onDebug) }
+                }
             }
+            .onChange(of: store.selectedTripID) { dayIndex = nil }
             .sheet(isPresented: $showsAccount) { AccountView(session: session) }
             .sheet(isPresented: $showsAssistant) {
                 if let snapshot = store.snapshot {
@@ -70,6 +70,7 @@ struct TodayView: View {
             Section {
                 HStack {
                     Button { dayIndex = index - 1 } label: { Image(systemName: "chevron.left") }.disabled(index == 0)
+                        .accessibilityLabel("前一天")
                     Spacer()
                     VStack {
                         Text(snapshot.trip.name)
@@ -78,9 +79,17 @@ struct TodayView: View {
                     }
                     Spacer()
                     Button { dayIndex = index + 1 } label: { Image(systemName: "chevron.right") }.disabled(index >= snapshot.timeline.count - 1)
+                        .accessibilityLabel("後一天")
                 }
                 .buttonStyle(.borderless)
             }
+
+            // 打開 App 就看得到附近的景點與店家（依目前位置）。
+            NearbySection(session: session, tripID: snapshot.trip.id, canEdit: store.myRole?.canEdit == true,
+                          mode: day.day.transportMode,
+                          planning: StopPlanning(tripID: snapshot.trip.id, dayID: day.day.id, dayTitle: "第 \(index + 1) 天") {
+                              Task { await store.reload() }
+                          })
 
             Section {
                 if day.stops.isEmpty {
@@ -99,6 +108,8 @@ struct TodayView: View {
                 NavigationLink("完整行程") { TripDetailView(session: session, trip: snapshot.trip) }
             } header: {
                 Text("今日行程")
+            } footer: {
+                Text("點行程點，可以看那一站附近還有什麼景點與店家、排進今天。")
             }
 
             Section {
@@ -132,7 +143,9 @@ struct TodayView: View {
                     }
                 }
                 let progress = snapshot.shoppingProgress
-                if progress.total > 0 { LabeledContent("已買", value: "\(progress.purchased)／\(progress.total)") }
+                if progress.total > 0 {
+                    LabeledContent("整趟已買", value: "\(progress.purchased)／\(progress.total)").monospacedDigit()
+                }
             } header: {
                 Text("今天可買")
             }
@@ -155,7 +168,13 @@ struct TodayView: View {
                                selectedStop = nil
                                Task { await store.reload() }
                            } : nil,
-                           timeZone: day.day.timeZone)
+                           timeZone: day.day.timeZone,
+                           session: session,
+                           planning: StopPlanning(tripID: snapshot.trip.id, dayID: day.day.id, dayTitle: "第 \(index + 1) 天") {
+                               selectedStop = nil
+                               Task { await store.reload() }
+                           },
+                           canEdit: store.myRole?.canEdit == true)
                 .presentationDetents([.medium, .large])
         }
         .sheet(item: $adding) { entry in

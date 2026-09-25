@@ -106,6 +106,8 @@ public struct ShoppingEntry: Identifiable, Codable, Hashable, Sendable {
     /// 已安排時的 Purchase Stop 所在日（當地日期）與店名。
     public var plannedDate: String?
     public var plannedStore: String?
+    /// 已安排在旅程的第幾天（1 起算），畫面用「第 N 天」而不是日期字串。
+    public var plannedDayNumber: Int?
 
     public var id: UUID { item.id }
 
@@ -193,8 +195,10 @@ extension TripRepository: ShoppingService {
             return items.map { item in
                 let stop = item.plannedStopId.flatMap { stopByID[$0] }
                 let place = stop?.placeId.flatMap { placeByID[$0] }
-                return ShoppingEntry(item: item, interestedUserIDs: interestByItem[item.id] ?? [], events: eventsByItem[item.id] ?? [],
-                                     plannedDate: stop.flatMap { dayByID[$0.dayId]?.localDate }, plannedStore: place.map { $0.displayTitle })
+                var entry = ShoppingEntry(item: item, interestedUserIDs: interestByItem[item.id] ?? [], events: eventsByItem[item.id] ?? [],
+                                          plannedDate: stop.flatMap { dayByID[$0.dayId]?.localDate }, plannedStore: place.map { $0.displayTitle })
+                entry.plannedDayNumber = stop.flatMap { dayByID[$0.dayId] }.map { $0.displayOrder + 1 }
+                return entry
             }
         } catch {
             throw BackendError.from(error)

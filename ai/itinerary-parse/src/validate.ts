@@ -24,6 +24,14 @@ function squash(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+// A real calendar date: Date.parse rolls "2026-02-30" over to March 2, so the
+// parsed date must print back as the same string.
+function isCalendarDate(s: string): boolean {
+  if (!DATE_RE.test(s)) return false;
+  const ts = Date.parse(s);
+  return !Number.isNaN(ts) && new Date(ts).toISOString().slice(0, 10) === s;
+}
+
 function addReason(stop: ParsedStop, reason: ConfirmationReason): void {
   if (!stop.needs_confirmation.includes(reason)) stop.needs_confirmation.push(reason);
 }
@@ -36,8 +44,7 @@ export function validateDraft(input: ParseInput, draft: ParseResult): ValidatedR
   result.days.forEach((day, d) => {
     const dayPath = `days[${d}]`;
     if (day.date !== null) {
-      const valid = DATE_RE.test(day.date) && !Number.isNaN(Date.parse(day.date));
-      if (!valid || day.date < input.tripStart || day.date > input.tripEnd) {
+      if (!isCalendarDate(day.date) || day.date < input.tripStart || day.date > input.tripEnd) {
         issues.push({ path: `${dayPath}.date`, issue: `date ${day.date} is not within the trip` });
         day.stops.forEach((s) => addReason(s, "ambiguous_date"));
       }
@@ -61,7 +68,17 @@ export function validateDraft(input: ParseInput, draft: ParseResult): ValidatedR
         addReason(stop, "ambiguous_time");
       }
 
-      if (!haystack.includes(squash(stop.source_excerpt))) {
+      // A blank name is no name (an empty string is a substring of any text).
+      if (stop.place_name !== null && squash(stop.place_name) === "") {
+        issues.push({ path: `${path}.place_name`, issue: "empty place name" });
+        stop.place_name = null;
+      }
+
+      const excerpt = squash(stop.source_excerpt);
+      if (excerpt === "") {
+        issues.push({ path: `${path}.source_excerpt`, issue: "empty excerpt" });
+        stop.confidence = "low";
+      } else if (!haystack.includes(excerpt)) {
         issues.push({ path: `${path}.source_excerpt`, issue: "excerpt not found in input" });
         stop.confidence = "low";
       }

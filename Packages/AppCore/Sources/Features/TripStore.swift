@@ -1,6 +1,7 @@
 import AppCore
 import Foundation
 import Observation
+import SwiftUI
 
 /// Today 與 Map 共用的目前 Trip 資料（同一份 snapshot、同一 revision；AC-02）。
 @MainActor
@@ -100,5 +101,33 @@ public final class TripStore {
         }
         self.sync = sync
         await sync.start()
+    }
+}
+
+/// 今天與地圖沒有資料時：真的還沒有旅程才請使用者建立；有旅程但載入失敗時說明原因並提供重試
+/// （不把離線或錯誤誤說成「尚未建立旅程」）。
+struct TripUnavailableView: View {
+    let store: TripStore
+    let systemImage: String
+    let goToTrips: () -> Void
+
+    var body: some View {
+        if store.trips.isEmpty && store.errorMessage == nil {
+            ContentUnavailableView {
+                Label("還沒有旅程", systemImage: systemImage)
+            } description: {
+                Text("先建立旅程，或用好友傳來的邀請連結加入。")
+            } actions: {
+                Button("建立旅程", action: goToTrips).buttonStyle(.borderedProminent)
+            }
+        } else {
+            ContentUnavailableView {
+                Label("無法載入旅程", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(store.errorMessage ?? "請稍後再試。")
+            } actions: {
+                Button("重新載入") { Task { await store.open(tripID: nil) } }
+            }
+        }
     }
 }

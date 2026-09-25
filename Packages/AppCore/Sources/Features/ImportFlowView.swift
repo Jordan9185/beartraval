@@ -247,12 +247,6 @@ struct ConfirmPlacesView: View {
                     Text(state.items[index].date ?? "日期未定")
                 }
             }
-            if searchDone < searchTotal {
-                Section {
-                    Label("還有 \(searchTotal - searchDone) 個地點搜尋中…", systemImage: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                }
-            }
             if !handled.isEmpty {
                 Section {
                     DisclosureGroup("已自動處理 \(handled.count) 項") {
@@ -384,7 +378,10 @@ struct ConfirmItemView: View {
                 }
                 Text(item.label)
             }
-            Text("「\(item.stop.sourceExcerpt)」").font(.caption).foregroundStyle(.secondary)
+            // 已自動處理的項目只留結論，原文片段留給需要判斷的項目（樣式指南）。
+            if !item.autoDecided {
+                Text("「\(item.stop.sourceExcerpt)」").font(.caption).foregroundStyle(.secondary)
+            }
             if item.autoDecided, let note = autoNote {
                 Label(note, systemImage: "sparkles").font(.caption).foregroundStyle(.secondary)
             }
@@ -417,14 +414,7 @@ struct ConfirmItemView: View {
             Button {
                 item.decision = .place(option)
             } label: {
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(option.displayTitle)
-                        if let address = option.address { Text(address).font(.caption).foregroundStyle(.secondary) }
-                    }
-                    Spacer()
-                    if item.decision == .place(option) { Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint) }
-                }
+                PlaceOptionRow(title: option.displayTitle, address: option.address, selected: item.decision == .place(option))
             }
             .accessibilityIdentifier("candidate-\(item.id)-\(option.name)")
         }
@@ -439,13 +429,7 @@ struct ConfirmItemView: View {
                 .font(.callout)
         }
         if showsSearch, let research {
-            HStack {
-                TextField("換個名稱搜尋", text: $query)
-                    .onSubmit { Task { await runSearch(research) } }
-                Button(researching ? "搜尋中…" : "搜尋") { Task { await runSearch(research) } }
-                    .buttonStyle(.borderless)
-                    .disabled(researching || query.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
+            PlaceSearchField(text: $query, placeholder: "換個名稱搜尋", isSearching: researching) { Task { await runSearch(research) } }
         }
 
         HStack {
@@ -515,7 +499,7 @@ struct ParsingProgressView: View {
             step(done: false, active: false, title: "搜尋地點，讓你逐一確認")
             TimelineView(.periodic(from: started, by: 1)) { context in
                 let seconds = max(0, Int(context.date.timeIntervalSince(started)))
-                Text("已經過 \(seconds / 60):\(String(format: "%02d", seconds % 60)) · 長行程約需 1～2 分鐘")
+                Text("已經過 \(seconds / 60) 分 \(seconds % 60) 秒 · 長行程約需 1～2 分鐘")
                     .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
         }

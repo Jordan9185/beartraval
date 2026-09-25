@@ -88,6 +88,21 @@ struct RouteMatchTests {
         #expect(RouteMatcher.bestDay([empty, busy])?.dayID == busy.dayID)
     }
 
+    /// 候選那兩段斷網時，原因要說「沒有網路」（審查）。
+    @Test func unavailableReasonComesFromCandidateLegsToo() async {
+        final class Offline: RoutingProvider, @unchecked Sendable {
+            let id = RouteProvider.appleMapKit
+            let known: Set<String>
+            init(_ known: Set<String>) { self.known = known }
+            func travelTime(from: Coordinate, to: Coordinate, mode: TravelMode, departure: Date) async -> LegTime {
+                known.contains(FakeProvider.key(from, to)) ? .minutes(10) : .unavailable(.network)
+            }
+        }
+        let provider = Offline([FakeProvider.key(a.coordinate, b.coordinate)])
+        let match = await RouteMatcher(provider: provider).match(RouteCandidate(point: x, dwellMinutes: 0), into: plan([stop(a), stop(b)]), mode: .walking)
+        #expect(match.result == .unavailable(.network))
+    }
+
     @Test func koreaTransitIsUnavailableWithoutCallingProvider() async {
         let provider = FakeProvider([:])
         let match = await RouteMatcher(provider: provider).match(RouteCandidate(point: kr, dwellMinutes: 30), into: plan([stop(kr), stop(kr)]), mode: .transit)

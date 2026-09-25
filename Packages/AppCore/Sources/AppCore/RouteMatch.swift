@@ -29,13 +29,17 @@ public struct DayPlan: Sendable {
     public var stops: [PlannedStop]
     /// 被排除的待確認 Stop 數，結果中註明。
     public var excludedPendingCount: Int
+    /// 這天設定的交通方式（重新計算過期的 proposal 時用最新的設定）。
+    public var transportMode: TravelMode?
 
-    public init(dayID: UUID, routeRevision: Int, localMidnight: Date, stops: [PlannedStop], excludedPendingCount: Int) {
+    public init(dayID: UUID, routeRevision: Int, localMidnight: Date, stops: [PlannedStop], excludedPendingCount: Int,
+                transportMode: TravelMode? = nil) {
         self.dayID = dayID
         self.routeRevision = routeRevision
         self.localMidnight = localMidnight
         self.stops = stops
         self.excludedPendingCount = excludedPendingCount
+        self.transportMode = transportMode
     }
 
     /// 沒有時間資訊時，以當地 10:00 作為查詢時段。
@@ -88,7 +92,11 @@ public struct BaseRoute: Equatable, Sendable {
         let reasons = times.compactMap { time -> RouteEstimate.UnavailableReason? in
             if case .unavailable(let r) = time { r } else { nil }
         }
-        return reasons.contains(.notSupportedInRegion) ? .notSupportedInRegion : (reasons.first ?? .unknown)
+        // 地區不支援、斷網、被節流比「不明原因」更能告訴使用者該怎麼辦。
+        for reason in [RouteEstimate.UnavailableReason.notSupportedInRegion, .network, .throttled] where reasons.contains(reason) {
+            return reason
+        }
+        return reasons.first ?? .unknown
     }
 }
 
@@ -217,8 +225,11 @@ public struct RouteMatcher: Sendable {
         }
 
         var insertions: [Insertion] = []
+        var candidateLegs: [LegTime] = []
         for k in positions {
-            insertions.append(await insertion(at: k, candidate: candidate, day: day, base: base, mode: mode, approximate: approximate))
+            let (result, legs) = await insertion(at: k, candidate: candidate, day: day, base: base, mode: mode, approximate: approximate)
+            insertions.append(result)
+            candidateLegs += legs
         }
 
         let result: DayMatch.Result
@@ -226,7 +237,7 @@ public struct RouteMatcher: Sendable {
         if let best = known.min(by: { Insertion.isBetter($0, than: $1) }) {
             result = .matched(best: best, all: insertions)
         } else {
-            result = .unavailable(await unavailableReason(candidate, day: day, mode: mode, base: base))
+            result = .unavailable(await unavailableReason(candidate, day: day, mode: mode, legs: base.legs.map(\.time) + candidateLegs))
         }
         return DayMatch(dayID: day.dayID, routeRevision: day.routeRevision, mode: mode, provider: provider.id,
                         excludedPendingCount: day.excludedPendingCount, result: result)
@@ -237,8 +248,9 @@ public struct RouteMatcher: Sendable {
         matches.filter { $0.best != nil }.min { Insertion.isBetter($0.best!, than: $1.best!) }
     }
 
+    /// 回傳插入結果，以及這次實際查詢的兩段路（算不出時用來說明原因）。
     private func insertion(at k: Int, candidate: RouteCandidate, day: DayPlan, base: BaseRoute,
-                           mode: TravelMode, approximate: Bool) async -> Insertion {
+                           mode: TravelMode, approximate: Bool) async -> (Insertion, [LegTime]) {
         let stops = day.stops
         let prev = k > 0 ? stops[k - 1] : nil
         let next = k < stops.count ? stops[k] : nil
@@ -260,8 +272,9 @@ public struct RouteMatcher: Sendable {
         }
 
         let check = fixedCheck(k: k, day: day, base: base, toC: toC, fromC: fromC, candidate: candidate)
-        return Insertion(index: k, previousStopID: prev?.id, nextStopID: next?.id, addedTravelMinutes: added,
-                         addedDwellMinutes: candidate.dwellMinutes, fixedCheck: check, approximate: approximate)
+        let queried = [prev.map { _ in toC }, next.map { _ in fromC }].compactMap { $0 }
+        return (Insertion(index: k, previousStopID: prev?.id, nextStopID: next?.id, addedTravelMinutes: added,
+                          addedDwellMinutes: candidate.dwellMinutes, fixedCheck: check, approximate: approximate), queried)
     }
 
     /// 插入後模擬到下一個有時間的固定 Stop，算出餘裕或遲到分鐘。
@@ -288,11 +301,12 @@ public struct RouteMatcher: Sendable {
             : .conflict(stopID: stops[fixedIndex].id, lateMinutes: Int((-slack).rounded(.up)))
     }
 
-    private func unavailableReason(_ candidate: RouteCandidate, day: DayPlan, mode: TravelMode, base: BaseRoute) async -> RouteEstimate.UnavailableReason {
+    /// 算不出時的原因：同時看當天路段與候選地點那兩段（例如斷網要說「沒有網路」而不是「無法估算」）。
+    private func unavailableReason(_ candidate: RouteCandidate, day: DayPlan, mode: TravelMode, legs: [LegTime]) async -> RouteEstimate.UnavailableReason {
         if mode == .transit && (candidate.point.isInKorea || day.stops.contains { $0.point.isInKorea }) {
             return .notSupportedInRegion
         }
-        return BaseRoute.dominantReason(base.legs.map(\.time))
+        return BaseRoute.dominantReason(legs)
     }
 
     private func straightDetour(_ k: Int, _ c: RouteCandidate, _ stops: [PlannedStop]) -> Double {

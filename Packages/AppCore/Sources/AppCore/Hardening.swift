@@ -17,6 +17,8 @@ extension BackendError {
             case "DUPLICATE_SAVED": "這個地點已經在收藏清單裡。"
             case "ALREADY_COMMITTED": "這份匯入已經建立過旅程。"
             case "PROPOSAL_CLOSED": "這個變更已經處理過了。"
+            case "ALREADY_SCHEDULED": "這個商品已經安排好購買的店了。"
+            case "ALREADY_RESOLVED": "這個收藏已經定位過了，請重新整理。"
             default: "資料衝突，請重新整理後再試。"
             }
         case .gone(let code): code == "INVITE_REVOKED" ? "邀請已被撤銷，請向擁有者索取新的邀請。" : "邀請已過期，請向擁有者索取新的邀請。"
@@ -25,6 +27,7 @@ extension BackendError {
             case "PLACE_UNRESOLVED": "地點尚未確認，無法加入行程或計算路線。"
             case "INVALID_DATES": "結束日期不能早於開始日期。"
             case "EMPTY_TEXT": "請先貼上行程文字。"
+            case "RATE_LIMITED": "使用次數已達上限，請稍後再試。"
             default: "資料格式不正確，請檢查後再試。"
             }
         case .other: "無法連線，請檢查網路後再試。"

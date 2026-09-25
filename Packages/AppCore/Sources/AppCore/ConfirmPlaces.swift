@@ -195,6 +195,14 @@ public enum PlaceMatch {
             [option.draft.name, option.draft.nameLocal, option.draft.nameZh].compactMap { $0 }.map(normalize)
         }
         let top = candidates.prefix(3)
+        // 候選中有同名的其他分店（「Matin Kim 명동점」）就是分店不明，交給使用者（AC-01）。
+        let branchMarkers = ["점", "店", "branch"]
+        let hasSiblingBranch = top.contains { option in
+            names(option).contains { name in
+                targets.contains { name != $0 && name.hasPrefix($0) } && branchMarkers.contains { name.hasSuffix($0) }
+            }
+        }
+        if hasSiblingBranch { return nil }
         // 完全同名優先（「大三島」勝過「大三島 盛港」），其次才看相近名稱。
         let exact = top.filter { names($0).contains { targets.contains($0) } }
         if exact.count == 1 { return exact[0] }

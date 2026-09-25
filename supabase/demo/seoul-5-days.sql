@@ -3,6 +3,7 @@
 --   docker exec -i supabase_db_beartraval psql -U postgres -v user_id=<auth.users.id> < supabase/demo/seoul-5-days.sql
 --
 -- 全部透過正式 RPC 以該使用者身分寫入，權限、revision、去重規則照常運作。
+-- 未定位的 Stop 只寫原文名稱，App 會標示「未定位」。
 
 \set ON_ERROR_STOP 1
 begin;
@@ -44,7 +45,7 @@ select app.commit_itinerary(:'d1', 0, format($$[
   {"place_id": %s, "raw_label": "飯店 check-in", "start_time": "15:00", "dwell_minutes": 30, "fixed": true},
   {"place_id": %s, "raw_label": "N首爾塔看夕陽", "start_time": "16:30", "dwell_minutes": 90},
   {"place_id": %s, "raw_label": "明洞餃子晚餐", "start_time": "18:30", "dwell_minutes": 60},
-  {"raw_label": "明洞夜市逛逛（地點待確認）"}
+  {"raw_label": "明洞夜市逛逛"}
 ]$$, to_json(:'hotel'::text), to_json(:'namsan'::text), to_json(:'kyoja'::text))::jsonb);
 
 -- Day 2：宮殿與市場（大眾運輸 → Apple 在韓國算不出，示範「無法估算」與外開）
@@ -61,7 +62,7 @@ select app.commit_itinerary(:'d3', 0, format($$[
   {"place_id": %s, "raw_label": "首爾林散步", "start_time": "10:00", "dwell_minutes": 60},
   {"place_id": %s, "raw_label": "Onion 早午餐", "start_time": "11:30", "dwell_minutes": 60},
   {"place_id": %s, "raw_label": "Musinsa Standard", "start_time": "13:30", "dwell_minutes": 45},
-  {"raw_label": "IG 看到的選品店（店名待確認）"}
+  {"raw_label": "IG 看到的選品店"}
 ]$$, to_json(:'forest'::text), to_json(:'onion'::text), to_json(:'musinsa'::text))::jsonb);
 
 -- Day 4：弘大、延南、望遠（步行）
@@ -79,11 +80,11 @@ select app.commit_itinerary(:'d5', 0, format($$[
   {"place_id": %s, "raw_label": "仁川機場 KE 691 21:40 起飛", "start_time": "19:00", "fixed": true}
 ]$$, to_json(:'hotel'::text), to_json(:'coex'::text), to_json(:'lotte'::text), to_json(:'icn'::text))::jsonb);
 
-reset role;
-update app.trip_days set transport_mode = 'walking' where id in (:'d1', :'d3', :'d4');
-update app.trip_days set transport_mode = 'transit' where id = :'d2';
-update app.trip_days set transport_mode = 'driving' where id = :'d5';
-set local role authenticated;
+-- 每日交通方式（Day 2 維持預設的大眾運輸）
+select app.update_day(:'d1', null, 'walking');
+select app.update_day(:'d3', null, 'walking');
+select app.update_day(:'d4', null, 'walking');
+select app.update_day(:'d5', null, 'driving');
 
 -- Saved：兩間已確認、一間在大眾運輸日附近、一筆地點未確認
 select app.save_place(:'trip_id', '올리브영 명동 플래그십', 'shop', :'oliveyoung',
@@ -101,7 +102,7 @@ select app.add_merchant_candidate(:'refa', :'lottedf', 'poi_category', null, 'Ap
 
 select id as mask from app.add_shopping_item(:'trip_id', '韓國面膜', null, null) \gset
 select app.add_merchant_candidate(:'mask', :'oliveyoung', 'poi_category', null, 'Apple 地圖搜尋「올리브영 명동」');
-select id as pid from app.create_proposal(:'d1', 1, format($$
+select id as pid from app.create_proposal(:'d1', (select route_revision from app.trip_days where id = :'d1'), format($$
   {"place_id": %s, "raw_label": "Olive Young 買面膜", "before_stop_id": %s, "dwell_minutes": 30, "shopping_item_id": %s}
 $$, to_json(:'oliveyoung'::text), to_json((select id from app.stops where day_id = :'d1' and raw_label = '明洞餃子晚餐')::text), to_json(:'mask'::text))::jsonb) \gset
 select app.confirm_proposal(:'pid');

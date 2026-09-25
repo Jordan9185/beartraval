@@ -61,7 +61,7 @@ extension DayPlan {
                 startMinutes: stop.startTime.flatMap(LocalTime.minutes), dwellMinutes: stop.dwellMinutes, fixed: stop.fixed))
         }
         return DayPlan(dayID: timeline.day.id, routeRevision: timeline.day.routeRevision, localMidnight: midnight,
-                       stops: planned, excludedPendingCount: excluded)
+                       stops: planned, excludedPendingCount: excluded, transportMode: timeline.day.transportMode)
     }
 }
 

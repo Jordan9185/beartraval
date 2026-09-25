@@ -16,7 +16,7 @@ struct LegRow: View {
         .font(.caption)
         .foregroundStyle(leg.time.minutes == nil ? .orange : .secondary)
         .padding(.leading, 52)
-        .accessibilityLabel(text)
+        .accessibilityLabel(mode.displayName + text)
     }
 
     private var icon: String {
@@ -28,11 +28,12 @@ struct LegRow: View {
     }
 
     private var text: String {
+        // 交通方式由前面的圖示表達，不再重複寫字（樣式指南）。
         let destination = toName.map { "到「\($0)」" } ?? ""
         switch leg.time {
-        case .minutes(let m): return "\(mode.displayName)約 \(Int(m.rounded(.up))) 分\(destination)"
+        case .minutes(let m): return "約 \(Int(m.rounded(.up))) 分\(destination)"
         case .unavailable(let reason):
-            return reason == .notSupportedInRegion ? "\(mode.displayName)無法估算\(destination)（此地區不提供）" : "無法估算\(destination)"
+            return reason == .notSupportedInRegion ? "無法估算\(destination)（此地區不提供）" : "無法估算\(destination)"
         }
     }
 }
@@ -141,18 +142,11 @@ struct ResolveStopSheet: View {
     var body: some View {
             Form {
                 Section("「\(stop.rawLabel)」") {
-                    HStack {
-                        TextField("店名或地點", text: $query).onSubmit { Task { await search() } }
-                        Button("搜尋") { Task { await search() } }
-                            .buttonStyle(.borderless)
-                    }
+                    PlaceSearchField(text: $query, isSearching: searching) { Task { await search() } }
                     if searching { ProgressView() }
                     ForEach(results) { option in
                         Button { Task { await choose(option) } } label: {
-                            VStack(alignment: .leading) {
-                                Text(option.displayTitle)
-                                if let address = option.address { Text(address).font(.caption).foregroundStyle(.secondary) }
-                            }
+                            PlaceOptionRow(title: option.displayTitle, address: option.address)
                         }
                     }
                 }

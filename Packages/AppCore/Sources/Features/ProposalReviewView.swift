@@ -16,12 +16,15 @@ struct ProposalReviewView: View {
     var shoppingItemID: UUID? = nil
     /// AI 助手建議的變更（仍需使用者確認）。
     var createdByAI = false
+    /// 從其他頁面推進來時（已在 NavigationStack 裡）不再包一層。
+    var embedded = false
     let onAdded: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var phase: Phase = .preparing
     @State private var pending: AddToDayFlow.Pending?
     @State private var notice: String?
+    @State private var added = false
 
     enum Phase: Equatable {
         case preparing
@@ -36,14 +39,21 @@ struct ProposalReviewView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        if embedded {
+            content
+        } else {
+            NavigationStack { content }
+        }
+    }
+
+    private var content: some View {
             Form {
                 if createdByAI {
                     Section { Label("AI 助手的建議，確認後才會加入。", systemImage: "sparkles").font(.caption) }
                 }
                 if let notice {
                     Section {
-                        Label(notice, systemImage: "arrow.triangle.2.circlepath").foregroundStyle(.orange)
+                        Label(notice, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                     }
                 }
                 switch phase {
@@ -71,15 +81,22 @@ struct ProposalReviewView: View {
             }
             .navigationTitle("加入行程")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
-                        if let id = pending?.proposal.id { Task { try? await session.trips.reject(proposalID: id) } }
-                        dismiss()
+                // 推進來的畫面用返回鍵離開；離開時一樣撤回這個 proposal。
+                if !embedded {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") {
+                            rejectPending()
+                            dismiss()
+                        }
                     }
                 }
             }
+            .onDisappear { if embedded && !added { rejectPending() } }
             .task { await prepare() }
-        }
+    }
+
+    private func rejectPending() {
+        if let id = pending?.proposal.id { Task { try? await session.trips.reject(proposalID: id) } }
     }
 
     private func position(_ pending: AddToDayFlow.Pending) -> String {
@@ -112,6 +129,7 @@ struct ProposalReviewView: View {
         do {
             switch try await flow.confirm(current, point: candidate.point) {
             case .added:
+                added = true
                 onAdded()
             case .needsReconfirm(let fresh):
                 pending = fresh

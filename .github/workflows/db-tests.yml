@@ -15,6 +15,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      # ubuntu-24.04 ships PostgreSQL 16 binaries under /usr/lib/postgresql/16/bin.
+      # Same major version as supabase/config.toml (db.major_version = 17); the
+      # runner image ships 16, so install 17 from the PostgreSQL apt repository.
+      - name: Install PostgreSQL 17
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-17
       - name: Run database tests
-        run: PG_BIN=/usr/lib/postgresql/16/bin supabase/tests/run.sh
+        run: PG_BIN=/usr/lib/postgresql/17/bin supabase/tests/run.sh

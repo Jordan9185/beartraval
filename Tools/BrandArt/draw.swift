@@ -85,21 +85,11 @@ func plane(_ c: CGContext, _ x: CGFloat, _ y: CGFloat, _ s: CGFloat, angle: CGFl
 }
 
 // MARK: App 圖示 1024×1024（不透明，iOS 會自動裁圓角）
+// 樣式指南：不用漸層與裝飾（天空、太陽、雲、航線在小尺寸會變雜點），只留熊熊與單一暖色底。
 let icon = canvas(1024, 1024, opaque: true) { c in
-    let g = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: [rgb(0x6EC6E6), rgb(0xA9DFEA), rgb(0xFFE2B0)] as CFArray, locations: [0, 0.55, 1])!
-    c.drawLinearGradient(g, start: CGPoint(x: 512, y: 0), end: CGPoint(x: 512, y: 1024), options: [])
-    // 太陽與雲
-    circle(c, 820, 230, 110, rgb(0xFFF1C1, 0.9))
-    for (x, y, r) in [(170, 300, 70), (240, 285, 85), (310, 305, 62)] as [(CGFloat, CGFloat, CGFloat)] { circle(c, x, y, r, rgb(0xFFFFFF, 0.85)) }
-    // 虛線航線 + 飛機
-    c.setStrokeColor(rgb(0xFFFFFF, 0.95)); c.setLineWidth(14); c.setLineCap(.round); c.setLineDash(phase: 0, lengths: [2, 34])
-    c.move(to: CGPoint(x: 150, y: 520)); c.addQuadCurve(to: CGPoint(x: 800, y: 170), control: CGPoint(x: 380, y: 120)); c.strokePath()
-    c.setLineDash(phase: 0, lengths: [])
-    plane(c, 820, 160, 62, angle: -0.35)
-    // 地面小丘
-    ellipse(c, 512, 1070, 1400, 360, rgb(0x8FCB7A))
-    // 熊熊
-    bear(c, 512, 650, 270)
+    c.setFillColor(rgb(0xFFF1D6))
+    c.fill(CGRect(x: 0, y: 0, width: 1024, height: 1024))
+    bear(c, 512, 560, 340)
 }
 save(icon, "AppIcon.png")
 

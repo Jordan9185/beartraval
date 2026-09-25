@@ -14,6 +14,7 @@ public struct ProductImportView: View {
     @State private var imageJPEG: Data?
     @State private var photo: PhotosPickerItem?
     @State private var trips: [Trip] = []
+    @State private var tripsLoaded = false
     @State private var tripID: UUID?
     @State private var drafts: [Draft] = []
     @State private var warnings: [String] = []
@@ -97,6 +98,8 @@ public struct ProductImportView: View {
                 Picker("旅程", selection: $tripID) {
                     ForEach(trips) { Text($0.name).tag(Optional($0.id)) }
                 }
+            } else if trips.isEmpty && tripsLoaded {
+                Text("沒有可以新增的旅程。請先建立旅程，或請擁有者給你編輯權限。").font(.caption).foregroundStyle(.secondary)
             }
 
             Section {
@@ -108,7 +111,8 @@ public struct ProductImportView: View {
         }
         .task {
             guard let repository else { return }
-            trips = (try? await repository.myTrips()) ?? []
+            trips = (try? await repository.editableTrips()) ?? []
+            tripsLoaded = true
             if tripID == nil { tripID = ShareFlowView.defaultTrip(trips)?.id }
         }
         .onChange(of: photo) {

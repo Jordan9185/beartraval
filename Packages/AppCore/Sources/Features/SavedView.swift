@@ -39,11 +39,6 @@ struct SavedView: View {
                         }
                     }
                 }
-                if trips.count > 1 {
-                    Picker("旅程", selection: $tripID) {
-                        ForEach(trips) { Text($0.name).tag(Optional($0.id)) }
-                    }
-                }
                 Picker("類別", selection: $filter) {
                     ForEach(SavedFilter.tabs, id: \.self) { Text($0.title).tag($0) }
                 }
@@ -71,14 +66,22 @@ struct SavedView: View {
             }
             .overlay {
                 if loaded && trips.isEmpty {
-                    ContentUnavailableView("尚未建立行程", systemImage: "bookmark")
+                    ContentUnavailableView("還沒有旅程", systemImage: "bookmark", description: Text("先到「旅程」建立或加入旅程。"))
                 } else if loaded && filter.apply(entries, includeAdded: includeAdded).isEmpty && drafts.isEmpty {
-                    ContentUnavailableView("尚未收藏地點", systemImage: "bookmark",
-                                           description: Text("從 Threads、IG 或地圖 App 分享到 BeaRTravel。"))
+                    ContentUnavailableView("還沒有收藏", systemImage: "bookmark",
+                                           description: Text("按右上角 ＋ 新增，或從 Threads、IG、地圖 App 分享到 BeaRTravel。"))
                 }
             }
             .navigationTitle("收藏")
+            // 換旅程與今天、購物一樣放在工具列。
             .toolbar {
+                if trips.count > 1 {
+                    ToolbarItem(placement: .automatic) {
+                        Picker("旅程", selection: $tripID) {
+                            ForEach(trips) { Text($0.name).tag(Optional($0.id)) }
+                        }
+                    }
+                }
                 if myRole?.canEdit == true, tripID != nil {
                     ToolbarItem(placement: .primaryAction) {
                         Button("新增地點", systemImage: "plus") { adding = true }
@@ -269,6 +272,7 @@ struct SavedDetailView: View {
                 }
                 Section {
                     if let place = entry.place {
+                        NavigateButton(destination: place.mapPoint, mode: .walking)
                         TaxiCardButton(place: place, fallbackChineseLabel: entry.saved.rawLabel)
                     } else {
                         let country = LocalMapCountry.guess(name: entry.saved.rawLabel, timeZone: nil)
@@ -333,19 +337,12 @@ struct ResolvePlaceSheet: View {
         NavigationStack {
             Form {
                 Section("「\(entry.saved.rawLabel)」") {
-                    HStack {
-                        TextField("店名或地點", text: $query).onSubmit { Task { await search() } }
-                        Button("搜尋") { Task { await search() } }
-                            .buttonStyle(.borderless)
-                    }
+                    PlaceSearchField(text: $query) { Task { await search() } }
                     ForEach(results) { option in
                         Button {
                             Task { await choose(option) }
                         } label: {
-                            VStack(alignment: .leading) {
-                                Text(option.displayTitle)
-                                if let address = option.address { Text(address).font(.caption).foregroundStyle(.secondary) }
-                            }
+                            PlaceOptionRow(title: option.displayTitle, address: option.address)
                         }
                     }
                 }
@@ -397,14 +394,8 @@ struct AddSavedPlaceView: View {
         NavigationStack {
             Form {
                 Section {
-                    HStack {
-                        TextField("店名或地點", text: $query)
-                            .onSubmit { Task { await search() } }
-                            .accessibilityIdentifier("savedQuery")
-                        Button("搜尋") { Task { await search() } }
-                            .buttonStyle(.borderless)
-                            .disabled(trimmed.isEmpty || searching)
-                    }
+                    PlaceSearchField(text: $query, isSearching: searching) { Task { await search() } }
+                        .accessibilityIdentifier("savedQuery")
                     Picker("類別", selection: $category) {
                         ForEach(SavedCategory.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     }
@@ -414,10 +405,7 @@ struct AddSavedPlaceView: View {
                     Section("Apple 地圖") {
                         ForEach(results) { option in
                             Button { Task { await save(option) } } label: {
-                                VStack(alignment: .leading) {
-                                    Text(option.displayTitle)
-                                    if let address = option.address { Text(address).font(.caption).foregroundStyle(.secondary) }
-                                }
+                                PlaceOptionRow(title: option.displayTitle, address: option.address)
                             }
                             .disabled(saving)
                         }

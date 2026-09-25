@@ -21,40 +21,78 @@
 
 ## RPC
 
+依 `migrations/` 目前的定義整理（2026-09-25，含 `20260925000016_review_low_fixes.sql`）。參數加 `?` 表示有預設值可省略。
+
+**行程與地點**
+
 | 函式 | 權限 | 說明 |
 |---|---|---|
-| `create_trip(name, start_date, end_date, time_zone)` | 已登入 | 建 Trip、每日 TripDay、Owner 成員 |
-| `upsert_place(provider, provider_place_id, name, latitude, longitude, name_local?, address?, country_code?)` | 已登入 | 註冊已確認的 POI；同一 provider id 已存在時回傳既有資料、不覆寫 |
-| `create_import(trip_name, start_date, end_date, time_zone, raw_text)` | 已登入 | 建 ImportSession，保留原文 |
-| `update_import_text(import_id, raw_text)` | 建立者 | 回到原文編輯；清除舊草稿 |
-| `commit_import(import_id, days jsonb)` | 建立者 | 在同一交易建 Trip、各日 Stop；Place 須先 `upsert_place` |
-| `record_parse_result(...)` | 僅 service_role | 由 `parse-import` Edge Function 寫入解析結果 |
-| `commit_itinerary(day_id, expected_route_revision, stops jsonb)` | Owner／Editor | 以有序清單取代當日行程；回傳新 route_revision |
-| `create_proposal(day_id, expected_route_revision, change jsonb, route_match jsonb)` | Owner／Editor | 建立加入行程的 proposal（地點須已確認）；不寫入 Stop |
-| `confirm_proposal(proposal_id)` | Owner／Editor | 插入 Stop；當日已變更時回 `{"status":"stale"}` 且不寫入 |
-| `reject_proposal(proposal_id)` | Owner／Editor | 取消 proposal |
-| `save_place(trip_id, raw_label, category, place_id?, source jsonb?)` | Owner／Editor | 收藏到共同 Saved（不改行程）；同一 `canonical_url` 或同一地點回傳既有項目並記錄想去 |
-| `set_saved_interest(saved_id, interested)` | Owner／Editor | 想去（成員集合） |
-| `resolve_saved(saved_id, place_id)` / `dismiss_saved(saved_id)` | Owner／Editor | 補填地點／移除 |
-| `create_invite(trip_id, role, expires_in, max_uses)` | Owner | 回傳一次性明文 token，DB 只存 SHA-256 |
-| `revoke_invite(invite_id)` | Owner | |
-| `accept_invite(token)` | 已登入 | 加入 Trip |
-| `set_member_role(trip_id, user_id, role)` / `remove_member(trip_id, user_id)` | Owner | |
+| `create_trip(name, start_date, end_date, time_zone)` | 已登入 | 建 Trip、每日 TripDay、Owner 成員（最多 60 天） |
+| `commit_itinerary(day_id, expected_route_revision, stops jsonb)` | Owner／Editor | 以有序清單取代當日行程；revision 與 stops 皆必填；回傳新 route_revision |
+| `update_day(day_id, time_zone?, transport_mode?)` | Owner／Editor | 每日時區與交通方式；有變更時 route_revision +1（該日未確認的 proposal 變 stale） |
 | `get_trip_changes(trip_id, since_revision)` | 成員 | 重連後補拉錯過的變更 |
+| `upsert_place(provider, provider_place_id, name, latitude, longitude, name_local?, address?, country_code?, name_zh?)` | 已登入 | 註冊已確認的 POI（provider 限 `apple_mapkit`／`apple_maps_server`）。同一 id 已存在時回傳既有資料；只在沒有其他 Trip 使用時補上缺少的當地名／中文名；座標與既有資料相差超過 1 km 時另建一筆 |
+| `delete_trip(trip_id)` | Owner | 刪除 Trip（含匯入原文、AI 紀錄） |
+
+**文字匯入（AI 草稿）**
+
+| 函式 | 權限 | 說明 |
+|---|---|---|
+| `create_import(trip_name, start_date, end_date, time_zone, raw_text)` | 已登入 | 建 ImportSession，保留原文 |
+| `update_import_text(import_id, raw_text)` | 建立者 | 回到原文編輯；清除舊草稿，並結束進行中的解析（其結果之後會被丟棄） |
+| `commit_import(import_id, days jsonb)` | 建立者 | 在同一交易建 Trip、各日 Stop；Place 須先 `upsert_place` |
+| `begin_parse(import_id)` | 僅 service_role | 取得解析權，回傳這次解析的 attempt id；已有解析進行中（8 分鐘內）回 null |
+| `record_parse_progress(import_id, attempt, progress jsonb)` | 僅 service_role | 解析進度（等待畫面用）；只接受目前的 attempt |
+| `record_parse_result(import_id, attempt, status, result, error, model)` | 僅 service_role | 寫入解析結果；attempt 已被取代（原文已改、解析被重新認領）或已建立 Trip 時不寫入並回傳 false |
+| `consume_ai_quota(kind)` | 已登入 | AI 呼叫次數限制（`parse`／`ask`／`extract` 每小時、每天上限）；超過回 false |
+
+**變更提案（Route Match → 正式行程）**
+
+| 函式 | 權限 | 說明 |
+|---|---|---|
+| `create_proposal(day_id, expected_route_revision, change jsonb, route_match jsonb?, created_by_ai?)` | Owner／Editor | 建立加入行程的 proposal，不寫入 Stop。地點須已確認；`before_stop_id`／`after_stop_id` 須是當日現存 Stop，`kind` 只能是 `standard`／`purchase`，`dwell_minutes` 為 0–1440 的整數 |
+| `confirm_proposal(proposal_id)` | Owner／Editor | 插入 Stop；當日已變更時回 `{"status":"stale"}` 且不寫入；帶 `shopping_item_id` 時建立 Purchase Stop，商品已有安排中的 Purchase Stop 則回 `ALREADY_SCHEDULED` |
+| `reject_proposal(proposal_id)` | Owner／Editor | 取消未確認或 stale 的 proposal；已確認的不受影響 |
+
+**收藏（Saved）**
+
+| 函式 | 權限 | 說明 |
+|---|---|---|
+| `save_place(trip_id, raw_label, category?, place_id?, source jsonb?, client_op_id?)` | Owner／Editor | 收藏到共同 Saved（不改行程）。同一 `canonical_url` 或同一地點回傳既有項目（`duplicate: true`）並記錄想去；同網址先前存成未定位、這次有地點時，改為補上該項目的地點；兩人同時收藏同一地點也回傳先存的那筆 |
+| `set_saved_interest(saved_id, interested)` | Owner／Editor | 想去（成員集合） |
+| `resolve_saved(saved_id, place_id)` | Owner／Editor | 補填未定位項目的地點（已有地點回 `ALREADY_RESOLVED`）；該地點已在行程中時標為 `added_to_itinerary` |
+| `dismiss_saved(saved_id)` | Owner／Editor | 移除（30 天後清除） |
+
+**購物**
+
+| 函式 | 權限 | 說明 |
+|---|---|---|
 | `add_shopping_item(trip_id, name, note?, url?, client_op_id?)` | Owner／Editor | 新增商品（未安排）；重送冪等 |
 | `set_shopping_interest(item_id, interested)` | Owner／Editor | 想買（成員集合，與購買分開） |
-| `add_merchant_candidate(item_id, place_id, evidence_type, evidence_url?, evidence_note?)` | Owner／Editor | 可能販售店與證據（30 天過期）；庫存一律 unknown |
-| `record_purchase(item_id, purchased, client_op_id?)` | Owner／Editor | 購買／撤銷事件；撤銷限購買者或 Owner |
-| `delete_trip(trip_id)` | Owner | 刪除 Trip（含匯入原文、AI 紀錄） |
-| `prepare_account_deletion(user_id)` / `purge_tombstones()` | 僅 service_role | 刪除帳號前的轉移與匿名化；30 天墓碑清除（pg_cron 每日） |
-| `set_display_name(name)` | 已登入 | 顯示名稱（只有共同 Trip 的成員看得到） |
+| `set_shopping_image(item_id, image_path)` | Owner／Editor | 商品圖片（private bucket `shopping-images` 中該 Trip 的資料夾）；傳 null 移除 |
+| `add_merchant_candidate(item_id, place_id, evidence_type, evidence_url?, evidence_note?)` | Owner／Editor | 可能販售店與證據（30 天過期，再加一次會更新證據並重新計算）；庫存一律 unknown |
+| `record_purchase(item_id, purchased, client_op_id?)` | Owner／Editor | 購買／撤銷事件；撤銷限購買者或 Owner（購買者帳號已刪除時只有 Owner 可撤銷） |
+
+**成員與帳號**
+
+| 函式 | 權限 | 說明 |
+|---|---|---|
+| `create_invite(trip_id, role, expires_in?, max_uses?)` | Owner | 回傳一次性明文 token，DB 只存 SHA-256；預設 7 天 |
+| `revoke_invite(invite_id)` | Owner | |
+| `accept_invite(token)` | 已登入 | 加入 Trip；已移除的成員重新加入時採邀請的權限 |
+| `set_member_role(trip_id, user_id, role)` / `remove_member(trip_id, user_id)` | Owner | 不能設為 Owner、不能改自己 |
+| `set_display_name(name)` | 已登入 | 顯示名稱 1–60 字（只有共同 Trip 的成員看得到） |
 | `invite_preview(token)` | 僅 service_role | 邀請預覽頁用：Trip 名稱、日期、邀請者、權限；不含行程 |
+| `prepare_account_deletion(user_id)` | 僅 service_role | 刪除帳號前：擁有的 Trip 轉給資歷最久的 Editor（其次 Viewer）或刪除，本人立即退出所有 Trip，事件作者清為 null；可重複執行 |
+| `purge_tombstones()` | 僅 service_role | 清除 30 天前的軟刪除 Stop 與移除的 Saved（pg_cron 每日 03:17） |
+
+內部函式（`require_role`、`trip_role_of`、`bump_trip`、`distance_km`、`uuid_or_null`、`place_used_by_others` 與觸發器）不是 API。
 
 Realtime：訂閱 `app.trip_events` 的 postgres_changes（依 `trip_id` 過濾，UUID 用小寫字串），收到後依 revision 重新拉取；重新訂閱成功時以 `get_trip_changes` 補拉。
 
 邀請預覽頁：`GET /functions/v1/invite?token=…`（Edge Function `invite`，公開）。「在 App 開啟」目前用 `beartravel://invite?token=…`；有網域後改成 Universal Link。
 
-離線佇列：`save_place` 接受 `client_op_id`，重送時回傳第一次的結果，不會重複新增。
+離線佇列：`save_place`、`add_shopping_item`、`record_purchase` 接受 `client_op_id`，重送時回傳第一次的結果，不會重複新增。
 
 ## 錯誤代碼
 
@@ -65,19 +103,19 @@ SQLSTATE `PTnnn` 會讓 PostgREST 回傳 HTTP `nnn`：
 | PT401 | `UNAUTHENTICATED` | 401 |
 | PT403 | `FORBIDDEN_ROLE` | 403 |
 | PT404 | `NOT_FOUND`、`INVITE_INVALID` | 404 |
-| PT409 | `STALE_REVISION`、`ALREADY_COMMITTED`、`PROPOSAL_CLOSED`、`DUPLICATE_SAVED` | 409 |
+| PT409 | `STALE_REVISION`、`ALREADY_COMMITTED`、`PROPOSAL_CLOSED`、`ALREADY_SCHEDULED`、`DUPLICATE_SAVED`、`ALREADY_RESOLVED` | 409 |
 | PT410 | `INVITE_EXPIRED`、`INVITE_REVOKED` | 410 |
-| PT422 | `INVALID_ITEM`、`EVIDENCE_REQUIRED`、`INVALID_SAVED`、`PLACE_UNRESOLVED`、`EMPTY_TEXT`、`DATE_OUTSIDE_TRIP`、`INVALID_PLACE`、`INVALID_DATES`、`INVALID_TIME_ZONE`、`INVALID_STOPS`、`PLACE_NOT_FOUND`、`STOP_NOT_IN_DAY`、`INVALID_ROLE` | 422 |
+| PT422 | `INVALID_STOPS`、`STOP_NOT_IN_DAY`、`PLACE_UNRESOLVED`、`PLACE_NOT_FOUND`、`INVALID_PLACE`、`INVALID_DATES`、`INVALID_TIME_ZONE`、`DATE_OUTSIDE_TRIP`、`EMPTY_TEXT`、`INVALID_SAVED`、`INVALID_ITEM`、`EVIDENCE_REQUIRED`、`INVALID_IMAGE`、`INVALID_ROLE`、`INVALID_NAME`、`INVALID_KIND` | 422 |
 
 ## 測試
 
-需要 Postgres 16+ 的 `initdb`、`pg_ctl`、`psql`（不需要 Docker）：
+需要 Postgres 16+ 的 `initdb`、`pg_ctl`、`psql`（不需要 Docker；CI 與 `config.toml` 一樣用 17）：
 
 ```
 supabase/tests/run.sh
 ```
 
-會建立暫時的資料庫，套用 shim 與 migration，每個 `*.test.sql` 在獨立資料庫執行，最後跑兩個連線同時提交的並發測試。CI：`.github/workflows/db-tests.yml`。
+會建立暫時的資料庫，套用 shim 與 migration，每個 `*.test.sql` 在獨立資料庫執行，最後跑三組兩個連線同時寫入的並發測試（第一個連線持有鎖，直到確認第二個連線正在等鎖，不靠固定等待時間）。CI：`.github/workflows/db-tests.yml`。
 
 ## 本機開發（iOS App 連線用）
 
@@ -98,6 +136,8 @@ supabase status     # 取得 anon key
 
 - API key：本機放 `supabase/functions/.env`（`ANTHROPIC_API_KEY=...`，已 gitignore），雲端用 `supabase secrets set ANTHROPIC_API_KEY=...`。
 - 沒有 key 時回 `missing_api_key`，session 標為 failed，原文保留。
+- 同一份匯入同時只跑一個解析（`begin_parse` 的 attempt id）；解析中使用者改了原文，舊解析的結果會被丟棄。
+- 日誌：每次一行 JSON（`ms`、`input_tokens`、`output_tokens`、`status`），不記原文與 prompt（D11）。
 
 ## Edge Function：`ask-trip`（AI 助手）
 

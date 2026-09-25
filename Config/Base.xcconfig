@@ -8,7 +8,7 @@ APP_GROUP_ID = group.$(BUNDLE_ID_PREFIX).beartravel
 // 簽章用的 entitlements。免費的個人開發帳號若不支援 App Group，在 Local.xcconfig.local 改成：
 //   APP_ENTITLEMENTS = Config/NoAppGroup.entitlements
 //   EXTENSION_ENTITLEMENTS = Config/NoAppGroup.entitlements
-// （分享擴充功能就無法與 App 共用登入與草稿，其餘功能不受影響。）
+// （分享擴充功能就無法與 App 共用登入、草稿與離線快取；App 改用自己的 Keychain 保存登入。）
 APP_ENTITLEMENTS = App/BearTravel.entitlements
 EXTENSION_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements
 

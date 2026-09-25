@@ -29,3 +29,55 @@ public struct ErrorText: View {
         ErrorText(message)
     }
 }
+
+/// 地點搜尋欄：各畫面同一個元件（樣式指南「同一種物件用同一個元件」）。
+public struct PlaceSearchField: View {
+    @Binding var text: String
+    let placeholder: String
+    let isSearching: Bool
+    let onSearch: () -> Void
+
+    public init(text: Binding<String>, placeholder: String = "店名或地點", isSearching: Bool = false, onSearch: @escaping () -> Void) {
+        _text = text
+        self.placeholder = placeholder
+        self.isSearching = isSearching
+        self.onSearch = onSearch
+    }
+
+    private var isEmpty: Bool { text.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    public var body: some View {
+        HStack {
+            TextField(placeholder, text: $text)
+                .submitLabel(.search)
+                .onSubmit { if !isEmpty && !isSearching { onSearch() } }
+            Button(isSearching ? "搜尋中…" : "搜尋", action: onSearch)
+                .buttonStyle(.borderless)
+                .disabled(isEmpty || isSearching)
+        }
+    }
+}
+
+/// 候選地點列：名稱＋地址，選中時打勾。
+public struct PlaceOptionRow: View {
+    let title: String
+    let address: String?
+    let selected: Bool
+
+    public init(title: String, address: String?, selected: Bool = false) {
+        self.title = title
+        self.address = address
+        self.selected = selected
+    }
+
+    public var body: some View {
+        HStack {
+            VStack(alignment: .leading) {
+                Text(title)
+                if let address { Text(address).font(.caption).foregroundStyle(.secondary) }
+            }
+            Spacer()
+            if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint) }
+        }
+    }
+}

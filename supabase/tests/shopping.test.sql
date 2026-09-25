@@ -43,6 +43,12 @@ select id as pid from app.create_proposal(:'day_id', 0,
 select tests.ok((app.confirm_proposal(:'pid')) ->> 'status' = 'confirmed', 'purchase stop confirmed');
 select tests.ok((select kind = 'purchase' and shopping_item_id = :'item_id' from app.stops where day_id = :'day_id'), 'stop is a purchase stop');
 select tests.ok((select planned_stop_id is not null from app.shopping_items where id = :'item_id'), 'item scheduled');
+-- A second purchase stop for an already scheduled item is refused.
+select id as pid2 from app.create_proposal(:'day_id', 1,
+  format('{"place_id": %s, "raw_label": "ReFa again", "shopping_item_id": %s}',
+         to_json(:'store'::text), to_json(:'item_id'::text))::jsonb) \gset
+select tests.throws(format($$select app.confirm_proposal(%L)$$, :'pid2'), 'PT409', 'item already has a purchase stop');
+select tests.ok((select count(*) from app.stops where shopping_item_id = :'item_id' and deleted_at is null) = 1, 'still one purchase stop');
 
 -- AC-11: purchase and undo.
 select tests.ok(app.record_purchase(:'item_id', true, '33333333-3333-3333-3333-333333333333') = 'purchased', 'editor marks purchased');
@@ -83,3 +89,55 @@ select tests.ok((app.set_shopping_image(:'item_id', null)).image_path is null, '
 select tests.login(:'viewer');
 select tests.throws(format($$select app.set_shopping_image(%L, %L)$$, :'item_id', :'trip_id' || '/v.jpg'), 'PT403', 'viewer cannot set image');
 select tests.ok(app.uuid_or_null('not-a-uuid') is null, 'bad folder name is not a trip');
+
+-- Interest toggle ("想買") is per member; viewers can't.
+select tests.login(:'owner');
+select app.set_shopping_interest(:'item2', true);
+select tests.ok((select count(*) from app.shopping_interests where item_id = :'item2') = 2, 'owner wants item2 too');
+select app.set_shopping_interest(:'item2', false);
+select tests.ok((select count(*) from app.shopping_interests where item_id = :'item2') = 1
+                and (select count(*) from app.shopping_interests where item_id = :'item2' and user_id = :'owner') = 0,
+                'owner removed only their own interest');
+select tests.login(:'viewer');
+select tests.throws(format($$select app.set_shopping_interest(%L, true)$$, :'item2'), 'PT403', 'viewer cannot mark interest');
+select tests.throws(format($$select app.add_merchant_candidate(%L, %L, 'user')$$, :'item2', :'store'), 'PT403', 'viewer cannot add merchants');
+
+-- Re-adding a merchant refreshes its evidence and restarts the 30 days (D8).
+select tests.login(:'editor');
+reset role;
+update app.merchant_candidates set evidence_at = now() - interval '40 days', expires_at = now() - interval '10 days'
+ where item_id = :'item_id' and place_id = :'store';
+set role authenticated;
+select app.add_merchant_candidate(:'item_id', :'store', 'official_locator', 'https://www.refa.net/shop/', '官方店鋪頁');
+select tests.ok((select evidence_type = 'official_locator' and expires_at > now() + interval '29 days' and evidence_at > now() - interval '1 minute'
+                   and inventory_status = 'unknown'
+                   from app.merchant_candidates where item_id = :'item_id' and place_id = :'store'),
+                'expired evidence refreshed, stock still unknown');
+select tests.ok((select count(*) from app.merchant_candidates where item_id = :'item_id') = 1, 'no duplicate merchant row');
+
+select tests.throws(format($$select app.add_shopping_item(%L, '   ')$$, :'trip_id'), 'PT422', 'blank item name rejected');
+
+-- Purchase without an op id is idempotent by state; undo with nothing bought writes nothing.
+select id as item3 from app.add_shopping_item(:'trip_id', 'Lemon candy') \gset
+select tests.ok(app.record_purchase(:'item3', false) = 'undone'
+                and (select count(*) from app.purchase_events where item_id = :'item3') = 0, 'undo of an unbought item writes nothing');
+select app.record_purchase(:'item3', true);
+select tests.ok(app.record_purchase(:'item3', true) = 'purchased'
+                and (select count(*) from app.purchase_events where item_id = :'item3') = 1, 'second purchase tick is a no-op');
+
+-- The buyer deleted their account (actor cleared): only the owner may undo.
+reset role;
+update app.purchase_events set actor_id = null where item_id = :'item3';
+set role authenticated;
+select tests.throws(format($$select app.record_purchase(%L, false)$$, :'item3'), 'PT403', 'editor cannot undo an anonymised purchase');
+select tests.login(:'owner');
+select tests.ok(app.record_purchase(:'item3', false) = 'undone', 'owner can undo an anonymised purchase');
+
+-- A purchase stop can't point at another trip's item.
+select id as other_trip from app.create_trip('Other', '2026-10-01', '2026-10-01', 'Asia/Tokyo') \gset
+select id as other_item from app.add_shopping_item(:'other_trip', 'Elsewhere') \gset
+select route_revision as rev from app.trip_days where id = :'day_id' \gset
+select id as pid3 from app.create_proposal(:'day_id', :'rev',
+  format('{"place_id": %s, "raw_label": "wrong trip", "shopping_item_id": %s}',
+         to_json(:'store'::text), to_json(:'other_item'::text))::jsonb) \gset
+select tests.throws(format($$select app.confirm_proposal(%L)$$, :'pid3'), 'PT404', 'item from another trip rejected');

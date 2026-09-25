@@ -19,52 +19,77 @@ select tests.ok((select parse_status = 'pending' and raw_text like 'Day 1%' from
                 'import stored with raw text');
 
 -- Clients cannot write parse results.
-select tests.throws(format($$select app.record_parse_result(%L, 'parsed', '{}', null, 'x')$$, :'import_id'),
+select tests.throws(format($$select app.record_parse_result(%L, gen_random_uuid(), 'parsed', '{}', null, 'x')$$, :'import_id'),
                     '42501', 'client cannot record parse result');
 select tests.throws(format($$update app.import_sessions set parse_status = 'parsed' where id = %L$$, :'import_id'),
                     '42501', 'direct update denied');
 
-select tests.throws(format($$select app.record_parse_progress(%L, '{"stage":"writing"}')$$, :'import_id'),
+select tests.throws(format($$select app.record_parse_progress(%L, gen_random_uuid(), '{"stage":"writing"}')$$, :'import_id'),
                     '42501', 'client cannot record parse progress');
 
 reset role;
 set role service_role;
 -- Progress is only kept while parsing.
-select app.record_parse_progress(:'import_id', '{"stage":"writing","stops":1}');
+select app.record_parse_progress(:'import_id', null, '{"stage":"writing","stops":1}');
 reset role;
 select tests.ok((select parse_progress is null from app.import_sessions where id = :'import_id'), 'progress ignored unless parsing');
 set role service_role;
-select app.record_parse_result(:'import_id', 'parsing', null, null, null);
-select app.record_parse_progress(:'import_id', '{"stage":"writing","days":1,"stops":2,"last_place":"광장시장"}');
+select app.begin_parse(:'import_id') as attempt \gset
+select app.record_parse_progress(:'import_id', :'attempt', '{"stage":"writing","days":1,"stops":2,"last_place":"광장시장"}');
+select app.record_parse_progress(:'import_id', gen_random_uuid(), '{"stage":"writing","last_place":"other attempt"}');
 reset role;
 select tests.ok((select parse_progress ->> 'last_place' = '광장시장' from app.import_sessions where id = :'import_id'),
-                'progress recorded while parsing');
+                'progress recorded while parsing, only by the running attempt');
 set role service_role;
 -- Only one parse at a time: a second claim while parsing is refused; an abandoned one can be reclaimed.
-select app.begin_parse(:'import_id') as second_claim \gset
+select app.begin_parse(:'import_id') is null as second_refused \gset
 reset role;
-select tests.ok(not :'second_claim'::boolean, 'second parse refused while one is running');
+select tests.ok(:'second_refused'::boolean, 'second parse refused while one is running');
 update app.import_sessions set updated_at = now() - interval '9 minutes' where id = :'import_id';
 set role service_role;
-select app.begin_parse(:'import_id') as stale_claim \gset
+select app.begin_parse(:'import_id') as attempt2 \gset
 reset role;
-select tests.ok(:'stale_claim'::boolean and (select parse_progress is null from app.import_sessions where id = :'import_id'),
-                'abandoned parse can be claimed again');
+select tests.ok(:'attempt2' <> :'attempt' and (select parse_progress is null from app.import_sessions where id = :'import_id'),
+                'abandoned parse can be claimed again with a new attempt');
+set role service_role;
+select app.record_parse_result(:'import_id', :'attempt', 'parsed', '{"draft": "abandoned"}', null, 'm') as abandoned_recorded \gset
+reset role;
+select tests.ok(not :'abandoned_recorded'::boolean
+                and (select parse_status = 'parsing' and parse_result is null from app.import_sessions where id = :'import_id'),
+                'result of the abandoned attempt is dropped');
 set role authenticated;
 select tests.throws(format($$select app.begin_parse(%L)$$, :'import_id'), '42501', 'client cannot claim a parse');
 reset role;
 set role service_role;
-select app.record_parse_result(:'import_id', 'failed', null, 'invalid_output', 'claude-opus-5');
+select app.record_parse_result(:'import_id', :'attempt2', 'failed', null, 'invalid_output', 'claude-opus-5');
 reset role;
 set role authenticated;
 select tests.login(:'owner');
 select tests.ok((select parse_status = 'failed' and raw_text like 'Day 1%' from app.import_sessions where id = :'import_id'),
                 'failed parse keeps raw text');
 
+-- The user edits the text while a retry is parsing the old text.
+reset role;
+set role service_role;
+select app.begin_parse(:'import_id') as attempt3 \gset
+reset role;
+set role authenticated;
+select tests.login(:'owner');
 select app.update_import_text(:'import_id', 'Day 1 광장시장 10:00, XXX Shoes 성수');
 select tests.ok((select parse_status = 'pending' and parse_error is null and raw_text like '%성수'
                    from app.import_sessions where id = :'import_id'),
                 'editing text resets draft and keeps new text');
+reset role;
+select tests.ok((select parse_attempt is null from app.import_sessions where id = :'import_id'), 'editing text ends the running attempt');
+set role service_role;
+select app.record_parse_progress(:'import_id', :'attempt3', '{"stage":"writing"}');
+select app.record_parse_result(:'import_id', :'attempt3', 'parsed', '{"draft": "for the old text"}', null, 'm') as late_recorded \gset
+reset role;
+select tests.ok(not :'late_recorded'::boolean
+                and (select parse_status = 'pending' and parse_result is null and parse_progress is null
+                       from app.import_sessions where id = :'import_id'),
+                'late result for the replaced text is dropped');
+set role authenticated;
 
 -- Other users cannot see or use the import.
 select tests.login(:'outsider');

@@ -144,6 +144,16 @@ async function main(): Promise<void> {
     writeFileSync(file, JSON.stringify({ options, totals, runs }, null, 2));
     console.log(`\nSaved ${file}`);
   }
+
+  // The dry run scores drafts built from the expectations, so anything short of a
+  // clean pass means the scorer (or the eval set) is broken: fail CI.
+  if (args["dry-run"]) {
+    const broken = runs.filter((r) => r.status !== "parsed" || (r.score?.failures.length ?? 0) > 0);
+    if (broken.length > 0 || totals.extraStops > 0) {
+      console.error(`\nScorer self-check failed: ${broken.map((r) => r.id).join(", ") || `${totals.extraStops} extra stops`}`);
+      process.exitCode = 1;
+    }
+  }
 }
 
 await main();

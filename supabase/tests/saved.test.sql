@@ -51,12 +51,16 @@ select tests.ok((select place_id is null and status = 'saved' from app.saved_pla
 select tests.throws(format($$select app.resolve_saved(%L, %L)$$, :'pending_id', :'onion'), 'PT409', 'resolving to an already saved place rejected');
 select app.resolve_saved(:'pending_id', :'gj');
 select tests.ok((select place_id = :'gj' from app.saved_places where id = :'pending_id'), 'manual fill resolves place');
+select (app.upsert_place('apple_mapkit', 'third', 'Third place', 37.55, 127.01)).id as third \gset
+select tests.throws(format($$select app.resolve_saved(%L, %L)$$, :'pending_id', :'third'), 'PT409', 'a confirmed saved place is not re-pointed');
 
 -- Viewer can read but not write.
 select tests.login(:'viewer');
 select tests.ok((select count(*) from app.saved_places where trip_id = :'trip_id') = 2, 'viewer reads saved');
 select tests.throws(format($$select app.save_place(%L, 'x')$$, :'trip_id'), 'PT403', 'viewer cannot save');
 select tests.throws(format($$select app.set_saved_interest(%L, true)$$, :'saved_id'), 'PT403', 'viewer cannot mark interest');
+select tests.throws(format($$select app.resolve_saved(%L, %L)$$, :'saved_id', :'third'), 'PT403', 'viewer cannot resolve');
+select tests.throws(format($$select app.dismiss_saved(%L)$$, :'saved_id'), 'PT403', 'viewer cannot dismiss');
 
 -- Adding the place to the itinerary moves the Saved entry out of the list.
 select tests.login(:'owner');
@@ -71,3 +75,22 @@ select tests.ok((select count(*) from app.trip_events where trip_id = :'trip_id'
 -- Removing the stop puts the saved entry back on the "to add" list.
 select app.commit_itinerary(:'day_id', 1, '[]'::jsonb);
 select tests.ok((select status = 'saved' from app.saved_places where id = :'saved_id'), 'removed stop returns saved entry to the list');
+
+-- Resolving to a place that is already a stop marks the entry as added.
+select (app.upsert_place('apple_mapkit', 'bbq', 'BBQ Place', 37.56, 126.97)).id as bbq \gset
+select app.commit_itinerary(:'day_id', 2, format('[{"place_id": %s, "raw_label": "BBQ"}]', to_json(:'bbq'::text))::jsonb);
+select ((app.save_place(:'trip_id', '朋友說的烤肉店', 'eat')) ->> 'id') as bbq_saved \gset
+select app.resolve_saved(:'bbq_saved', :'bbq');
+select tests.ok((select status = 'added_to_itinerary' from app.saved_places where id = :'bbq_saved'),
+                'resolving to a place on the itinerary marks the entry added');
+
+-- A located re-share of a URL that was first saved without a place confirms that entry.
+select ((app.save_place(:'trip_id', 'Threads 上的麵店', 'eat', null,
+        '{"type": "share", "url": "https://www.threads.net/@b/post/2", "canonical_url": "https://www.threads.net/@b/post/2"}')) ->> 'id') as unlocated \gset
+select (app.upsert_place('apple_mapkit', 'noodle', 'Noodle House', 37.565, 126.98)).id as noodle \gset
+select app.save_place(:'trip_id', 'Noodle House', 'eat', :'noodle',
+       '{"type": "share", "url": "https://www.threads.net/@b/post/2?igsh=y", "canonical_url": "https://www.threads.net/@b/post/2"}') as relocated \gset
+select tests.ok((:'relocated'::jsonb ->> 'id') = :'unlocated' and (:'relocated'::jsonb ->> 'duplicate')::boolean
+                and (select place_id = :'noodle' and status = 'saved' from app.saved_places where id = :'unlocated'),
+                'located re-share confirms the place on the earlier entry');
+select tests.ok((select count(*) from app.saved_places where trip_id = :'trip_id' and place_id = :'noodle') = 1, 'no second entry for the place');

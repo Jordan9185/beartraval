@@ -120,7 +120,7 @@ public enum LoginError: Error, Equatable {
         case .invalidCredentials: "電子郵件或密碼錯誤。"
         case .emailTaken: "這個電子郵件已經註冊過，請直接登入。"
         case .weakPassword: "密碼強度不足，請至少 \(LoginRules.minimumPasswordLength) 個字元。"
-        case .confirmationRequired: "帳號已建立，但後端要求驗證電子郵件；請聯絡管理者關閉驗證。"
+        case .confirmationRequired: "帳號已建立。請到信箱點開驗證信，完成後回來登入。"
         case .other: "登入失敗：無法連線或服務暫時無法使用，請稍後再試。"
         }
     }

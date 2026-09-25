@@ -13,4 +13,10 @@ public enum AppGroup {
         guard let identifier else { return nil }
         return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)
     }
+
+    /// Keychain 共用群組：只有真的拿到 App Group 權限時才用；沒有（NoAppGroup 簽章）時
+    /// 用 App 自己的 Keychain，否則登入狀態會存不進去（審查）。
+    public static var keychainAccessGroup: String? {
+        containerURL == nil ? nil : identifier
+    }
 }

@@ -65,13 +65,9 @@ struct TripMapView: View {
                             .presentationDetents([.medium, .large])
                     }
                 } else if store.loaded {
-                    ContentUnavailableView {
-                        Label("尚未建立旅程", systemImage: "map")
-                    } actions: {
-                        Button("建立旅程", action: goToTrips).buttonStyle(.borderedProminent)
-                    }
+                    TripUnavailableView(store: store, systemImage: "map", goToTrips: goToTrips)
                 } else {
-                    ProgressView()
+                    ProgressView("載入中…")
                 }
             }
             .navigationTitle("地圖")
@@ -108,10 +104,12 @@ extension View {
 
 struct PinMarker: View {
     let pin: TripMapPin
+    /// 跟著系統字級放大，大字模式下數字不會擠出圓圈。
+    @ScaledMetric(relativeTo: .caption) private var size: CGFloat = 28
 
     var body: some View {
         ZStack {
-            Circle().fill(color).frame(width: 28, height: 28)
+            Circle().fill(color).frame(width: size, height: size)
             switch pin.kind {
             case .stop(_, let order, let fixed):
                 Group { if fixed { Image(systemName: "lock.fill") } else { Text("\(order)") } }.font(.caption.bold()).foregroundStyle(.white)
@@ -135,18 +133,20 @@ struct LayerPicker: View {
     @Binding var layers: Set<MapLayer>
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack {
-                ForEach(MapLayer.allCases, id: \.self) { layer in
-                    Button(layer.title) {
-                        if layers.contains(layer) { layers.remove(layer) } else { layers.insert(layer) }
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(layers.contains(layer) ? .accentColor : .gray)
-                    .font(.caption)
-                }
+        // 一個「圖層」選單取代五顆小按鈕：點擊範圍大、畫面乾淨（樣式指南）。
+        Menu {
+            ForEach(MapLayer.allCases, id: \.self) { layer in
+                Toggle(layer.title, isOn: Binding(
+                    get: { layers.contains(layer) },
+                    set: { if $0 { layers.insert(layer) } else { layers.remove(layer) } }))
             }
+        } label: {
+            Label("圖層（\(layers.count)／\(MapLayer.allCases.count)）", systemImage: "square.3.layers.3d")
+                .frame(maxWidth: .infinity)
         }
+        #if os(iOS)
+        .menuActionDismissBehavior(.disabled)
+        #endif
     }
 }
 
@@ -171,6 +171,8 @@ struct PinDetailView: View {
                     }
                 }
                 Section {
+                    NavigateButton(destination: pin.place.mapPoint,
+                                   mode: snapshot.timeline.indices.contains(dayIndex) ? snapshot.timeline[dayIndex].day.transportMode : .walking)
                     TaxiCardButton(place: pin.place)
                     if case .stop = pin.kind {} else { Button("試算順路") { showsRoute = true } }
                 }

@@ -45,24 +45,44 @@ Deno.serve(async (req) => {
   const { data: allowed } = await db.rpc("consume_ai_quota", { p_kind: "ask" });
   if (allowed !== true) return json({ status: "failed", reason: "rate_limited" });
 
-  const [days, stops, saved, interests, items, events, merchants, members] = await Promise.all([
+  // Every query is scoped to this trip: RLS alone would return rows from all the
+  // caller's trips, cut off at PostgREST's max_rows. A failed query means the
+  // context is incomplete, so nothing is answered from it.
+  const [days, stops, saved, items, members] = await Promise.all([
     db.from("trip_days").select("*").eq("trip_id", trip.id).order("display_order"),
     db.from("stops").select("*").eq("trip_id", trip.id).is("deleted_at", null).order("sort_order"),
     db.from("saved_places").select("*").eq("trip_id", trip.id).neq("status", "dismissed"),
-    db.from("saved_interests").select("saved_id, user_id"),
     db.from("shopping_items").select("*").eq("trip_id", trip.id).is("deleted_at", null),
-    db.from("purchase_events").select("item_id, type, id").order("id"),
-    db.from("merchant_candidates").select("item_id, place_id, evidence_type"),
     db.from("trip_members").select("user_id").eq("trip_id", trip.id).eq("status", "active"),
   ]);
+  const savedIdList = (saved.data ?? []).map((s) => s.id);
+  const itemIdList = (items.data ?? []).map((i) => i.id);
+  const none = Promise.resolve({ data: [] as any[], error: null });
+  const [interests, events, merchants] = await Promise.all([
+    savedIdList.length ? db.from("saved_interests").select("saved_id, user_id").in("saved_id", savedIdList) : none,
+    itemIdList.length ? db.from("purchase_events").select("item_id, type, id").in("item_id", itemIdList).order("id") : none,
+    itemIdList.length
+      ? db.from("merchant_candidates").select("item_id, place_id, evidence_type").in("item_id", itemIdList)
+      : none,
+  ]);
+  const contextFailed = () => {
+    console.log(JSON.stringify({ fn: "ask-trip", status: "failed", reason: "context_error" }));
+    return json({ status: "failed", reason: "context_error" });
+  };
+  if ([days, stops, saved, items, members, interests, events, merchants].some((r) => r.error)) return contextFailed();
+
   const placeIds = new Set<string>([
     ...(stops.data ?? []).map((s) => s.place_id).filter(Boolean),
     ...(saved.data ?? []).map((s) => s.place_id).filter(Boolean),
     ...(merchants.data ?? []).map((m) => m.place_id),
   ]);
-  const { data: places } = await db.from("places").select("id, name, name_local").in("id", [...placeIds]);
-  const { data: profiles } = await db.from("profiles").select("user_id, display_name")
-    .in("user_id", (members.data ?? []).map((m) => m.user_id));
+  const [placesResult, profilesResult] = await Promise.all([
+    db.from("places").select("id, name, name_local").in("id", [...placeIds]),
+    db.from("profiles").select("user_id, display_name").in("user_id", (members.data ?? []).map((m) => m.user_id)),
+  ]);
+  if (placesResult.error || profilesResult.error) return contextFailed();
+  const places = placesResult.data;
+  const profiles = profilesResult.data;
   const placeName = (id: string | null) => {
     const p = (places ?? []).find((x) => x.id === id);
     return p ? (p.name_local ?? p.name) : null;

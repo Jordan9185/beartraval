@@ -53,8 +53,43 @@ for t in "$TESTS_DIR"/*.test.sql; do
   fi
 done
 
+# Concurrency checks. Session A takes a lock, then holds it until session B is
+# blocked on that lock (seen in pg_stat_activity), so the order never depends on
+# timing. A prints "waiter blocked" once B was waiting; without it the check fails.
+HOLD_UNTIL_WAITER=$(cat <<'SQL'
+reset role;
+do $$
+begin
+  for i in 1..400 loop
+    perform pg_stat_clear_snapshot();
+    if exists (select 1 from pg_stat_activity
+                where datname = current_database() and pid <> pg_backend_pid() and wait_event_type = 'Lock') then
+      raise notice 'waiter blocked';
+      return;
+    end if;
+    perform pg_sleep(0.05);
+  end loop;
+  raise exception 'no other session waited for the lock';
+end;
+$$;
+SQL
+)
+
+# Polls until session A (in database $1) is holding its lock and waiting in the loop above (20 s at most).
+await_holder() {
+  local i
+  for ((i = 0; i < 400; i++)); do
+    if [[ "$("${PSQL[@]}" -d "$1" -At -c "select count(*) from pg_stat_activity where datname = '$1' and wait_event = 'PgSleep'")" != "0" ]]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  echo "timed out waiting for session A in $1" >&2
+  return 1
+}
+
 # Two editors commit to the same day at the same time. The first holds the day
-# lock for a moment; the second must wait, then get STALE_REVISION (AC-13).
+# lock; the second must wait, then get STALE_REVISION (AC-13).
 "$PG_BIN/createdb" -T bt_template t_concurrency
 "${PSQL[@]}" -d t_concurrency <<'SQL' >/dev/null
 set role authenticated;
@@ -68,11 +103,11 @@ set role authenticated;
 select tests.login('00000000-0000-0000-0000-00000000000a');
 begin;
 select app.commit_itinerary('$DAY_ID', 0, '[{"raw_label":"from A"}]');
-select pg_sleep(1.5);
+$HOLD_UNTIL_WAITER
 commit;
 SQL
 A_PID=$!
-sleep 0.5
+await_holder t_concurrency || true
 set +e
 "${PSQL[@]}" -d t_concurrency >"$WORK/b.out" 2>&1 <<SQL
 set role authenticated;
@@ -80,14 +115,16 @@ select tests.login('00000000-0000-0000-0000-00000000000a');
 select app.commit_itinerary('$DAY_ID', 0, '[{"raw_label":"from B"}]');
 SQL
 B_STATUS=$?
-set -e
 wait "$A_PID"
+A_STATUS=$?
+set -e
 LABELS="$("${PSQL[@]}" -d t_concurrency -At -c "select string_agg(raw_label, ',') from app.stops where deleted_at is null")"
 
-if [[ $B_STATUS -ne 0 ]] && grep -q STALE_REVISION "$WORK/b.out" && [[ "$LABELS" == "from A" ]]; then
-  echo "PASS concurrency (second concurrent commit got STALE_REVISION; no silent overwrite)"
+if [[ $A_STATUS -eq 0 && $B_STATUS -ne 0 ]] && grep -q 'waiter blocked' "$WORK/a.out" && grep -q STALE_REVISION "$WORK/b.out" \
+   && [[ "$LABELS" == "from A" ]]; then
+  echo "PASS concurrency (second concurrent commit waited, then got STALE_REVISION; no silent overwrite)"
 else
-  echo "FAIL concurrency (b status=$B_STATUS, stops=$LABELS)"
+  echo "FAIL concurrency (a status=$A_STATUS, b status=$B_STATUS, stops=$LABELS)"
   cat "$WORK/a.out" "$WORK/b.out"
   failed=1
 fi
@@ -118,24 +155,70 @@ set role authenticated;
 select tests.login('00000000-0000-0000-0000-00000000000a');
 begin;
 select app.confirm_proposal('$P_A') ->> 'status';
-select pg_sleep(1.5);
+$HOLD_UNTIL_WAITER
 commit;
 SQL
 PA_PID=$!
-sleep 0.5
+await_holder t_proposal_race || true
+set +e
 "${PSQL[@]}" -d t_proposal_race -At >"$WORK/pb.out" 2>&1 <<SQL
 set role authenticated;
 select tests.login('00000000-0000-0000-0000-00000000000a');
 select app.confirm_proposal('$P_B') ->> 'status';
 SQL
 wait "$PA_PID"
+set -e
 RACE_LABELS="$("${PSQL[@]}" -d t_proposal_race -At -c "select string_agg(raw_label, ',') from app.stops where deleted_at is null")"
 
-if grep -qx confirmed "$WORK/pa.out" && grep -qx stale "$WORK/pb.out" && [[ "$RACE_LABELS" == "from A" ]]; then
-  echo "PASS proposal race (second concurrent confirm got stale; no silent overwrite)"
+if grep -qx confirmed "$WORK/pa.out" && grep -q 'waiter blocked' "$WORK/pa.out" && grep -qx stale "$WORK/pb.out" \
+   && [[ "$RACE_LABELS" == "from A" ]]; then
+  echo "PASS proposal race (second concurrent confirm waited, then got stale; no silent overwrite)"
 else
   echo "FAIL proposal race (stops=$RACE_LABELS)"
   cat "$WORK/pa.out" "$WORK/pb.out"
+  failed=1
+fi
+
+# Two members save the same place at the same time. The second insert waits on
+# the first one's unique-index entry, then gets the first entry back as a
+# duplicate instead of a unique_violation error.
+"$PG_BIN/createdb" -T bt_template t_save_race
+"${PSQL[@]}" -d t_save_race <<'SQL' >/dev/null
+set role authenticated;
+select tests.login('00000000-0000-0000-0000-00000000000a');
+select id from app.create_trip('Race', '2026-10-01', '2026-10-01', 'Asia/Seoul');
+select app.upsert_place('apple_mapkit', 'race', 'Race', 37.5, 127.0);
+SQL
+SAVE_TRIP="$("${PSQL[@]}" -d t_save_race -At -c "select id from app.trips limit 1")"
+SAVE_PLACE="$("${PSQL[@]}" -d t_save_race -At -c "select id from app.places where provider_place_id = 'race'")"
+
+"${PSQL[@]}" -d t_save_race -At >"$WORK/sa.out" 2>&1 <<SQL &
+set role authenticated;
+select tests.login('00000000-0000-0000-0000-00000000000a');
+begin;
+select app.save_place('$SAVE_TRIP', 'from A', 'eat', '$SAVE_PLACE') ->> 'duplicate';
+$HOLD_UNTIL_WAITER
+commit;
+SQL
+SA_PID=$!
+await_holder t_save_race || true
+set +e
+"${PSQL[@]}" -d t_save_race -At >"$WORK/sb.out" 2>&1 <<SQL
+set role authenticated;
+select tests.login('00000000-0000-0000-0000-00000000000a');
+select app.save_place('$SAVE_TRIP', 'from B', 'eat', '$SAVE_PLACE') ->> 'duplicate';
+SQL
+SB_STATUS=$?
+wait "$SA_PID"
+set -e
+SAVED_LABELS="$("${PSQL[@]}" -d t_save_race -At -c "select string_agg(raw_label, ',') from app.saved_places")"
+
+if [[ $SB_STATUS -eq 0 ]] && grep -qx false "$WORK/sa.out" && grep -q 'waiter blocked' "$WORK/sa.out" \
+   && grep -qx true "$WORK/sb.out" && [[ "$SAVED_LABELS" == "from A" ]]; then
+  echo "PASS save race (second concurrent save of the same place returned the first entry as a duplicate)"
+else
+  echo "FAIL save race (b status=$SB_STATUS, saved=$SAVED_LABELS)"
+  cat "$WORK/sa.out" "$WORK/sb.out"
   failed=1
 fi
 

@@ -12,25 +12,28 @@ struct TripListView: View {
     @State private var errorMessage: String?
     @State private var showsCreate = false
     @State private var showsJoin = false
+    @State private var showsAccount = false
 
     var body: some View {
         NavigationStack {
             List {
                 if let errorMessage {
                     ErrorText(errorMessage)
+                    Button("重新載入") { Task { await reload() } }
                 }
                 ForEach(trips) { trip in
                     NavigationLink(value: trip) {
                         VStack(alignment: .leading) {
                             Text(trip.name)
-                            Text("\(trip.startDate) – \(trip.endDate) · \(trip.timeZone)")
-                                .font(.caption).foregroundStyle(.secondary)
+                            Text(Self.subtitle(trip)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
                         }
                     }
                 }
             }
             .overlay {
-                if loaded && trips.isEmpty && errorMessage == nil {
+                if !loaded {
+                    ProgressView("載入中…")
+                } else if trips.isEmpty && errorMessage == nil {
                     ContentUnavailableView {
                         Label("還沒有旅程", systemImage: "calendar")
                     } description: {
@@ -50,9 +53,13 @@ struct TripListView: View {
                 }
             }
             .toolbar {
-                Button("加入好友的旅程", systemImage: "person.badge.plus") { showsJoin = true }
                 Button("建立旅程", systemImage: "plus") { showsCreate = true }
+                Menu("更多", systemImage: "ellipsis.circle") {
+                    Button("加入好友的旅程", systemImage: "person.badge.plus") { showsJoin = true }
+                    Button("帳號設定", systemImage: "person.crop.circle") { showsAccount = true }
+                }
             }
+            .sheet(isPresented: $showsAccount) { AccountView(session: session) }
             .sheet(isPresented: $showsJoin) {
                 JoinTripView(session: session, initialToken: nil) { tripID in
                     Task { await reload() }
@@ -68,6 +75,21 @@ struct TripListView: View {
             .refreshable { await reload() }
             .task { await reload() }
         }
+    }
+
+    /// 「10/23 – 10/29 · 7 天 · 首爾（UTC+9）」：與建立表單同樣的時區寫法，不露出 IANA 代碼。
+    static func subtitle(_ trip: Trip) -> String {
+        func short(_ date: String) -> String {
+            let parts = date.split(separator: "-")
+            return parts.count == 3 ? "\(Int(parts[1]) ?? 0)/\(Int(parts[2]) ?? 0)" : date
+        }
+        var parts = ["\(short(trip.startDate)) – \(short(trip.endDate))"]
+        if let tz = TimeZone(identifier: trip.timeZone),
+           let start = LocalDate.midnight(trip.startDate, in: tz), let end = LocalDate.midnight(trip.endDate, in: tz) {
+            parts.append("\(Int((end.timeIntervalSince(start) / 86_400).rounded()) + 1) 天")
+        }
+        parts.append(TripTimeZones.displayName(trip.timeZone))
+        return parts.joined(separator: " · ")
     }
 
     private func reload() async {
@@ -112,6 +134,13 @@ struct CreateTripView: View {
                 Section {
                     // 固定高度：長文在框內捲動，不會把上方的名稱、日期、時區擠出畫面。
                     TextEditor(text: $rawText).frame(height: 180)
+                        .accessibilityLabel("行程文字")
+                        .overlay(alignment: .topLeading) {
+                            if rawText.isEmpty {
+                                Text("貼上 ChatGPT、LINE 或備忘錄的行程").foregroundStyle(.tertiary)
+                                    .padding(.top, 8).padding(.leading, 5).allowsHitTesting(false)
+                            }
+                        }
                 } header: {
                     HStack {
                         Text("匯入行程文字（可略過）")
@@ -138,7 +167,7 @@ struct CreateTripView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(hasText ? "下一步" : "建立") { Task { await save() } }
+                    Button(isSaving ? "處理中…" : hasText ? "下一步" : "建立") { Task { await save() } }
                         .disabled(isSaving || name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
@@ -198,8 +227,7 @@ struct TripDetailView: View {
             ForEach(timeline) { day in
                 Section {
                     if day.stops.isEmpty {
-                        Label("尚無行程", systemImage: "calendar.badge.plus")
-                            .foregroundStyle(.secondary)
+                        Text("這天還沒有行程").foregroundStyle(.secondary)
                     }
                     ForEach(day.stops) { stop in
                         Button { selectedStop = stop } label: {
@@ -210,21 +238,22 @@ struct TripDetailView: View {
                             LegRow(leg: leg, mode: day.day.transportMode, toName: stopName(leg.to, in: day))
                         }
                     }
-                    RouteStatusRow(day: day, base: baseRoutes[day.id])
-                    if let suggestion = TripTimeZones.mismatch(for: day, places: places) {
-                        Label("這天的地點在\(TripTimeZones.displayName(suggestion))一帶，時區仍是\(TripTimeZones.displayName(day.day.timeZone))。",
-                              systemImage: "clock.badge.exclamationmark")
-                            .font(.caption).foregroundStyle(.orange)
-                    }
+                    // 一列說完這天的交通方式、路程與時區；可編輯時點進去改設定。
                     if myRole?.canEdit == true {
                         NavigationLink {
                             DaySettingsView(session: session, day: day, suggestion: TripTimeZones.suggested(for: day, places: places)) {
                                 Task { await reload() }
                             }
                         } label: {
-                            Label("\(day.day.transportMode.displayName) · \(TripTimeZones.displayName(day.day.timeZone))", systemImage: "gearshape")
-                                .font(.caption)
+                            RouteStatusRow(day: day, base: baseRoutes[day.id])
                         }
+                    } else {
+                        RouteStatusRow(day: day, base: baseRoutes[day.id])
+                    }
+                    if let suggestion = TripTimeZones.mismatch(for: day, places: places) {
+                        Label("這天的地點在\(TripTimeZones.displayName(suggestion))一帶，時區仍是\(TripTimeZones.displayName(day.day.timeZone))。",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.caption).foregroundStyle(.orange)
                     }
                 } header: {
                     Text("第 \(day.day.displayOrder + 1) 天 · \(day.day.localDate)")
@@ -248,8 +277,16 @@ struct TripDetailView: View {
                            mode: timeline.first { $0.id == stop.dayId }?.day.transportMode ?? .transit,
                            previous: previousPlace(before: stop),
                            editing: editingContext(for: stop),
-                           timeZone: timeline.first { $0.id == stop.dayId }?.day.timeZone)
-                .presentationDetents([.medium])
+                           timeZone: timeline.first { $0.id == stop.dayId }?.day.timeZone,
+                           session: session,
+                           planning: timeline.first { $0.id == stop.dayId }.map { day in
+                               StopPlanning(tripID: trip.id, dayID: day.id, dayTitle: "第 \(day.day.displayOrder + 1) 天") {
+                                   selectedStop = nil
+                                   Task { await reload() }
+                               }
+                           },
+                           canEdit: myRole?.canEdit == true)
+                .presentationDetents([.medium, .large])
         }
         .navigationTitle(trip.name)
         // toolbar 只留一個主要動作「試算順路」，其餘收進「更多」。
@@ -377,6 +414,10 @@ struct StopDetailView: View {
     var editing: StopEditingContext? = nil
     /// 當天時區，用來推測未定位地點在哪個國家、該開哪個當地地圖。
     var timeZone: String? = nil
+    /// 有值時列出這站附近還有什麼，並可排進這天。
+    var session: SessionModel? = nil
+    var planning: StopPlanning? = nil
+    var canEdit = false
     @Environment(\.dismiss) private var dismissDetail
 
     var body: some View {
@@ -387,7 +428,7 @@ struct StopDetailView: View {
                     if let address = place?.address { Text(address).font(.caption).foregroundStyle(.secondary) }
                     if let start = stop.startTime { LabeledContent("時間", value: LocalTime.hourMinute(start)) }
                     if let dwell = stop.dwellMinutes { LabeledContent("停留", value: "\(dwell) 分") }
-                    LabeledContent("類型", value: stop.fixed ? "固定" : "彈性")
+                    if stop.fixed { Label("固定行程", systemImage: "lock.fill").foregroundStyle(.secondary) }
                     if place == nil { Text("未定位，不計入路線").font(.caption).foregroundStyle(.secondary) }
                 }
                 if place == nil {
@@ -405,12 +446,19 @@ struct StopDetailView: View {
                     PendingStopActions(context: editing, stop: stop) { dismissDetail() }
                 }
                 if let place {
-                    Section { TaxiCardButton(place: place, fallbackChineseLabel: stop.rawLabel) }
+                    Section {
+                        NavigateButton(destination: place.mapPoint, mode: mode)
+                        TaxiCardButton(place: place, fallbackChineseLabel: stop.rawLabel)
+                    }
                 }
                 if let place, place.isInKorea {
                     Section("在地地圖") {
                         LocalMapButtons(destination: place.mapPoint, origin: previous?.mapPoint, mode: mode, address: place.address)
                     }
+                }
+                if let place, let session {
+                    NearbyAroundSection(session: session, center: Coordinate(latitude: place.latitude, longitude: place.longitude),
+                                        tripID: planning?.tripID, canEdit: canEdit, mode: mode, planning: planning)
                 }
             }
             .navigationTitle("行程點")
@@ -459,13 +507,13 @@ struct RouteStatusRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            LabeledContent("路線（\(day.day.transportMode.displayName)）") {
-                Text(summary)
-            }
+            Text("\(day.day.transportMode.displayName) · \(summary) · \(TripTimeZones.displayName(day.day.timeZone))")
+                .monospacedDigit()
             if day.pendingCount > 0 {
-                Text("\(day.pendingCount) 個未定位的地點未計入").font(.caption)
+                Text("\(day.pendingCount) 個未定位的地點未計入")
             }
         }
+        .font(.caption)
         .foregroundStyle(.secondary)
     }
 

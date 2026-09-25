@@ -27,6 +27,7 @@ struct AccountView: View {
     @State private var confirmDelete = false
     @State private var deleting = false
     @State private var errorMessage: String?
+    @AppStorage("navigationApp") private var navigationApp: String = NavigationApp.apple.rawValue
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -45,6 +46,15 @@ struct AccountView: View {
                     Text("顯示名稱")
                 } footer: {
                     Text(savedName ? "已儲存。" : "旅伴在成員列表和收藏裡看到的名字。")
+                }
+                Section {
+                    Picker("導航用的地圖", selection: $navigationApp) {
+                        ForEach(NavigationApp.allCases, id: \.self) { Text($0.displayName).tag($0.rawValue) }
+                    }
+                } header: {
+                    Text("導航")
+                } footer: {
+                    Text("按「導航」時開啟的 App。沒有安裝 Google 地圖時會開網頁版。韓國地點另外提供 Naver／Kakao 地圖。")
                 }
                 Section {
                     Button("登出") { Task { await session.signOut(); dismiss() } }

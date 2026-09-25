@@ -19,7 +19,12 @@ struct LoginView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Picker("", selection: $mode) {
+                Section {
+                    Text("和旅伴一起規劃每天的行程、收藏想去的店、記下想買的東西。")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .listRowBackground(Color.clear)
+                }
+                Picker("登入或註冊", selection: $mode) {
                     ForEach(Mode.allCases, id: \.self) { Text($0.rawValue) }
                 }
                 .pickerStyle(.segmented)
@@ -35,9 +40,13 @@ struct LoginView: View {
                         #endif
                     SecureField("密碼", text: $password)
                         .textContentType(mode == .signUp ? .newPassword : .password)
+                        .submitLabel(mode == .signUp ? .next : .go)
+                        .onSubmit { if mode == .signIn { Task { await submit() } } }
                     if mode == .signUp {
                         SecureField("再輸入一次密碼", text: $confirmation)
                             .textContentType(.newPassword)
+                            .submitLabel(.go)
+                            .onSubmit { Task { await submit() } }
                     }
                 } footer: {
                     if mode == .signUp {
@@ -62,6 +71,7 @@ struct LoginView: View {
     }
 
     private func submit() async {
+        guard !isSubmitting, !email.isEmpty, !password.isEmpty else { return }
         let address = email.trimmingCharacters(in: .whitespaces).lowercased()
         if mode == .signUp, let problem = LoginRules.signUpProblem(email: address, password: password, confirmation: confirmation) {
             errorMessage = problem

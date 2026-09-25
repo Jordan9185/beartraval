@@ -88,14 +88,29 @@ public struct ChangeProposal: Codable, Identifiable, Hashable, Sendable {
     public var change: ProposalChange
     public var expectedRouteRevision: Int
     public var status: Status
+    /// AI 助手提出的變更；重新計算過期的 proposal 時要保留（審查）。
+    public var createdByAI: Bool
 
-    public init(id: UUID, tripId: UUID, dayId: UUID, change: ProposalChange, expectedRouteRevision: Int, status: Status) {
+    public init(id: UUID, tripId: UUID, dayId: UUID, change: ProposalChange, expectedRouteRevision: Int, status: Status,
+                createdByAI: Bool = false) {
         self.id = id
         self.tripId = tripId
         self.dayId = dayId
         self.change = change
         self.expectedRouteRevision = expectedRouteRevision
         self.status = status
+        self.createdByAI = createdByAI
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        tripId = try c.decode(UUID.self, forKey: .tripId)
+        dayId = try c.decode(UUID.self, forKey: .dayId)
+        change = try c.decode(ProposalChange.self, forKey: .change)
+        expectedRouteRevision = try c.decode(Int.self, forKey: .expectedRouteRevision)
+        status = try c.decode(Status.self, forKey: .status)
+        createdByAI = try c.decodeIfPresent(Bool.self, forKey: .createdByAI) ?? false
     }
 
     enum CodingKeys: String, CodingKey {
@@ -103,6 +118,7 @@ public struct ChangeProposal: Codable, Identifiable, Hashable, Sendable {
         case tripId = "trip_id"
         case dayId = "day_id"
         case expectedRouteRevision = "expected_route_revision"
+        case createdByAI = "created_by_ai"
     }
 }
 
@@ -158,10 +174,24 @@ extension TripRepository: ProposalService {
     }
 
     public func loadDayPlan(tripID: UUID, dayID: UUID) async throws -> DayPlan {
-        async let d = days(of: tripID)
-        async let s = stops(of: tripID)
-        let (allDays, allStops) = try await (d, s)
-        guard let day = allDays.first(where: { $0.id == dayID }) else { throw BackendError.notFound }
+        // 版本與 Stop 分兩次讀：讀完 Stop 後再確認版本沒變，避免 proposal 帶著新版本號、
+        // 卻是用舊的 Stop 算出來的（伺服器就無法擋下過期）。
+        var attempt = 0
+        while true {
+            attempt += 1
+            async let d = days(of: tripID)
+            async let s = stops(of: tripID)
+            let (allDays, allStops) = try await (d, s)
+            guard let day = allDays.first(where: { $0.id == dayID }) else { throw BackendError.notFound }
+            let after = try await days(of: tripID).first(where: { $0.id == dayID })?.routeRevision
+            if after == day.routeRevision || attempt >= 3 {
+                return try await dayPlan(day: day, stops: allStops)
+            }
+        }
+    }
+
+    private func dayPlan(day: TripDay, stops allStops: [Stop]) async throws -> DayPlan {
+        let dayID = day.id
         let dayStops = allStops.filter { $0.dayId == dayID }
         let placeList = try await places(ids: Array(Set(dayStops.compactMap(\.placeId))))
         let timeline = DayTimeline(day: day, stops: dayStops.sorted { $0.sortOrder < $1.sortOrder })
@@ -200,10 +230,12 @@ public struct AddToDayFlow: Sendable {
     }
 
     /// 用最新的當日資料計算並建立 proposal；無法估算時回傳 nil 與結果。
+    /// `followDayMode` 為 true 時改用這天目前設定的交通方式（重新計算過期 proposal 時）。
     public func propose(placeID: UUID, label: String, point: RoutePoint, dwellMinutes: Int,
                         tripID: UUID, dayID: UUID, mode: TravelMode, shoppingItemID: UUID? = nil,
-                        createdByAI: Bool = false) async throws -> (Pending?, DayMatch) {
+                        createdByAI: Bool = false, followDayMode: Bool = false) async throws -> (Pending?, DayMatch) {
         let plan = try await service.loadDayPlan(tripID: tripID, dayID: dayID)
+        let mode = followDayMode ? (plan.transportMode ?? mode) : mode
         let match = await matcher.match(RouteCandidate(point: point, dwellMinutes: dwellMinutes), into: plan, mode: mode)
         guard let best = match.best else { return (nil, match) }
         let proposal = try await service.createProposal(
@@ -223,7 +255,8 @@ public struct AddToDayFlow: Sendable {
             let (fresh, match) = try await propose(placeID: change.placeId, label: change.rawLabel, point: point,
                                                    dwellMinutes: pending.insertion.addedDwellMinutes,
                                                    tripID: pending.proposal.tripId, dayID: pending.proposal.dayId,
-                                                   mode: pending.match.mode, shoppingItemID: change.shoppingItemId)
+                                                   mode: pending.match.mode, shoppingItemID: change.shoppingItemId,
+                                                   createdByAI: pending.proposal.createdByAI, followDayMode: true)
             return fresh.map(ConfirmResult.needsReconfirm) ?? .noLongerAvailable(match)
         }
     }
