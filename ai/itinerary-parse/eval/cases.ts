@@ -90,7 +90,7 @@ Jordan: 👍 10/3 早上去廣藏市場吃早餐`,
     expected: [
       { date: "2026-10-02", aliases: ["xxxshoes"], flags: ["ambiguous_branch"] },
       { date: "2026-10-02", aliases: ["jungsik"], start_time: "19:00", fixed: true },
-      { date: "2026-10-03", aliases: ["廣藏市場", "gwangjang"], flags: ["ambiguous_time"] },
+      { date: "2026-10-03", aliases: ["廣藏市場", "gwangjang"], start_time: null, not_flags: ["ambiguous_time"] },
     ],
   },
   {
@@ -211,9 +211,9 @@ Day 4: Fly home`,
 傍晚去南大門市場
 晚上想吃烤肉 王妃家`,
     expected: [
-      { date: "2026-10-01", aliases: ["ninetree"], flags: ["ambiguous_time"] },
-      { date: "2026-10-01", aliases: ["南大門"], flags: ["ambiguous_time"] },
-      { date: "2026-10-01", aliases: ["王妃家"], flags: ["ambiguous_time"] },
+      { date: "2026-10-01", aliases: ["ninetree"], start_time: null, not_flags: ["ambiguous_time"] },
+      { date: "2026-10-01", aliases: ["南大門"], start_time: null, not_flags: ["ambiguous_time"] },
+      { date: "2026-10-01", aliases: ["王妃家"], start_time: null, not_flags: ["ambiguous_time"] },
     ],
   },
   {
@@ -394,7 +394,7 @@ Sun 10/4: brunch somewhere in Seongsu, 16:20 flight CI161`,
       { date: "2026-11-11", aliases: ["ferry", "miyajimaguchi"], start_time: "08:45", fixed: true },
       { date: "2026-11-11", aliases: ["itsukushima"] },
       { date: "2026-11-11", aliases: ["はやし"] },
-      { date: "2026-11-11", aliases: ["momiji"], flags: ["ambiguous_time"] },
+      { date: "2026-11-11", aliases: ["momiji"], start_time: null, not_flags: ["ambiguous_time"] },
     ],
   },
   {

@@ -125,4 +125,43 @@ struct ConfirmPlacesTests {
         let stop = try JSONDecoder().decode(ParsedStop.self, from: Data(#"{"source_excerpt":"尾道","place_name":"尾道","branch_hint":null,"city":"Onomichi","search_query":"尾道","category":"place","start_time":null,"end_time":null,"time_is_approximate":false,"fixed_suspected":false,"fixed_reason":null,"confidence":"high","needs_confirmation":[]}"#.utf8))
         #expect(stop.city == "Onomichi")
     }
+
+    func stop(_ name: String, _ query: String?, confidence: String = "high", reasons: [ParsedStop.Reason] = []) -> ParsedStop {
+        ParsedStop(sourceExcerpt: name, placeName: name, searchQuery: query, category: "place", confidence: confidence, needsConfirmation: reasons)
+    }
+
+    /// 名稱取自實際 Apple 地圖回傳（2026-09-25 首爾＋廣島行程模擬）。
+    @Test func confidentMatchesFromRealSearches() {
+        #expect(PlaceMatch.confident(for: stop("嚴島神社", "厳島神社"), in: [option("a", "嚴島神社")])?.id == "a")
+        #expect(PlaceMatch.confident(for: stop("海上大鳥居", "厳島神社 大鳥居"), in: [option("a", "厳島神社大鳥居")])?.id == "a")
+        #expect(PlaceMatch.confident(for: stop("尾道", "尾道"), in: [option("a", "尾道市")])?.id == "a")
+        #expect(PlaceMatch.confident(for: stop("瀨戶田", "瀬戸田"), in: [option("a", "瀬戸田港"), option("b", "Dolce總店")])?.id == "a")
+        #expect(PlaceMatch.confident(for: stop("下瀨美術館", "下瀬美術館"), in: [option("a", "下瀬美術館")])?.id == "a")
+        // 完全同名勝過相近名稱。
+        #expect(PlaceMatch.confident(for: stop("大三島", "大三島"), in: [option("a", "大三島"), option("b", "大三島 盛港")])?.id == "a")
+    }
+
+    @Test func unclearMatchesAreLeftToTheUser() {
+        // 查到的是別的店。
+        #expect(PlaceMatch.confident(for: stop("Matin Kim", "마뗑킴 성수"), in: [option("a", "媽媽旅館")]) == nil)
+        #expect(PlaceMatch.confident(for: stop("宮島", "宮島"), in: [option("a", "嚴島"), option("b", "宮島SA")]) == nil)
+        // 只是名稱的一小段。
+        #expect(PlaceMatch.confident(for: stop("大鳥居", nil), in: [option("a", "嚴島神社大鳥居")]) == nil)
+        // 分店不明、信心不足：不自動選（AC-01）。
+        #expect(PlaceMatch.confident(for: stop("XXX Shoes", nil, reasons: [.ambiguousBranch]), in: [option("a", "XXX Shoes")]) == nil)
+        #expect(PlaceMatch.confident(for: stop("Beidelli", nil, confidence: "medium"), in: [option("a", "Beidelli")]) == nil)
+        // 兩個候選都相符（兩間分店）。
+        #expect(PlaceMatch.confident(for: stop("Matin Kim", nil), in: [option("a", "Matin Kim"), option("b", "Matin Kim")]) == nil)
+    }
+
+    @Test func searchResultsDecideClearCasesOnly() {
+        var state = ConfirmPlacesState(session: session, draft: draft)
+        state.applySearchResults([option("gj", "광장시장")], at: 0)
+        state.applySearchResults([option("m", "XXX Shoes 명동점"), option("s", "XXX Shoes 성수점")], at: 1)
+        state.applySearchResults([], at: 3)
+        #expect(state.items[0].decision == .place(option("gj", "광장시장")) && state.items[0].autoDecided)
+        #expect(state.items[1].decision == nil)
+        #expect(state.items[3].decision == .pendingText && state.items[3].autoDecided)
+        #expect(state.needsAttention == [1, 2, 3])  // 3 還沒有日期（10/9 不在旅程內）
+    }
 }

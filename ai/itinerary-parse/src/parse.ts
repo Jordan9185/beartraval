@@ -9,8 +9,9 @@ import { ParseResult, type ParseInput } from "./schema.ts";
 import { validateDraft, type ValidationIssue } from "./validate.ts";
 
 export const DEFAULT_MODEL = "claude-opus-5-5";
-// Opus 5.5 defaults to medium effort; parsing accuracy matters more than latency here.
-export const DEFAULT_EFFORT = "high" as const;
+// High effort took 2–5 minutes on a real 7-day plan, too long to wait on a phone
+// and close to the Edge Function time limit; medium is Opus 5.5's default.
+export const DEFAULT_EFFORT = "medium" as const;
 
 export interface ParseProgress {
   // "reading" until the model starts writing the draft, then "writing".

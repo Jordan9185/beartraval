@@ -199,7 +199,7 @@ struct ConfirmPlacesView: View {
                     Button("疑似固定的 \(state.unconfirmedFixedCount) 項都設為固定") { state.confirmSuspectedFixed() }
                 }
             } footer: {
-                Text("地點要由你選定才會寫入行程；保留為文字的項目不參與路線，之後可在行程裡再確認。")
+                Text("只有名稱明確相符才會自動選定。其他地點由你選，或先保留為文字（不參與路線），之後在行程裡再確認。")
             }
             if !warnings.isEmpty {
                 Section {
@@ -215,11 +215,30 @@ struct ConfirmPlacesView: View {
                     Text(rawText).font(.callout).textSelection(.enabled).accessibilityIdentifier("rawText")
                 }
             }
-            ForEach($state.items) { $item in
+            // 只把需要使用者決定的項目攤開；App 代為處理的收在下面，可點開檢查或修改。
+            ForEach(attention, id: \.self) { index in
                 Section {
-                    ConfirmItemView(item: $item, tripDates: state.tripDates)
+                    ConfirmItemView(item: $state.items[index], tripDates: state.tripDates)
                 } header: {
-                    Text(item.date ?? "日期未定")
+                    Text(state.items[index].date ?? "日期未定")
+                }
+            }
+            if searchDone < searchTotal {
+                Section {
+                    Label("還有 \(searchTotal - searchDone) 個地點搜尋中…", systemImage: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if !handled.isEmpty {
+                Section {
+                    DisclosureGroup("已自動處理 \(handled.count) 項") {
+                        ForEach(handled, id: \.self) { index in
+                            ConfirmItemView(item: $state.items[index], tripDates: state.tripDates)
+                        }
+                    }
+                    .accessibilityIdentifier("autoHandled")
+                } footer: {
+                    Text("名稱相符的地點已自動選定；Apple 地圖找不到的、航班等先保留為文字。點開可以修改。")
                 }
             }
             Section {
@@ -237,16 +256,24 @@ struct ConfirmPlacesView: View {
     }
 
     private var summary: some View {
-        let places = state.items.filter(\.needsSearch).count
-        let text = state.items.count - places
+        let needs = state.needsAttention.count
         return VStack(alignment: .leading, spacing: 2) {
-            Text("解析出 \(state.items.count) 項：\(places) 個地點待選")
-                .font(.subheadline.weight(.semibold))
-            if text > 0 {
-                Text("\(text) 項（航班、未指定地點）已先保留為文字").font(.caption).foregroundStyle(.secondary)
-            }
+            Text("解析出 \(state.items.count) 項").font(.subheadline.weight(.semibold))
+            Text(searchDone < searchTotal ? "搜尋地點中，名稱相符的會自動選定"
+                 : needs == 0 ? "全部已自動處理，可以直接建立" : "\(needs) 項需要你確認，其餘已自動處理")
+                .font(.caption).foregroundStyle(.secondary)
         }
         .accessibilityIdentifier("importSummary")
+    }
+
+    /// 需要使用者處理、且已經搜尋完（或不需搜尋）的項目。
+    private var attention: [Int] {
+        state.needsAttention.filter { state.items[$0].searched || !state.items[$0].needsSearch }
+    }
+
+    private var handled: [Int] {
+        let needs = Set(state.needsAttention)
+        return state.items.indices.filter { !needs.contains($0) }
     }
 
     private var searchTotal: Int { state.items.filter(\.needsSearch).count }
@@ -273,19 +300,22 @@ struct ConfirmPlacesView: View {
                     centers[area] = center
                 }
             }
-            let key = "\(query)|\(area ?? "")"
-            let results: [PlaceOption]
-            if let cached = cache[key] {
-                results = cached
-            } else if let center {
-                results = await placeSearch.search(query, around: center, limit: 5)
-            } else {
-                results = await placeSearch.search(query, near: area, limit: 5)
+            // 先用當地語言的查詢；找不到再用原文名稱（例如「LAVITA Hotel」比「라비타 호텔 청담」好找）。
+            var results: [PlaceOption] = []
+            for text in [query, item.stop.placeName].compactMap({ $0 }).uniqued() {
+                let key = "\(text)|\(area ?? "")"
+                if let cached = cache[key] {
+                    results = cached
+                } else {
+                    // 城市定位不到時不加區域，也不把城市名塞進查詢（會把結果帶偏）。
+                    results = center != nil ? await placeSearch.search(text, around: center, limit: 5)
+                                            : await placeSearch.search(text, near: nil, limit: 5)
+                    if Task.isCancelled { return }
+                    cache[key] = results
+                }
+                if !results.isEmpty { break }
             }
-            if Task.isCancelled { return }
-            cache[key] = results
-            state.items[index].candidates = results
-            state.items[index].searched = true
+            state.applySearchResults(results, at: index)
         }
     }
 }
@@ -303,6 +333,9 @@ struct ConfirmItemView: View {
                 Text(item.label).font(.headline)
             }
             Text("「\(item.stop.sourceExcerpt)」").font(.caption).foregroundStyle(.secondary)
+            if item.autoDecided, let note = autoNote {
+                Label(note, systemImage: "wand.and.stars").font(.caption).foregroundStyle(.tint)
+            }
             ForEach(item.stop.needsConfirmation, id: \.self) { reason in
                 Label(reasonText(reason), systemImage: "questionmark.circle").font(.caption).foregroundStyle(.orange)
             }
@@ -365,6 +398,14 @@ struct ConfirmItemView: View {
         .font(.caption)
     }
 
+    private var autoNote: String? {
+        switch item.decision {
+        case .place(let option): "名稱相符，已自動選定：\(option.displayTitle)"
+        case .pendingText: item.needsSearch ? "Apple 地圖找不到，已保留為文字" : "不是地點（航班、交通等），保留為文字"
+        default: nil
+        }
+    }
+
     private func reasonText(_ reason: ParsedStop.Reason) -> String {
         switch reason {
         case .ambiguousBranch: "分店不明，請選擇"
@@ -425,5 +466,12 @@ struct ParsingProgressView: View {
                 if let detail { Text(verbatim: detail).font(.caption).foregroundStyle(.secondary) }
             }
         }
+    }
+}
+
+private extension Array where Element: Hashable {
+    func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
     }
 }

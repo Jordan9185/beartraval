@@ -105,7 +105,7 @@ test("scorer: missing ambiguous_branch flag is a failure (AC-01)", () => {
   });
   const s = scoreCase(c, result);
   assert.deepEqual(s.stopRecall, [3, 3]);
-  assert.deepEqual(s.flags, [1, 2]);
+  assert.deepEqual(s.flags, [0, 1]);
   assert.ok(s.failures.some((f) => f.includes("ambiguous_branch")));
 });
 
@@ -114,6 +114,13 @@ test("scorer: non-stop leaking into a place name is caught", () => {
   const s = scoreCase(c, draft(null, [stop({ place_name: "護照" })]));
   assert.deepEqual(s.mustNotInclude, [2, 3]);
   assert.equal(s.extraStops, 1);
+});
+
+test("transport legs may summarise their names", () => {
+  const leg = stop({ source_excerpt: "14:00 XXX Shoes", place_name: "TSA → GMP", category: "transport", search_query: null });
+  const { result, issues } = validateDraft(input, draft("2026-10-02", [leg]));
+  assert.deepEqual(issues, []);
+  assert.deepEqual(result.days[0]!.stops[0]!.needs_confirmation, []);
 });
 
 test("place name that isn't in the text is flagged unknown", () => {

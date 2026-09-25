@@ -68,7 +68,8 @@ export function validateDraft(input: ParseInput, draft: ParseResult): ValidatedR
 
       // Names are copied as written, so one that isn't in the text was invented
       // or planted; it goes to the user as an unknown place.
-      if (stop.place_name !== null && !haystack.toLowerCase().includes(squash(stop.place_name).toLowerCase())) {
+      // Transport legs are summarised ("TSA → GMP") and never looked up, so they're exempt.
+      if (stop.place_name !== null && stop.category !== "transport" && !haystack.toLowerCase().includes(squash(stop.place_name).toLowerCase())) {
         issues.push({ path: `${path}.place_name`, issue: "place name not found in input" });
         stop.confidence = "low";
         addReason(stop, "unknown_place");
