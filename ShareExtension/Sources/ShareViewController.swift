@@ -60,7 +60,7 @@ struct ShareRootView: View {
                     ProgressView("讀取分享內容…")
                 }
             }
-            .navigationTitle("BearTravel")
+            .navigationTitle("BeaRTravel")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消", action: finish) }

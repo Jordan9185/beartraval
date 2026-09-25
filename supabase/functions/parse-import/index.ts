@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
       tripEnd: session.end_date,
       timeZone: session.time_zone,
       rawText: session.raw_text,
-    });
+    }, { model: Deno.env.get("ANTHROPIC_MODEL") || undefined });
     if (outcome.status === "failed") {
       await record("failed", null, outcome.reason, null);
       return json({ status: "failed", reason: outcome.reason });

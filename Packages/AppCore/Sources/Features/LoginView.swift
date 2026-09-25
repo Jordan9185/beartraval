@@ -55,7 +55,7 @@ struct LoginView: View {
                     Section { Text(errorMessage).foregroundStyle(.red) }
                 }
             }
-            .navigationTitle("BearTravel")
+            .navigationTitle("BeaRTravel")
             .onChange(of: mode) { errorMessage = nil }
         }
     }

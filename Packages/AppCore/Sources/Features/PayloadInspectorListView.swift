@@ -32,7 +32,7 @@ struct PayloadInspectorListView: View {
         }
         .overlay {
             if records.isEmpty && store != nil {
-                ContentUnavailableView("尚無紀錄", systemImage: "tray", description: Text("從 Threads／IG 分享到 BearTravel 後回來這裡查看。"))
+                ContentUnavailableView("尚無紀錄", systemImage: "tray", description: Text("從 Threads／IG 分享到 BeaRTravel 後回來這裡查看。"))
             }
         }
         .navigationTitle("分享內容紀錄")

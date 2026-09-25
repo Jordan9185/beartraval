@@ -71,7 +71,7 @@ struct SavedView: View {
                     ContentUnavailableView("尚未建立行程", systemImage: "bookmark")
                 } else if loaded && filter.apply(entries, includeAdded: includeAdded).isEmpty && drafts.isEmpty {
                     ContentUnavailableView("尚未收藏地點", systemImage: "bookmark",
-                                           description: Text("從 Threads、IG 或地圖 App 分享到 BearTravel。"))
+                                           description: Text("從 Threads、IG 或地圖 App 分享到 BeaRTravel。"))
                 }
             }
             .navigationTitle("收藏")

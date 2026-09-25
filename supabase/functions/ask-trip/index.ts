@@ -126,7 +126,8 @@ Deno.serve(async (req) => {
 
   const started = Date.now();
   try {
-    const outcome = await askTrip(new Anthropic({ apiKey }), context.data, question);
+    const outcome = await askTrip(new Anthropic({ apiKey }), context.data, question,
+      { model: Deno.env.get("ANTHROPIC_MODEL") || undefined });
     const latency_ms = Date.now() - started;
     if (outcome.status === "failed") {
       console.log(JSON.stringify({ fn: "ask-trip", status: "failed", reason: outcome.reason, latency_ms }));

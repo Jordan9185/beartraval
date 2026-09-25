@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
     `<p class="muted">${escape(data.inviter ?? "旅伴")} 邀請你加入</p>
 <h1>${escape(data.trip_name)}</h1>
 <p>${escape(data.start_date)} – ${escape(data.end_date)}<br><span class="muted">權限：${role}</span></p>
-<a class="button" href="${appLink}">在 BearTravel 開啟</a>
-<p class="muted">需要先安裝 BearTravel 並登入。</p>`,
+<a class="button" href="${appLink}">在 BeaRTravel 開啟</a>
+<p class="muted">需要先安裝 BeaRTravel 並登入。</p>`,
   );
 });

@@ -5,6 +5,13 @@ BUNDLE_ID_PREFIX = com.jordan9185
 DEVELOPMENT_TEAM =
 APP_GROUP_ID = group.$(BUNDLE_ID_PREFIX).beartravel
 
+// 簽章用的 entitlements。免費的個人開發帳號若不支援 App Group，在 Local.xcconfig.local 改成：
+//   APP_ENTITLEMENTS = Config/NoAppGroup.entitlements
+//   EXTENSION_ENTITLEMENTS = Config/NoAppGroup.entitlements
+// （分享擴充功能就無法與 App 共用登入與草稿，其餘功能不受影響。）
+APP_ENTITLEMENTS = App/BearTravel.entitlements
+EXTENSION_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements
+
 // 後端：預設為本機 `supabase start`（xcconfig 會把 // 當註解，所以用 $() 隔開）。
 // 本機 anon key 由 `supabase status` 取得；連雲端專案時在 Local.xcconfig.local 覆寫兩者。
 SUPABASE_URL = http:/$()/127.0.0.1:54321

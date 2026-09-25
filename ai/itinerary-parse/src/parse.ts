@@ -8,7 +8,9 @@ import { SYSTEM_PROMPT, userMessage } from "./prompt.ts";
 import { ParseResult, type ParseInput } from "./schema.ts";
 import { validateDraft, type ValidationIssue } from "./validate.ts";
 
-export const DEFAULT_MODEL = "claude-opus-5";
+export const DEFAULT_MODEL = "claude-opus-5-5";
+// Opus 5.5 defaults to medium effort; parsing accuracy matters more than latency here.
+export const DEFAULT_EFFORT = "high" as const;
 
 export interface ParseOptions {
   model?: string;
@@ -39,7 +41,7 @@ export async function parseItinerary(
     thinking: { type: "adaptive" },
     output_config: {
       format: betaZodOutputFormat(ParseResult),
-      ...(options.effort ? { effort: options.effort } : {}),
+      effort: options.effort ?? DEFAULT_EFFORT,
     },
     system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: userMessage(input) }],

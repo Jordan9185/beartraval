@@ -35,4 +35,4 @@ npm run eval -- --effort medium --only seoul-korean,hiroshima-japanese
 
 ## 模型與費用
 
-預設 `claude-opus-5`、adaptive thinking，並開啟伺服器端 refusal fallback（`fallbacks: "default"`）。實際跑 `npm run eval` 前先確認費用；可用 `--effort` 比較不同設定的準確率與 token 數。
+預設 `claude-opus-5-5`（effort `high`）、adaptive thinking，並開啟伺服器端 refusal fallback（`fallbacks: "default"`）。實際跑 `npm run eval` 前先確認費用；可用 `--effort` 比較不同設定的準確率與 token 數。
