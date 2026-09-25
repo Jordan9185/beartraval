@@ -94,9 +94,16 @@ struct CreateTripView: View {
                     Text("跨國旅程建好後，可以在每一天的設定改時區。")
                 }
                 Section {
-                    TextEditor(text: $rawText).frame(minHeight: 160)
+                    // 固定高度：長文在框內捲動，不會把上方的名稱、日期、時區擠出畫面。
+                    TextEditor(text: $rawText).frame(height: 180)
                 } header: {
-                    Text("匯入行程文字（可略過）")
+                    HStack {
+                        Text("匯入行程文字（可略過）")
+                        Spacer()
+                        if hasText {
+                            Button("清除") { rawText = "" }.font(.caption).textCase(nil)
+                        }
+                    }
                 } footer: {
                     Text("貼上 ChatGPT、LINE 或備忘錄的行程。解析後逐一確認地點，才會建立正式行程；原文會保留。")
                 }
@@ -104,6 +111,7 @@ struct CreateTripView: View {
                     Text(errorMessage).foregroundStyle(.red)
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("建立旅程")
             .navigationDestination(item: $importSession) { importSession in
                 ImportFlowView(session: importSession, service: session.imports, placeSearch: session.placeSearch) { trip in
