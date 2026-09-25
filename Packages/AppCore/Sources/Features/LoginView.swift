@@ -25,7 +25,7 @@ struct LoginView: View {
                 .listRowBackground(Color.clear)
 
                 Section {
-                    TextField("Email", text: $email)
+                    TextField("電子郵件", text: $email)
                         .textContentType(.username)
                         .autocorrectionDisabled()
                         #if os(iOS)

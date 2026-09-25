@@ -30,10 +30,10 @@ struct TodayView: View {
                     ProgressView()
                 }
             }
-            .navigationTitle("Today")
+            .navigationTitle("今天")
             .toolbar {
                 if store.trips.count > 1 {
-                    Picker("Trip", selection: Binding(get: { store.selectedTripID }, set: { store.selectedTripID = $0 })) {
+                    Picker("旅程", selection: Binding(get: { store.selectedTripID }, set: { store.selectedTripID = $0 })) {
                         ForEach(store.trips) { Text($0.name).tag(Optional($0.id)) }
                     }
                 }
@@ -41,7 +41,7 @@ struct TodayView: View {
                 if store.snapshot != nil {
                     Button("AI 助手", systemImage: "sparkles") { showsAssistant = true }
                 }
-                if let onDebug { Button("Debug", systemImage: "ladybug", action: onDebug) }
+                if let onDebug { Button("除錯", systemImage: "ladybug", action: onDebug) }
             }
             .sheet(isPresented: $showsAccount) { AccountView(session: session) }
             .sheet(isPresented: $showsAssistant) {
@@ -65,7 +65,7 @@ struct TodayView: View {
                     Spacer()
                     VStack {
                         Text(snapshot.trip.name).font(.headline)
-                        Text("Day \(index + 1) · \(day.day.localDate)").font(.subheadline).foregroundStyle(.secondary)
+                        Text("第 \(index + 1) 天 · \(day.day.localDate)").font(.subheadline).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Button { dayIndex = index + 1 } label: { Image(systemName: "chevron.right") }.disabled(index >= snapshot.timeline.count - 1)
@@ -80,7 +80,7 @@ struct TodayView: View {
                 ForEach(day.stops) { stop in
                     HStack {
                         Text(stop.startTime.map(LocalTime.hourMinute) ?? "--:--").monospacedDigit().foregroundStyle(.secondary)
-                        Text(stop.placeId.flatMap { snapshot.places[$0] }.map { $0.nameLocal ?? $0.name } ?? stop.rawLabel)
+                        Text(stop.placeId.flatMap { snapshot.places[$0] }.map { $0.displayTitle(fallbackChinese: stop.rawLabel) } ?? stop.rawLabel)
                         if stop.fixed { Image(systemName: "lock.fill").font(.caption).foregroundStyle(.orange).accessibilityLabel("固定") }
                         if stop.kind == .purchase { Image(systemName: "bag").font(.caption) }
                     }
@@ -92,7 +92,7 @@ struct TodayView: View {
 
             Section {
                 if computingNearby { ProgressView("計算順路…") }
-                else if nearby.isEmpty { Text("沒有順路的 Saved").foregroundStyle(.secondary) }
+                else if nearby.isEmpty { Text("沒有順路的收藏").foregroundStyle(.secondary) }
                 ForEach(nearby, id: \.0.id) { entry, match in
                     HStack {
                         VStack(alignment: .leading) {
@@ -104,7 +104,7 @@ struct TodayView: View {
                     }
                 }
             } header: {
-                Text("順路 Saved（\(nearby.count)）")
+                Text("順路收藏（\(nearby.count)）")
             } footer: {
                 Text("加入後多花 \(Self.nearbyThresholdMinutes) 分鐘以內的收藏。")
             }
@@ -136,7 +136,7 @@ struct TodayView: View {
         .task(id: "\(snapshot.revision)-\(index)") { await computeNearby(snapshot, index) }
         .sheet(item: $adding) { entry in
             if let place = entry.place {
-                ProposalReviewView(session: session, tripID: snapshot.trip.id, dayID: day.day.id, dayTitle: "Day \(index + 1)",
+                ProposalReviewView(session: session, tripID: snapshot.trip.id, dayID: day.day.id, dayTitle: "第 \(index + 1) 天",
                                    mode: day.day.transportMode, candidate: SearchResult(draft: place.asDraft),
                                    dwellMinutes: entry.saved.category.defaultDwellMinutes) {
                     adding = nil
@@ -167,12 +167,12 @@ struct TodayView: View {
 
 extension Place {
     var asDraft: PlaceDraft {
-        PlaceDraft(providerPlaceId: providerPlaceId, name: nameLocal ?? name, nameLocal: nameLocal, address: address,
-                   latitude: latitude, longitude: longitude, countryCode: countryCode)
+        PlaceDraft(providerPlaceId: providerPlaceId, name: name, nameLocal: nameLocal, address: address,
+                   latitude: latitude, longitude: longitude, countryCode: countryCode, nameZh: nameZh)
     }
 
     var mapPoint: MapPoint {
-        MapPoint(name: nameLocal ?? name, latitude: latitude, longitude: longitude)
+        MapPoint(name: originalName, latitude: latitude, longitude: longitude)
     }
 
     var isInKorea: Bool {

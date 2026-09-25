@@ -17,27 +17,27 @@ select id as d4 from app.trip_days where trip_id = :'trip_id' and display_order 
 select id as d5 from app.trip_days where trip_id = :'trip_id' and display_order = 4 \gset
 
 -- 地點（座標為概略值）
-select (app.upsert_place('apple_mapkit', 'demo-hotel', 'Nine Tree Premier Hotel Myeongdong II', 37.5634, 126.9837, '나인트리 프리미어 호텔 명동2', '서울특별시 중구 명동', 'KR')).id as hotel \gset
-select (app.upsert_place('apple_mapkit', 'demo-namsan', 'N Seoul Tower', 37.5512, 126.9882, 'N서울타워', '서울특별시 용산구 남산공원길 105', 'KR')).id as namsan \gset
-select (app.upsert_place('apple_mapkit', 'demo-kyoja', 'Myeongdong Kyoja', 37.5625, 126.9856, '명동교자 본점', '서울특별시 중구 명동10길 29', 'KR')).id as kyoja \gset
-select (app.upsert_place('apple_mapkit', 'demo-oliveyoung', 'Olive Young Myeongdong Flagship', 37.5637, 126.9854, '올리브영 명동 플래그십', '서울특별시 중구 명동길 53', 'KR')).id as oliveyoung \gset
-select (app.upsert_place('apple_mapkit', 'demo-gyeongbok', 'Gyeongbokgung Palace', 37.5796, 126.9770, '경복궁', '서울특별시 종로구 사직로 161', 'KR')).id as gyeongbok \gset
-select (app.upsert_place('apple_mapkit', 'demo-bukchon', 'Bukchon Hanok Village', 37.5826, 126.9831, '북촌한옥마을', '서울특별시 종로구 계동길 37', 'KR')).id as bukchon \gset
-select (app.upsert_place('apple_mapkit', 'demo-gwangjang', 'Gwangjang Market', 37.5700, 126.9996, '광장시장', '서울특별시 종로구 창경궁로 88', 'KR')).id as gwangjang \gset
-select (app.upsert_place('apple_mapkit', 'demo-ddp', 'Dongdaemun Design Plaza', 37.5665, 127.0092, '동대문디자인플라자', '서울특별시 중구 을지로 281', 'KR')).id as ddp \gset
-select (app.upsert_place('apple_mapkit', 'demo-tosokchon', 'Tosokchon Samgyetang', 37.5781, 126.9716, '토속촌 삼계탕', '서울특별시 종로구 자하문로5길 5', 'KR')).id as tosokchon \gset
-select (app.upsert_place('apple_mapkit', 'demo-seoulforest', 'Seoul Forest', 37.5444, 127.0374, '서울숲', '서울특별시 성동구 뚝섬로 273', 'KR')).id as forest \gset
-select (app.upsert_place('apple_mapkit', 'demo-onion', 'Onion Seongsu', 37.5447, 127.0584, '어니언 성수', '서울특별시 성동구 아차산로9길 8', 'KR')).id as onion \gset
-select (app.upsert_place('apple_mapkit', 'demo-musinsa', 'Musinsa Standard Seongsu', 37.5430, 127.0560, '무신사 스탠다드 성수', '서울특별시 성동구 성수동2가', 'KR')).id as musinsa \gset
-select (app.upsert_place('apple_mapkit', 'demo-hongdae', 'Hongik Univ. Station', 37.5572, 126.9245, '홍대입구역', '서울특별시 마포구 양화로 160', 'KR')).id as hongdae \gset
-select (app.upsert_place('apple_mapkit', 'demo-yeonnam', 'Gyeongui Line Forest Park', 37.5625, 126.9215, '연남동 경의선숲길', '서울특별시 마포구 연남동', 'KR')).id as yeonnam \gset
-select (app.upsert_place('apple_mapkit', 'demo-mangwon', 'Mangwon Market', 37.5560, 126.9060, '망원시장', '서울특별시 마포구 포은로8길 14', 'KR')).id as mangwon \gset
-select (app.upsert_place('apple_mapkit', 'demo-coex', 'Starfield Library COEX', 37.5100, 127.0600, '별마당도서관', '서울특별시 강남구 영동대로 513', 'KR')).id as coex \gset
-select (app.upsert_place('apple_mapkit', 'demo-lotte', 'Lotte World Tower Seoul Sky', 37.5126, 127.1025, '롯데월드타워 서울스카이', '서울특별시 송파구 올림픽로 300', 'KR')).id as lotte \gset
-select (app.upsert_place('apple_mapkit', 'demo-icn', 'Incheon International Airport T1', 37.4492, 126.4510, '인천국제공항 제1터미널', '인천광역시 중구 공항로 272', 'KR')).id as icn \gset
-select (app.upsert_place('apple_mapkit', 'demo-layered', 'Cafe Layered Yeonnam', 37.5609, 126.9230, '카페 레이어드 연남', '서울특별시 마포구 연남동', 'KR')).id as layered \gset
-select (app.upsert_place('apple_mapkit', 'demo-tongin', 'Tongin Market', 37.5808, 126.9696, '통인시장', '서울특별시 종로구 자하문로15길 18', 'KR')).id as tongin \gset
-select (app.upsert_place('apple_mapkit', 'demo-lottedf', 'Lotte Duty Free Myeongdong', 37.5650, 126.9810, '롯데면세점 명동본점', '서울특별시 중구 남대문로 81', 'KR')).id as lottedf \gset
+select (app.upsert_place('apple_mapkit', 'demo-hotel', 'Nine Tree Premier Hotel Myeongdong II', 37.5634, 126.9837, '나인트리 프리미어 호텔 명동2', '서울특별시 중구 명동', 'KR', '明洞九樹尊貴酒店2號店')).id as hotel \gset
+select (app.upsert_place('apple_mapkit', 'demo-namsan', 'N Seoul Tower', 37.5512, 126.9882, 'N서울타워', '서울특별시 용산구 남산공원길 105', 'KR', 'N首爾塔')).id as namsan \gset
+select (app.upsert_place('apple_mapkit', 'demo-kyoja', 'Myeongdong Kyoja', 37.5625, 126.9856, '명동교자 본점', '서울특별시 중구 명동10길 29', 'KR', '明洞餃子本店')).id as kyoja \gset
+select (app.upsert_place('apple_mapkit', 'demo-oliveyoung', 'Olive Young Myeongdong Flagship', 37.5637, 126.9854, '올리브영 명동 플래그십', '서울특별시 중구 명동길 53', 'KR', 'Olive Young 明洞旗艦店')).id as oliveyoung \gset
+select (app.upsert_place('apple_mapkit', 'demo-gyeongbok', 'Gyeongbokgung Palace', 37.5796, 126.9770, '경복궁', '서울특별시 종로구 사직로 161', 'KR', '景福宮')).id as gyeongbok \gset
+select (app.upsert_place('apple_mapkit', 'demo-bukchon', 'Bukchon Hanok Village', 37.5826, 126.9831, '북촌한옥마을', '서울특별시 종로구 계동길 37', 'KR', '北村韓屋村')).id as bukchon \gset
+select (app.upsert_place('apple_mapkit', 'demo-gwangjang', 'Gwangjang Market', 37.5700, 126.9996, '광장시장', '서울특별시 종로구 창경궁로 88', 'KR', '廣藏市場')).id as gwangjang \gset
+select (app.upsert_place('apple_mapkit', 'demo-ddp', 'Dongdaemun Design Plaza', 37.5665, 127.0092, '동대문디자인플라자', '서울특별시 중구 을지로 281', 'KR', '東大門設計廣場')).id as ddp \gset
+select (app.upsert_place('apple_mapkit', 'demo-tosokchon', 'Tosokchon Samgyetang', 37.5781, 126.9716, '토속촌 삼계탕', '서울특별시 종로구 자하문로5길 5', 'KR', '土俗村蔘雞湯')).id as tosokchon \gset
+select (app.upsert_place('apple_mapkit', 'demo-seoulforest', 'Seoul Forest', 37.5444, 127.0374, '서울숲', '서울특별시 성동구 뚝섬로 273', 'KR', '首爾林')).id as forest \gset
+select (app.upsert_place('apple_mapkit', 'demo-onion', 'Onion Seongsu', 37.5447, 127.0584, '어니언 성수', '서울특별시 성동구 아차산로9길 8', 'KR', 'Onion 聖水店')).id as onion \gset
+select (app.upsert_place('apple_mapkit', 'demo-musinsa', 'Musinsa Standard Seongsu', 37.5430, 127.0560, '무신사 스탠다드 성수', '서울특별시 성동구 성수동2가', 'KR', 'Musinsa Standard 聖水店')).id as musinsa \gset
+select (app.upsert_place('apple_mapkit', 'demo-hongdae', 'Hongik Univ. Station', 37.5572, 126.9245, '홍대입구역', '서울특별시 마포구 양화로 160', 'KR', '弘大入口站')).id as hongdae \gset
+select (app.upsert_place('apple_mapkit', 'demo-yeonnam', 'Gyeongui Line Forest Park', 37.5625, 126.9215, '연남동 경의선숲길', '서울특별시 마포구 연남동', 'KR', '延南洞京義線林道')).id as yeonnam \gset
+select (app.upsert_place('apple_mapkit', 'demo-mangwon', 'Mangwon Market', 37.5560, 126.9060, '망원시장', '서울특별시 마포구 포은로8길 14', 'KR', '望遠市場')).id as mangwon \gset
+select (app.upsert_place('apple_mapkit', 'demo-coex', 'Starfield Library COEX', 37.5100, 127.0600, '별마당도서관', '서울특별시 강남구 영동대로 513', 'KR', '星空圖書館')).id as coex \gset
+select (app.upsert_place('apple_mapkit', 'demo-lotte', 'Lotte World Tower Seoul Sky', 37.5126, 127.1025, '롯데월드타워 서울스카이', '서울특별시 송파구 올림픽로 300', 'KR', '樂天世界塔 Seoul Sky')).id as lotte \gset
+select (app.upsert_place('apple_mapkit', 'demo-icn', 'Incheon International Airport T1', 37.4492, 126.4510, '인천국제공항 제1터미널', '인천광역시 중구 공항로 272', 'KR', '仁川國際機場第一航廈')).id as icn \gset
+select (app.upsert_place('apple_mapkit', 'demo-layered', 'Cafe Layered Yeonnam', 37.5609, 126.9230, '카페 레이어드 연남', '서울특별시 마포구 연남동', 'KR', 'Cafe Layered 延南店')).id as layered \gset
+select (app.upsert_place('apple_mapkit', 'demo-tongin', 'Tongin Market', 37.5808, 126.9696, '통인시장', '서울특별시 종로구 자하문로15길 18', 'KR', '通仁市場')).id as tongin \gset
+select (app.upsert_place('apple_mapkit', 'demo-lottedf', 'Lotte Duty Free Myeongdong', 37.5650, 126.9810, '롯데면세점 명동본점', '서울특별시 중구 남대문로 81', 'KR', '樂天免稅店明洞總店')).id as lottedf \gset
 
 -- Day 1：抵達、明洞（步行）
 select app.commit_itinerary(:'d1', 0, format($$[

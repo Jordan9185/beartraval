@@ -9,15 +9,15 @@ struct DebugMenuView: View {
             List {
                 Section("帳號") {
                     if case .signedIn(let email) = session.state {
-                        LabeledContent("Email", value: email ?? "（未提供）")
+                        LabeledContent("電子郵件", value: email ?? "（未提供）")
                     }
                     Button("登出", role: .destructive) { Task { await session.signOut() } }
                 }
-                NavigationLink("Payload Inspector（#2）") { PayloadInspectorListView() }
+                NavigationLink("分享內容紀錄（#2）") { PayloadInspectorListView() }
                 NavigationLink("路線／AI 呼叫統計") { TelemetryView() }
                 NavigationLink("Naver／Kakao 外開連結（#1）") { LocalMapLinkDebugView() }
             }
-            .navigationTitle("Debug")
+            .navigationTitle("除錯")
         }
     }
 }

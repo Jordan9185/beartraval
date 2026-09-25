@@ -109,10 +109,10 @@ public enum LoginError: Error, Equatable {
 
     public var message: String {
         switch self {
-        case .invalidCredentials: "Email 或密碼錯誤。"
-        case .emailTaken: "這個 Email 已經註冊過，請直接登入。"
+        case .invalidCredentials: "電子郵件或密碼錯誤。"
+        case .emailTaken: "這個電子郵件已經註冊過，請直接登入。"
         case .weakPassword: "密碼強度不足，請至少 \(LoginRules.minimumPasswordLength) 個字元。"
-        case .confirmationRequired: "帳號已建立，但後端要求 Email 確認；請聯絡管理者關閉 Email 確認。"
+        case .confirmationRequired: "帳號已建立，但後端要求驗證電子郵件；請聯絡管理者關閉驗證。"
         case .other(let message): "登入失敗：\(message)"
         }
     }
@@ -129,7 +129,7 @@ public enum LoginRules {
     }
 
     public static func signUpProblem(email: String, password: String, confirmation: String) -> String? {
-        if !isValidEmail(email) { return "請輸入有效的 Email。" }
+        if !isValidEmail(email) { return "請輸入有效的電子郵件。" }
         if password.count < minimumPasswordLength { return "密碼至少 \(minimumPasswordLength) 個字元。" }
         if password != confirmation { return "兩次輸入的密碼不一致。" }
         return nil

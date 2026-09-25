@@ -48,7 +48,7 @@ struct TripMapView: View {
                     ProgressView()
                 }
             }
-            .navigationTitle("Map")
+            .navigationTitle("地圖")
             .navigationBarTitleDisplayModeInline()
         }
     }

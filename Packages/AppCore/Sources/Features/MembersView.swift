@@ -54,7 +54,7 @@ struct MembersView: View {
                 } header: {
                     Text("邀請")
                 } footer: {
-                    Text("連結 7 天內有效。預覽頁只顯示 Trip 名稱、日期與邀請者，不顯示行程內容。")
+                    Text("連結 7 天內有效。預覽頁只顯示旅程名稱、日期與邀請者，不顯示行程內容。")
                 }
             }
 
@@ -121,13 +121,13 @@ struct JoinTripView: View {
                 Section {
                     TextField("貼上邀請連結", text: $text, axis: .vertical)
                 } footer: {
-                    Text("加入後可依權限查看或編輯共同的 Saved、Shopping 與行程。")
+                    Text("加入後可依權限查看或編輯共同的收藏、購物清單與行程。")
                 }
                 Button(joining ? "加入中…" : "加入") { Task { await join() } }
                     .disabled(joining || InviteLink.token(from: text) == nil)
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             }
-            .navigationTitle("加入 Trip")
+            .navigationTitle("加入旅程")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
             .onAppear { if let initialToken { text = initialToken } }
         }

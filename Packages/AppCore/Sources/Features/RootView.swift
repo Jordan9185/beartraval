@@ -55,15 +55,15 @@ public struct RootView: View {
     private func tabView(_ session: SessionModel) -> some View {
         TabView {
             TodayView(session: session, store: tripStore(session), onDebug: debugAction)
-                .tabItem { Label("Today", systemImage: "sun.max") }
+                .tabItem { Label("今天", systemImage: "sun.max") }
             TripListView(session: session)
-                .tabItem { Label("Trip", systemImage: "calendar") }
+                .tabItem { Label("旅程", systemImage: "calendar") }
             TripMapView(session: session, store: tripStore(session))
-                .tabItem { Label("Map", systemImage: "map") }
+                .tabItem { Label("地圖", systemImage: "map") }
             SavedView(session: session)
-                .tabItem { Label("Saved", systemImage: "bookmark") }
+                .tabItem { Label("收藏", systemImage: "bookmark") }
             ShoppingTab(session: session)
-                .tabItem { Label("Shopping", systemImage: "bag") }
+                .tabItem { Label("購物", systemImage: "bag") }
         }
         .sheet(isPresented: $showsDebug) { DebugMenuView(session: session) }
         .task {
@@ -98,7 +98,7 @@ struct EmptyTab: View {
                 .navigationTitle(title)
                 .toolbar {
                     if let onDebug {
-                        Button("Debug", systemImage: "ladybug", action: onDebug)
+                        Button("除錯", systemImage: "ladybug", action: onDebug)
                     }
                 }
         }

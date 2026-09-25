@@ -112,7 +112,7 @@ public struct ShoppingUITestRoot: View {
             ShoppingListView(service: service, tripID: FakeShoppingService.tripID, canEdit: true, queue: nil, reloadToken: token) { _ in
                 Text("merchant")
             }
-            .navigationTitle("Shopping")
+            .navigationTitle("購物清單")
         }
     }
 }

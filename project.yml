@@ -1,5 +1,7 @@
 name: BearTravel
 options:
+  # 使用者介面以繁體中文為主（系統元件也跟著顯示繁中）。
+  developmentLanguage: zh-Hant
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
@@ -46,6 +48,8 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: BearTravel
+        CFBundleDevelopmentRegion: zh-Hant
+        CFBundleLocalizations: [zh-Hant]
         SupabaseURL: $(SUPABASE_URL)
         SupabaseAnonKey: $(SUPABASE_ANON_KEY)
         # 邀請連結 beartravel://invite?token=…（Universal Link 待有網域後補上）
@@ -85,6 +89,8 @@ targets:
       path: ShareExtension/Info.plist
       properties:
         CFBundleDisplayName: BearTravel
+        CFBundleDevelopmentRegion: zh-Hant
+        CFBundleLocalizations: [zh-Hant]
         SupabaseURL: $(SUPABASE_URL)
         SupabaseAnonKey: $(SUPABASE_ANON_KEY)
         NSAppTransportSecurity:

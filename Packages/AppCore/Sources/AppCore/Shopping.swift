@@ -180,7 +180,7 @@ extension TripRepository: ShoppingService {
                 let stop = item.plannedStopId.flatMap { stopByID[$0] }
                 let place = stop?.placeId.flatMap { placeByID[$0] }
                 return ShoppingEntry(item: item, interestedUserIDs: interestByItem[item.id] ?? [], events: eventsByItem[item.id] ?? [],
-                                     plannedDate: stop.flatMap { dayByID[$0.dayId]?.localDate }, plannedStore: place.map { $0.nameLocal ?? $0.name })
+                                     plannedDate: stop.flatMap { dayByID[$0.dayId]?.localDate }, plannedStore: place.map { $0.displayTitle })
             }
         } catch {
             throw BackendError.from(error)

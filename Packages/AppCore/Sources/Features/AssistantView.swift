@@ -95,7 +95,7 @@ struct AssistantView: View {
         if let entry = snapshot.saved.first(where: { $0.id.uuidString.lowercased() == proposal.savedId.lowercased() }),
            let place = entry.place,
            let day = snapshot.timeline.first(where: { $0.id.uuidString.lowercased() == proposal.dayId.lowercased() }) {
-            ProposalReviewView(session: session, tripID: snapshot.trip.id, dayID: day.id, dayTitle: "Day \(day.day.displayOrder + 1)",
+            ProposalReviewView(session: session, tripID: snapshot.trip.id, dayID: day.id, dayTitle: "第 \(day.day.displayOrder + 1) 天",
                                mode: day.day.transportMode, candidate: SearchResult(draft: place.asDraft),
                                dwellMinutes: entry.saved.category.defaultDwellMinutes, createdByAI: true) {
                 applying = nil
@@ -148,7 +148,7 @@ struct AssistantView: View {
     }
 
     private func dayTitle(_ id: String) -> String? {
-        snapshot.timeline.first { $0.id.uuidString.lowercased() == id.lowercased() }.map { "Day \($0.day.displayOrder + 1)" }
+        snapshot.timeline.first { $0.id.uuidString.lowercased() == id.lowercased() }.map { "第 \($0.day.displayOrder + 1) 天" }
     }
 
     private func citationName(_ c: AssistantAnswer.Citation) -> String? {
@@ -157,8 +157,8 @@ struct AssistantView: View {
         case "saved": return savedName(id)
         case "shopping": return snapshot.shopping.first { $0.id.uuidString.lowercased() == id }?.item.name
         case "stop":
-            let stop = snapshot.timeline.flatMap(\.stops).first { $0.id.uuidString.lowercased() == id }
-            return stop.map { $0.placeId.flatMap { snapshot.places[$0] }.map { $0.nameLocal ?? $0.name } ?? $0.rawLabel }
+            guard let stop = snapshot.timeline.flatMap(\.stops).first(where: { $0.id.uuidString.lowercased() == id }) else { return nil }
+            return stop.placeId.flatMap { snapshot.places[$0] }?.displayTitle(fallbackChinese: stop.rawLabel) ?? stop.rawLabel
         case "route_fact": return "順路試算"
         default: return nil
         }

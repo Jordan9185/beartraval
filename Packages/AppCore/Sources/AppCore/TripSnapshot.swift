@@ -48,11 +48,11 @@ public enum MapLayer: String, CaseIterable, Hashable, Sendable {
 
     public var title: String {
         switch self {
-        case .todayRoute: "Today Route"
-        case .saved: "Saved"
-        case .food: "Food"
-        case .shopping: "Shopping"
-        case .otherDays: "Other Days"
+        case .todayRoute: "今日路線"
+        case .saved: "收藏"
+        case .food: "美食"
+        case .shopping: "購物"
+        case .otherDays: "其他天"
         }
     }
 }
@@ -86,7 +86,7 @@ extension TripSnapshot {
                 guard let place = stop.placeId.flatMap({ places[$0] }) else { continue }
                 order += 1
                 pins.append(TripMapPin(id: "stop-\(stop.id)", layer: layer, kind: .stop(stop.id, order: order, fixed: stop.fixed),
-                                   place: place, title: place.nameLocal ?? place.name, dimmed: !isToday))
+                                   place: place, title: place.displayTitle(fallbackChinese: stop.rawLabel), dimmed: !isToday))
             }
         }
         for entry in routableSaved {
@@ -102,7 +102,7 @@ extension TripSnapshot {
                     guard let place = places[candidate.placeId] else { continue }
                     pins.append(TripMapPin(id: "merchant-\(candidate.id)", layer: .shopping,
                                        kind: .merchant(itemID: entry.id, candidateID: candidate.id),
-                                       place: place, title: "\(entry.item.name) · \(place.nameLocal ?? place.name)", dimmed: entry.isPurchased))
+                                       place: place, title: "\(entry.item.name) · \(place.displayTitle)", dimmed: entry.isPurchased))
                 }
             }
         }

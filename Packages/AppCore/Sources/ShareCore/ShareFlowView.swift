@@ -126,7 +126,7 @@ public struct ShareFlowView: View {
                 } label: {
                     HStack {
                         VStack(alignment: .leading) {
-                            Text(option.name)
+                            Text(option.displayTitle)
                             if let address = option.address { Text(address).font(.caption).foregroundStyle(.secondary) }
                         }
                         Spacer()
@@ -147,11 +147,11 @@ public struct ShareFlowView: View {
     // MARK: Trip 與順路
 
     private var tripSection: some View {
-        Section("加入哪個 Trip") {
+        Section("加入哪個旅程") {
             if trips.isEmpty {
-                Text(signedIn == nil ? "載入中…" : "還沒有 Trip，請先在 App 建立。").foregroundStyle(.secondary)
+                Text(signedIn == nil ? "載入中…" : "還沒有旅程，請先在 App 建立。").foregroundStyle(.secondary)
             } else {
-                Picker("Trip", selection: $tripID) {
+                Picker("旅程", selection: $tripID) {
                     ForEach(trips) { Text($0.name).tag(Optional($0.id)) }
                 }
                 .onChange(of: tripID) { Task { await computeMatches() } }
@@ -190,7 +190,7 @@ public struct ShareFlowView: View {
             Button(busy ? "處理中…" : "先收藏") { Task { await save() } }
                 .disabled(busy || tripID == nil || (selected == nil && query.trimmingCharacters(in: .whitespaces).isEmpty))
         } footer: {
-            Text(selected == nil ? "未選地點時會收藏為「地點待確認」，之後可補填，不會參與路線計算。" : "收藏到共同 Saved，不會改動正式行程。")
+            Text(selected == nil ? "未選地點時會收藏為「地點待確認」，之後可補填，不會參與路線計算。" : "收藏到共同的收藏清單，不會改動正式行程。")
         }
     }
 
@@ -251,7 +251,7 @@ public struct ShareFlowView: View {
             let days = try await repository.days(of: tripID)
             var results: [DayMatch] = []
             for day in days {
-                dayTitles[day.id] = "Day \(day.displayOrder + 1)"
+                dayTitles[day.id] = "第 \(day.displayOrder + 1) 天"
                 let plan = try await repository.loadDayPlan(tripID: tripID, dayID: day.id)
                 results.append(await matcher.match(RouteCandidate(point: routePoint(selected), dwellMinutes: category.defaultDwellMinutes),
                                                    into: plan, mode: day.transportMode))
@@ -270,7 +270,7 @@ public struct ShareFlowView: View {
             let place = try await repository.upsertPlace(selected.draft)
             let flow = AddToDayFlow(service: repository, matcher: matcher)
             point = routePoint(selected)
-            let (fresh, _) = try await flow.propose(placeID: place.id, label: place.nameLocal ?? place.name, point: point!,
+            let (fresh, _) = try await flow.propose(placeID: place.id, label: place.displayTitle, point: point!,
                                                     dwellMinutes: category.defaultDwellMinutes, tripID: tripID, dayID: match.dayID, mode: match.mode)
             pending = fresh
             notice = nil
@@ -310,7 +310,7 @@ public struct ShareFlowView: View {
             if let selected {
                 let place = try await repository.upsertPlace(selected.draft)
                 placeID = place.id
-                label = place.nameLocal ?? place.name
+                label = place.displayTitle
             }
             let source = SavedSource(url: analysis.sourceURL?.absoluteString, canonicalUrl: analysis.canonicalURL, summary: analysis.excerpt)
             let (_, duplicate) = try await repository.savePlace(tripID: tripID, label: label, category: category, placeID: placeID, source: source)

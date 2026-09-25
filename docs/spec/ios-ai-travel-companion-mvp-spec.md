@@ -6,7 +6,7 @@
 ## 0. 參考與現況
 
 - [可互動 HTML wireframe](https://ai-travel-companion-mvp-wireframe.jordan8125.chatgpt.site/)：確認畫面順序與操作意圖。AI、路程、店家、邀請與同步目前都是示意資料；不可把其 JavaScript 實作當成正式架構。
-- 主要產品：原生 iOS App。Bottom tabs 固定為 **Today / Trip / Map / Saved / Shopping**；右上有 AI 入口，右下有全域新增。
+- 主要產品：原生 iOS App。Bottom tabs 固定為 **今天／旅程／地圖／收藏／購物**（Today / Trip / Map / Saved / Shopping；2026-09-25 改為繁體中文介面，店名保留原文並附中文）；右上有 AI 入口，右下有全域新增。
 - 核心價值：把已排好的旅行匯入，將旅途中看到的地點或想買的商品與**每日既定路線**比較，讓使用者決定是否加入。
 - 三條必須走通的主流程：
   1. 貼文字行程 → 解析 → 使用者確認地點／固定時間 → 建立 Trip 與 Base Route → Today。

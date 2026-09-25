@@ -51,8 +51,12 @@ public struct MapKitPlaceSearch: PlaceSearching {
             address = item.placemark.title
         }
         let name = item.name ?? "（未命名）"
-        return PlaceDraft(providerPlaceId: providerID(item, name: name, coordinate: coordinate), name: name, address: address,
-                          latitude: coordinate.latitude, longitude: coordinate.longitude, countryCode: item.placemark.countryCode)
+        let country = item.placemark.countryCode
+        // 裝置語系為繁中時，Apple 常回傳中文譯名；依文字判斷是原文還是中文（店名保留原文並附中文）。
+        let naming = PlaceNaming.classify(name: name, countryCode: country)
+        return PlaceDraft(providerPlaceId: providerID(item, name: name, coordinate: coordinate), name: name, nameLocal: naming.local,
+                          address: address, latitude: coordinate.latitude, longitude: coordinate.longitude, countryCode: country,
+                          nameZh: naming.zh)
     }
 
     /// iOS 18+ 用 MapKit 的穩定 identifier；iOS 17 沒有，以名稱 + 座標（約 1 公尺）組成。

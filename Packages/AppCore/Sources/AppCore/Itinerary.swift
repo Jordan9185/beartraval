@@ -22,9 +22,11 @@ public struct Place: Codable, Identifiable, Hashable, Sendable {
     public var latitude: Double
     public var longitude: Double
     public var countryCode: String?
+    /// 繁體中文名稱（顯示在原文旁）。
+    public var nameZh: String?
 
     public init(id: UUID, provider: String, providerPlaceId: String, name: String, nameLocal: String?, address: String?,
-                latitude: Double, longitude: Double, countryCode: String?) {
+                latitude: Double, longitude: Double, countryCode: String?, nameZh: String? = nil) {
         self.id = id
         self.provider = provider
         self.providerPlaceId = providerPlaceId
@@ -34,6 +36,7 @@ public struct Place: Codable, Identifiable, Hashable, Sendable {
         self.latitude = latitude
         self.longitude = longitude
         self.countryCode = countryCode
+        self.nameZh = nameZh
     }
 
     enum CodingKeys: String, CodingKey {
@@ -41,6 +44,7 @@ public struct Place: Codable, Identifiable, Hashable, Sendable {
         case providerPlaceId = "provider_place_id"
         case nameLocal = "name_local"
         case countryCode = "country_code"
+        case nameZh = "name_zh"
     }
 }
 
@@ -129,9 +133,10 @@ public struct PlaceDraft: Equatable, Sendable {
     public var latitude: Double
     public var longitude: Double
     public var countryCode: String?
+    public var nameZh: String?
 
     public init(provider: RouteProvider = .appleMapKit, providerPlaceId: String, name: String, nameLocal: String? = nil,
-                address: String? = nil, latitude: Double, longitude: Double, countryCode: String? = nil) {
+                address: String? = nil, latitude: Double, longitude: Double, countryCode: String? = nil, nameZh: String? = nil) {
         self.provider = provider
         self.providerPlaceId = providerPlaceId
         self.name = name
@@ -140,6 +145,7 @@ public struct PlaceDraft: Equatable, Sendable {
         self.latitude = latitude
         self.longitude = longitude
         self.countryCode = countryCode
+        self.nameZh = nameZh
     }
 }
 

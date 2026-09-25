@@ -35,7 +35,7 @@ struct PayloadInspectorListView: View {
                 ContentUnavailableView("尚無紀錄", systemImage: "tray", description: Text("從 Threads／IG 分享到 BearTravel 後回來這裡查看。"))
             }
         }
-        .navigationTitle("Payload Inspector")
+        .navigationTitle("分享內容紀錄")
         .toolbar {
             if let exportURL {
                 ShareLink(item: exportURL) { Label("匯出", systemImage: "square.and.arrow.up") }

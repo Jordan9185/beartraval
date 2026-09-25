@@ -31,7 +31,7 @@ struct AccountView: View {
         NavigationStack {
             Form {
                 if case .signedIn(let email) = session.state {
-                    Section("帳號") { LabeledContent("Email", value: email ?? "") }
+                    Section("帳號") { LabeledContent("電子郵件", value: email ?? "") }
                 }
                 Section("顯示名稱") {
                     HStack {
@@ -45,7 +45,7 @@ struct AccountView: View {
                 Section {
                     Button(deleting ? "刪除中…" : "刪除帳號", role: .destructive) { confirmDelete = true }.disabled(deleting)
                 } footer: {
-                    Text("你擁有的 Trip 會轉給其他成員；沒有其他成員的 Trip 會一併刪除。你在共同 Trip 新增的內容會保留給旅伴，但不再顯示你的名字。")
+                    Text("你擁有的旅程會轉給其他成員；沒有其他成員的旅程會一併刪除。你在共同旅程新增的內容會保留給旅伴，但不再顯示你的名字。")
                 }
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             }

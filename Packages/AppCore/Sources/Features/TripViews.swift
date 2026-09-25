@@ -31,15 +31,15 @@ struct TripListView: View {
                     ContentUnavailableView {
                         Label("尚未建立行程", systemImage: "calendar")
                     } actions: {
-                        Button("建立 Trip") { showsCreate = true }
+                        Button("建立旅程") { showsCreate = true }
                     }
                 }
             }
-            .navigationTitle("Trip")
+            .navigationTitle("旅程")
             .navigationDestination(for: Trip.self) { TripDetailView(session: session, trip: $0) }
             .toolbar {
-                Button("加入好友的 Trip", systemImage: "person.badge.plus") { showsJoin = true }
-                Button("建立 Trip", systemImage: "plus") { showsCreate = true }
+                Button("加入好友的旅程", systemImage: "person.badge.plus") { showsJoin = true }
+                Button("建立旅程", systemImage: "plus") { showsCreate = true }
             }
             .sheet(isPresented: $showsJoin) {
                 JoinTripView(session: session, initialToken: nil) { _ in Task { await reload() } }
@@ -102,7 +102,7 @@ struct CreateTripView: View {
                     Text(errorMessage).foregroundStyle(.red)
                 }
             }
-            .navigationTitle("建立 Trip")
+            .navigationTitle("建立旅程")
             .navigationDestination(item: $importSession) { importSession in
                 ImportFlowView(session: importSession, service: session.imports, placeSearch: session.placeSearch) { trip in
                     onCreated(trip)
@@ -187,15 +187,15 @@ struct TripDetailView: View {
                     }
                     RouteStatusRow(day: day, base: baseRoutes[day.id])
                 } header: {
-                    Text("Day \(day.day.displayOrder + 1) · \(day.day.localDate)")
+                    Text("第 \(day.day.displayOrder + 1) 天 · \(day.day.localDate)")
                 }
             }
         }
         .safeAreaInset(edge: .bottom) {
             if let revision { Text("資料版本 r\(revision)").font(.caption2).foregroundStyle(.secondary).padding(4) }
         }
-        .confirmationDialog("刪除「\(trip.name)」？所有旅伴都會失去這個 Trip，匯入原文與 AI 紀錄也會刪除。", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("刪除 Trip", role: .destructive) {
+        .confirmationDialog("刪除「\(trip.name)」？所有旅伴都會失去這個旅程，匯入原文與 AI 紀錄也會刪除。", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("刪除旅程", role: .destructive) {
                 Task {
                     do {
                         try await session.trips.deleteTrip(trip.id)
@@ -216,14 +216,14 @@ struct TripDetailView: View {
             NavigationLink { MembersView(session: session, trip: trip, myRole: myRole) } label: { Label("成員", systemImage: "person.2") }
             if myRole == .owner {
                 Menu("更多", systemImage: "ellipsis.circle") {
-                    Button("刪除 Trip", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                    Button("刪除旅程", systemImage: "trash", role: .destructive) { confirmDelete = true }
                 }
             }
             Button("試算順路", systemImage: "point.topleft.down.to.point.bottomright.curvepath") { showsRouteMatch = true }
                 .disabled(timeline.isEmpty)
             #if DEBUG
-            Menu("Debug", systemImage: "ladybug") {
-                Button("寫入範例 Stop 到 Day 1") { Task { await seedSample() } }
+            Menu("除錯", systemImage: "ladybug") {
+                Button("寫入範例行程點到第 1 天") { Task { await seedSample() } }
             }
             #endif
         }
@@ -321,7 +321,7 @@ struct StopDetailView: View {
         NavigationStack {
             Form {
                 Section {
-                    Text(place.map { $0.nameLocal ?? $0.name } ?? stop.rawLabel).font(.headline)
+                    Text(place?.displayTitle(fallbackChinese: stop.rawLabel) ?? stop.rawLabel).font(.headline)
                     if let address = place?.address { Text(address).font(.caption).foregroundStyle(.secondary) }
                     if let start = stop.startTime { LabeledContent("時間", value: LocalTime.hourMinute(start)) }
                     if let dwell = stop.dwellMinutes { LabeledContent("停留", value: "\(dwell) 分") }
@@ -334,7 +334,7 @@ struct StopDetailView: View {
                     }
                 }
             }
-            .navigationTitle("Stop")
+            .navigationTitle("行程點")
             .navigationBarTitleDisplayModeInline()
         }
     }
@@ -351,7 +351,7 @@ struct StopRow: View {
                 .foregroundStyle(stop.startTime == nil ? .tertiary : .primary)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(place?.nameLocal ?? place?.name ?? stop.rawLabel)
+                    Text(place?.displayTitle(fallbackChinese: stop.rawLabel) ?? stop.rawLabel)
                     if stop.fixed {
                         Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.orange)
                             .accessibilityLabel("固定")

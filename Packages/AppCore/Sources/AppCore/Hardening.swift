@@ -14,8 +14,8 @@ extension BackendError {
         case .staleRevision: "行程剛被其他人修改，已載入最新版本，請重新確認。"
         case .conflict(let code):
             switch code {
-            case "DUPLICATE_SAVED": "這個地點已經在 Saved 裡。"
-            case "ALREADY_COMMITTED": "這份匯入已經建立過 Trip。"
+            case "DUPLICATE_SAVED": "這個地點已經在收藏清單裡。"
+            case "ALREADY_COMMITTED": "這份匯入已經建立過旅程。"
             case "PROPOSAL_CLOSED": "這個變更已經處理過了。"
             default: "資料衝突，請重新整理後再試。"
             }

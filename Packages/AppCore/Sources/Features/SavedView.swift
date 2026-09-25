@@ -38,7 +38,7 @@ struct SavedView: View {
                     }
                 }
                 if trips.count > 1 {
-                    Picker("Trip", selection: $tripID) {
+                    Picker("旅程", selection: $tripID) {
                         ForEach(trips) { Text($0.name).tag(Optional($0.id)) }
                     }
                 }
@@ -74,7 +74,7 @@ struct SavedView: View {
                                            description: Text("從 Threads、IG 或地圖 App 分享到 BearTravel。"))
                 }
             }
-            .navigationTitle("Saved")
+            .navigationTitle("收藏")
             .refreshable { await reload() }
             .task { await loadTrips() }
             .onChange(of: tripID) { Task { await switchTrip() } }
@@ -236,9 +236,7 @@ struct SavedRouteSheet: View {
         Group {
             if let timeline {
                 RouteMatchView(session: session, tripID: tripID, timeline: timeline, places: places, onAdded: onAdded,
-                               preset: SearchResult(draft: PlaceDraft(providerPlaceId: place.providerPlaceId, name: place.nameLocal ?? place.name,
-                                                                      address: place.address, latitude: place.latitude,
-                                                                      longitude: place.longitude, countryCode: place.countryCode)),
+                               preset: SearchResult(draft: place.asDraft),
                                canEdit: canEdit)
             } else {
                 ProgressView()
@@ -276,7 +274,7 @@ struct ResolvePlaceSheet: View {
                             Task { await choose(option) }
                         } label: {
                             VStack(alignment: .leading) {
-                                Text(option.name)
+                                Text(option.displayTitle)
                                 if let address = option.address { Text(address).font(.caption).foregroundStyle(.secondary) }
                             }
                         }
@@ -301,7 +299,7 @@ struct ResolvePlaceSheet: View {
             try await session.trips.resolveSaved(savedID: entry.id, placeID: place.id)
             onDone()
         } catch BackendError.conflict("DUPLICATE_SAVED") {
-            errorMessage = "這個地點已經在 Saved 裡。"
+            errorMessage = "這個地點已經在收藏清單裡。"
         } catch {
             errorMessage = "補填失敗：\(error.localizedDescription)"
         }

@@ -52,7 +52,7 @@ struct ShareRootView: View {
                                   saveDraft: { try ShareDraftStore.shared()?.save(ShareDraft(content: content)) }) { outcome in
                         done = switch outcome {
                         case .added: "已加入行程"
-                        case .saved(let duplicate): duplicate ? "已在 Saved，已標記想去" : "已收藏到 Saved"
+                        case .saved(let duplicate): duplicate ? "已在收藏清單，已標記想去" : "已加入收藏"
                         case .draftSaved: "已存成草稿，開啟 App 後繼續"
                         }
                     }
@@ -66,7 +66,7 @@ struct ShareRootView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("取消", action: finish) }
                 #if DEBUG
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Inspector", systemImage: "ladybug") { showsInspector = true }.disabled(model.record == nil)
+                    Button("分享紀錄", systemImage: "ladybug") { showsInspector = true }.disabled(model.record == nil)
                 }
                 #endif
             }
@@ -100,7 +100,7 @@ struct InspectorSheet: View {
                 }
                 if let status { Text(status) }
             }
-            .navigationTitle("Payload Inspector")
+            .navigationTitle("分享內容紀錄")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("關閉") { dismiss() } }
@@ -110,7 +110,7 @@ struct InspectorSheet: View {
                         do {
                             guard let store = PayloadLogStore.shared() else { status = "App Group 未設定"; return }
                             try store.save(record)
-                            status = "已記錄，可在 App 的 Debug → Payload Inspector 匯出"
+                            status = "已記錄，可在 App 的「除錯 → 分享內容紀錄」匯出"
                         } catch {
                             status = "寫入失敗：\(error.localizedDescription)"
                         }

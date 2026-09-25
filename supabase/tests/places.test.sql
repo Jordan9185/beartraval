@@ -45,3 +45,12 @@ select tests.ok(app.commit_itinerary(:'day_id', 0, format('[{"place_id": %s, "ra
                 to_json(:'place_id'::text))::jsonb) = 1, 'stop references upserted place');
 select tests.ok((select resolution_status = 'resolved' from app.stops where day_id = :'day_id'),
                 'stop with place is resolved');
+
+-- Chinese and local names can be filled in later but never overwritten.
+select tests.login(:'owner');
+select app.upsert_place('apple_mapkit', 'kyoja', '明洞餃子', 37.5625, 126.9856, null, null, 'KR', '明洞餃子');
+select tests.login(:'outsider');
+select app.upsert_place('apple_mapkit', 'kyoja', 'Myeongdong Kyoja', 0, 0, '명동교자 본점', null, 'KR', '別的名字');
+reset role;
+select tests.ok((select name = '明洞餃子' and name_local = '명동교자 본점' and name_zh = '明洞餃子' and latitude = 37.5625
+                   from app.places where provider_place_id = 'kyoja'), 'missing local name filled, others kept');

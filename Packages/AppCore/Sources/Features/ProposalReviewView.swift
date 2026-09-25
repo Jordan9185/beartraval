@@ -56,7 +56,7 @@ struct ProposalReviewView: View {
                 case .review, .confirming:
                     if let pending {
                         Section("\(dayTitle)（\(mode.displayName)）") {
-                            LabeledContent("地點", value: candidate.name)
+                            LabeledContent("地點", value: candidate.draft.displayTitle)
                             Text(position(pending))
                             MatchNumbers(insertion: pending.insertion) { pending.stopLabels[$0 ?? UUID()] }
                         }
@@ -96,7 +96,7 @@ struct ProposalReviewView: View {
     private func prepare() async {
         do {
             let place = try await session.trips.upsertPlace(candidate.draft)
-            let (fresh, _) = try await flow.propose(placeID: place.id, label: place.nameLocal ?? place.name, point: candidate.point,
+            let (fresh, _) = try await flow.propose(placeID: place.id, label: place.displayTitle, point: candidate.point,
                                                     dwellMinutes: dwellMinutes, tripID: tripID, dayID: dayID, mode: mode,
                                                     shoppingItemID: shoppingItemID, createdByAI: createdByAI)
             pending = fresh

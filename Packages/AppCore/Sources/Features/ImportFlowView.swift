@@ -73,7 +73,7 @@ public struct ImportFlowView: View {
                 Button("重試") { Task { phase = .parsing; await parse() } }
                     .accessibilityIdentifier("retryParse")
                 Button("編輯原文") { editedText = session.rawText; phase = .editing }
-                Button("略過匯入，建立空 Trip") { Task { await commitEmpty() } }
+                Button("略過匯入，建立空旅程") { Task { await commitEmpty() } }
             }
             if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
         }
@@ -185,7 +185,7 @@ struct ConfirmPlacesView: View {
                 }
             }
             Section {
-                Button(isCommitting ? "建立中…" : "建立 Trip", action: onSubmit)
+                Button(isCommitting ? "建立中…" : "建立旅程", action: onSubmit)
                     .disabled(!state.canSubmit || isCommitting)
                     .accessibilityIdentifier("submitImport")
                 if !state.canSubmit {
@@ -253,7 +253,7 @@ struct ConfirmItemView: View {
             } label: {
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(option.name)
+                        Text(option.displayTitle)
                         if let address = option.address { Text(address).font(.caption).foregroundStyle(.secondary) }
                     }
                     Spacer()

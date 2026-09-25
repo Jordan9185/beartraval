@@ -23,10 +23,10 @@ struct ShoppingTab: View {
                     ContentUnavailableView("尚未建立行程", systemImage: "bag")
                 }
             }
-            .navigationTitle("Shopping")
+            .navigationTitle("購物清單")
             .toolbar {
                 if trips.count > 1 {
-                    Picker("Trip", selection: $tripID) { ForEach(trips) { Text($0.name).tag(Optional($0.id)) } }
+                    Picker("旅程", selection: $tripID) { ForEach(trips) { Text($0.name).tag(Optional($0.id)) } }
                 }
             }
             .task {
@@ -235,7 +235,7 @@ struct MerchantSearchView: View {
             ForEach(options) { option in
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(option.place.name).font(.headline)
+                        Text(option.place.displayTitle).font(.headline)
                         if let address = option.place.address { Text(address).font(.caption).foregroundStyle(.secondary) }
                         Text("可能販售（\(evidence.displayName)）· 庫存未知").font(.caption).foregroundStyle(.orange)
                         if let best = option.best, let ins = best.best {
@@ -275,7 +275,7 @@ struct MerchantSearchView: View {
         defer { searching = false }
         let found = await session.placeSearch.search(query, near: nil, limit: 5)
         guard let days = try? await session.trips.days(of: tripID) else { return }
-        for day in days { dayTitles[day.id] = "Day \(day.displayOrder + 1)" }
+        for day in days { dayTitles[day.id] = "第 \(day.displayOrder + 1) 天" }
         var computed: [Option] = []
         for place in found {
             var matches: [DayMatch] = []

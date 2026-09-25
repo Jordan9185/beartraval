@@ -6,10 +6,10 @@ public enum SavedCategory: String, Codable, CaseIterable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .eat: "Eat"
-        case .cafe: "Cafe"
-        case .shop: "Shop"
-        case .place: "Place"
+        case .eat: "美食"
+        case .cafe: "咖啡"
+        case .shop: "購物"
+        case .place: "景點"
         case .other: "其他"
         }
     }
@@ -104,7 +104,7 @@ public struct SavedEntry: Identifiable, Codable, Hashable, Sendable {
     public var interestedUserIDs: Set<UUID>
 
     public var id: UUID { saved.id }
-    public var title: String { place?.nameLocal ?? place?.name ?? saved.rawLabel }
+    public var title: String { place?.displayTitle(fallbackChinese: saved.rawLabel) ?? saved.rawLabel }
     public var isConfirmed: Bool { saved.placeId != nil }
 
     public init(saved: SavedPlace, place: Place?, source: SourceReference?, interestedUserIDs: Set<UUID>) {
@@ -124,7 +124,7 @@ public enum SavedFilter: Hashable, Sendable {
 
     public var title: String {
         switch self {
-        case .all: "All"
+        case .all: "全部"
         case .category(let c): c.displayName
         }
     }

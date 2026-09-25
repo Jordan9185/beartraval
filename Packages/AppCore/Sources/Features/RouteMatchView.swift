@@ -42,7 +42,7 @@ struct RouteMatchView: View {
             Form {
                 Section("候選地點") {
                     if let candidate {
-                        LabeledContent(candidate.name, value: candidate.address ?? "")
+                        LabeledContent(candidate.draft.displayTitle, value: candidate.address ?? "")
                         Button("換一個") { self.candidate = nil; matches = [] }
                     } else {
                         TextField("搜尋店名或地點", text: $query)
@@ -53,7 +53,7 @@ struct RouteMatchView: View {
                                 Task { await compute() }
                             } label: {
                                 VStack(alignment: .leading) {
-                                    Text(result.name)
+                                    Text(result.draft.displayTitle)
                                     if let address = result.address { Text(address).font(.caption).foregroundStyle(.secondary) }
                                 }
                             }
@@ -161,12 +161,12 @@ struct RouteMatchView: View {
 
     private func dayTitle(_ id: UUID) -> String {
         guard let day = timeline.first(where: { $0.id == id })?.day else { return "" }
-        return "Day \(day.displayOrder + 1) · \(day.localDate)"
+        return "第 \(day.displayOrder + 1) 天 · \(day.localDate)"
     }
 
     private func stopName(_ id: UUID?) -> String? {
         guard let id, let stop = timeline.lazy.flatMap(\.stops).first(where: { $0.id == id }) else { return nil }
-        if let placeID = stop.placeId, let place = places[placeID] { return place.nameLocal ?? place.name }
+        if let placeID = stop.placeId, let place = places[placeID] { return place.displayTitle(fallbackChinese: stop.rawLabel) }
         return stop.rawLabel
     }
 
@@ -184,7 +184,7 @@ struct RouteMatchView: View {
         guard let id = match.best?.previousStopID,
               let stop = timeline.lazy.flatMap(\.stops).first(where: { $0.id == id }),
               let placeID = stop.placeId, let place = places[placeID] else { return nil }
-        return MapPoint(name: place.nameLocal ?? place.name, latitude: place.latitude, longitude: place.longitude)
+        return MapPoint(name: place.originalName, latitude: place.latitude, longitude: place.longitude)
     }
 }
 
@@ -207,8 +207,9 @@ struct SearchResult: Identifiable, Equatable {
         RoutePoint(coordinate: Coordinate(latitude: draft.latitude, longitude: draft.longitude), countryCode: draft.countryCode)
     }
 
+    /// 外開在地地圖用原文名稱（Naver／Kakao 以韓文搜尋較準）。
     var mapPoint: MapPoint {
-        MapPoint(name: name, latitude: point.coordinate.latitude, longitude: point.coordinate.longitude)
+        MapPoint(name: draft.nameLocal ?? draft.name, latitude: point.coordinate.latitude, longitude: point.coordinate.longitude)
     }
 }
 

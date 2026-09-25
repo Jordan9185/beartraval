@@ -56,7 +56,7 @@ extension DayPlan {
                 continue
             }
             planned.append(PlannedStop(
-                id: stop.id, label: place.nameLocal ?? place.name,
+                id: stop.id, label: place.displayTitle(fallbackChinese: stop.rawLabel),
                 point: RoutePoint(coordinate: Coordinate(latitude: place.latitude, longitude: place.longitude), countryCode: place.countryCode),
                 startMinutes: stop.startTime.flatMap(LocalTime.minutes), dwellMinutes: stop.dwellMinutes, fixed: stop.fixed))
         }
