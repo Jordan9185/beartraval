@@ -1,0 +1,4 @@
+// Release（TestFlight）：連雲端 Supabase。
+// 雲端網址與 anon key 放在 Config/Cloud.xcconfig.local（已 gitignore），格式同 Base.xcconfig 的註解。
+#include "Base.xcconfig"
+#include? "Cloud.xcconfig.local"

@@ -117,6 +117,13 @@ BEARTRAVEL_TEST_SUPABASE_ANON_KEY=<supabase status 的 ANON_KEY> \
 swift test --package-path Packages/AppCore
 ```
 
+## 雲端專案（首爾）
+
+- 專案：`BeaRTravel`（`dchzimksdgxzjvzswzrh`，ap-northeast-2）。已套用全部 migration、部署 4 個 Edge Functions、以 `supabase config push` 開放 `app` schema、關閉 Email 確認、密碼最短 8。
+- 更新：`supabase db push`、`supabase functions deploy`；`supabase config push` 會把本機 `config.toml` 的 auth 設定一併推上去，推之前先看差異。
+- App：Release build 連雲端，網址與 anon key 放在 `Config/Cloud.xcconfig.local`（gitignore）；Debug build 連本機。
+- AI：`supabase secrets set ANTHROPIC_API_KEY=...` 後，匯入解析與 AI 助手才會運作。
+
 ## 部署到 Supabase 專案時
 
 - 在專案的 API 設定把 `app` 加入 exposed schemas，用戶端以 `schema: 'app'` 呼叫 RPC。
