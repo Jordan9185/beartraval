@@ -7,7 +7,7 @@ import { SYSTEM_PROMPT, userMessage } from "./prompt.ts";
 import { AssistantAnswer, type TripContext } from "./schema.ts";
 import { validateAnswer, type ValidationIssue } from "./validate.ts";
 
-export const DEFAULT_MODEL = "claude-opus-5-5";
+export const DEFAULT_MODEL = "claude-sonnet-5";
 // Trip Q&A reads already-structured data; medium effort keeps answers quick.
 export const DEFAULT_EFFORT = "medium" as const;
 
@@ -31,7 +31,7 @@ export async function askTrip(
   try {
     response = await client.beta.messages.parse({
       model: options.model ?? DEFAULT_MODEL,
-      // Thinking counts toward max_tokens on Opus 5.5 (always on); leave room for it.
+      // Adaptive thinking counts toward max_tokens; leave room for it.
       max_tokens: 16000,
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",

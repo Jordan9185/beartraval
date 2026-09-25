@@ -8,9 +8,10 @@ import { SYSTEM_PROMPT, userMessage } from "./prompt.ts";
 import { ParseResult, type ParseInput } from "./schema.ts";
 import { validateDraft, type ValidationIssue } from "./validate.ts";
 
-export const DEFAULT_MODEL = "claude-opus-5-5";
+export const DEFAULT_MODEL = "claude-sonnet-5";
 // High effort took 2–5 minutes on a real 7-day plan, too long to wait on a phone
-// and close to the Edge Function time limit; medium is Opus 5.5's default.
+// and close to the Edge Function time limit. Sonnet 5 (2026-09-25) costs much less
+// than Opus 5.5 at near-Opus quality; medium keeps it quick.
 export const DEFAULT_EFFORT = "medium" as const;
 
 export interface ParseProgress {

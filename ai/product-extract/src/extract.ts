@@ -7,7 +7,7 @@ import { SYSTEM_PROMPT, userText } from "./prompt.ts";
 import { ExtractResult, type ExtractInput } from "./schema.ts";
 import { validateProducts, type ValidationIssue } from "./validate.ts";
 
-export const DEFAULT_MODEL = "claude-opus-5-5";
+export const DEFAULT_MODEL = "claude-sonnet-5";
 // Reading one post; medium keeps the share sheet responsive.
 export const DEFAULT_EFFORT = "medium" as const;
 
