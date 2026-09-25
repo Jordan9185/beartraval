@@ -74,13 +74,16 @@ struct ShoppingTab: View {
 }
 
 /// 商品清單；與後端隔離（`ShoppingService`），UI 測試可用假服務。
-public struct ShoppingListView<MerchantScreen: View>: View {
+/// 注意：這個清單刻意拆成幾個非泛型的小 View（見 `ShoppingGroupSection`）。
+/// 泛型套泛型、ForEach 裡再包條件與 Section 時，Release 版在 SwiftUI 建立 view list 會把主執行緒堆疊用光而閃退
+/// （2026-09-25 在 iPhone 上重現：儲存第一個附照片的商品後）。
+public struct ShoppingListView: View {
     let service: any ShoppingService
     let tripID: UUID
     let canEdit: Bool
     let queue: OfflineQueue?
     let reloadToken: Int
-    let merchantScreen: (ShoppingEntry) -> MerchantScreen
+    let merchantScreen: (ShoppingEntry) -> AnyView
 
     @State private var entries: [ShoppingEntry] = []
     @State private var newName = ""
@@ -89,14 +92,20 @@ public struct ShoppingListView<MerchantScreen: View>: View {
     @State private var errorMessage: String?
     @State private var loaded = false
 
-    public init(service: any ShoppingService, tripID: UUID, canEdit: Bool, queue: OfflineQueue?, reloadToken: Int,
-                @ViewBuilder merchantScreen: @escaping (ShoppingEntry) -> MerchantScreen) {
+    public init<MerchantScreen: View>(service: any ShoppingService, tripID: UUID, canEdit: Bool, queue: OfflineQueue?, reloadToken: Int,
+                                      @ViewBuilder merchantScreen: @escaping (ShoppingEntry) -> MerchantScreen) {
         self.service = service
         self.tripID = tripID
         self.canEdit = canEdit
         self.queue = queue
         self.reloadToken = reloadToken
-        self.merchantScreen = merchantScreen
+        self.merchantScreen = { AnyView(merchantScreen($0)) }
+    }
+
+    private var rowContext: ShoppingRowContext {
+        ShoppingRowContext(service: service, tripID: tripID, canEdit: canEdit, merchantScreen: merchantScreen,
+                           toggle: { entry in Task { await togglePurchased(entry) } },
+                           changed: { Task { await reload() } })
     }
 
     public var body: some View {
@@ -128,25 +137,9 @@ public struct ShoppingListView<MerchantScreen: View>: View {
             }
             if let errorMessage { ErrorText(errorMessage) }
             // 依狀態分組：未安排、已安排、已購買（每列不必再靠顏色分辨）。
-            ForEach(ShoppingGroup.allCases, id: \.self) { group in
-                let members = entries.filter { group.contains($0) }
-                if !members.isEmpty {
-                    Section(group.title) {
-                        ForEach(members) { entry in
-                            NavigationLink {
-                                ShoppingItemDetailView(service: service, tripID: tripID, entry: entry, canEdit: canEdit,
-                                                       merchantScreen: canEdit && entry.status == .unscheduled ? AnyView(merchantScreen(entry)) : nil) {
-                                    Task { await reload() }
-                                }
-                            } label: {
-                                ShoppingRow(entry: entry, me: service.currentUserID, canEdit: canEdit, service: service,
-                                            toggle: { Task { await togglePurchased(entry) } },
-                                            merchantScreen: { merchantScreen(entry) })
-                            }
-                        }
-                    }
-                }
-            }
+            ShoppingGroupSection(group: .unscheduled, entries: entries, context: rowContext)
+            ShoppingGroupSection(group: .scheduled, entries: entries, context: rowContext)
+            ShoppingGroupSection(group: .purchased, entries: entries, context: rowContext)
         }
         .overlay {
             if loaded && entries.isEmpty {
@@ -210,13 +203,56 @@ private struct NoExecutor: QueuedOperationExecutor {
     func execute(_ item: QueuedItem) async throws {}
 }
 
-struct ShoppingRow<MerchantScreen: View>: View {
+/// 清單列需要的共用資料（避免每列都帶一串參數與泛型）。
+struct ShoppingRowContext {
+    let service: any ShoppingService
+    let tripID: UUID
+    let canEdit: Bool
+    let merchantScreen: (ShoppingEntry) -> AnyView
+    let toggle: (ShoppingEntry) -> Void
+    let changed: () -> Void
+}
+
+/// 一個狀態分組；沒有項目時什麼都不顯示。
+struct ShoppingGroupSection: View {
+    let group: ShoppingGroup
+    let entries: [ShoppingEntry]
+    let context: ShoppingRowContext
+
+    var body: some View {
+        let members = entries.filter { group.contains($0) }
+        if !members.isEmpty {
+            Section(group.title) {
+                ForEach(members) { entry in
+                    ShoppingEntryLink(entry: entry, context: context)
+                }
+            }
+        }
+    }
+}
+
+struct ShoppingEntryLink: View {
+    let entry: ShoppingEntry
+    let context: ShoppingRowContext
+
+    var body: some View {
+        NavigationLink {
+            ShoppingItemDetailView(service: context.service, tripID: context.tripID, entry: entry, canEdit: context.canEdit,
+                                   merchantScreen: context.canEdit && entry.status == .unscheduled ? context.merchantScreen(entry) : nil,
+                                   onChanged: context.changed)
+        } label: {
+            ShoppingRow(entry: entry, me: context.service.currentUserID, canEdit: context.canEdit, service: context.service,
+                        toggle: { context.toggle(entry) })
+        }
+    }
+}
+
+struct ShoppingRow: View {
     let entry: ShoppingEntry
     let me: UUID?
     let canEdit: Bool
     let service: any ShoppingService
     let toggle: () -> Void
-    let merchantScreen: () -> MerchantScreen
 
     var body: some View {
         HStack(alignment: .top) {
