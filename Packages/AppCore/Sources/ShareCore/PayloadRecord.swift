@@ -33,7 +33,7 @@ public struct PayloadRecord: Codable, Identifiable, Sendable {
         public var byteCount: Int?
         public var durationMs: Int
         public var error: String?
-        /// 圖片縮圖（JPEG，長邊 1024 px），給購物清單附圖與 AI 辨識用；不寫進 Payload 紀錄。
+        /// 圖片縮圖（JPEG，長邊 2048 px，截圖小字才讀得到），給購物清單附圖與 AI 辨識用；不寫進 Payload 紀錄。
         public var imageJPEG: Data?
 
         enum CodingKeys: String, CodingKey {

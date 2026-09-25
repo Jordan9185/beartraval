@@ -83,3 +83,79 @@ struct PastedLinkTests {
         #expect(ShareAnalysis.urls(in: "光化門").isEmpty)
     }
 }
+
+struct ScreenshotTextTests {
+    @Test func picksNameBeforeKoreanAddress() {
+        let lines = ["9:41", "Instagram", "makmade_official", "MAKMADE 성수", "서울특별시 성동구 연무장길 45", "영업 중", "02-123-4567", "#성수카페"]
+        let guess = ScreenshotText.guess(from: lines)
+        #expect(guess.address == "서울특별시 성동구 연무장길 45")
+        #expect(guess.name == "MAKMADE 성수")
+        #expect(!guess.otherLines.contains("9:41") && !guess.otherLines.contains("#성수카페"))
+    }
+
+    @Test func recognisesJapaneseAndTaiwanAddresses() {
+        #expect(ScreenshotText.isAddress("〒739-0588 広島県廿日市市宮島町1-1"))
+        #expect(ScreenshotText.isAddress("台北市信義區松仁路 58 號"))
+        #expect(!ScreenshotText.isAddress("厳島神社"))
+    }
+
+    @Test func withoutAddressTheFirstMeaningfulLineIsTheName() {
+        #expect(ScreenshotText.guess(from: ["12:03", "Follow", "Cafe Layered 연남", "1.2k"]).name == "Cafe Layered 연남")
+    }
+}
+
+#if canImport(AppKit)
+import AppKit
+
+struct ScreenshotOCRTests {
+    func render(_ lines: [String]) throws -> Data {
+        let size = NSSize(width: 1000, height: 120 * lines.count + 80)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 44), .foregroundColor: NSColor.black]
+        for (i, line) in lines.enumerated() {
+            (line as NSString).draw(at: NSPoint(x: 40, y: size.height - 120 - CGFloat(i) * 110), withAttributes: attrs)
+        }
+        image.unlockFocus()
+        let tiff = try #require(image.tiffRepresentation)
+        return try #require(NSBitmapImageRep(data: tiff)?.representation(using: .jpeg, properties: [:]))
+    }
+
+    /// 在裝置上辨識：畫一張有韓文店名與地址的圖，確認讀得出來並猜對地址。
+    @Test func recognisesKoreanShopAndAddress() async throws {
+        let lines = await ScreenshotText.recognize(jpeg: try render(["MAKMADE 성수", "서울특별시 성동구 연무장길 45"]))
+        let guess = ScreenshotText.guess(from: lines)
+        #expect(guess.address?.contains("연무장길") == true, "lines: \(lines)")
+        #expect(guess.name?.contains("MAKMADE") == true, "lines: \(lines)")
+    }
+
+    /// 中文介面裡的韓國店（IG 截圖常見）。
+    @Test func recognisesKoreanShopInChineseInterface() async throws {
+        let lines = await ScreenshotText.recognize(jpeg: try render(["明洞必吃！排隊也值得", "명동교자 본점", "서울특별시 중구 명동10길 29", "營業中 · 10:30–21:00"]))
+        let guess = ScreenshotText.guess(from: lines)
+        #expect(guess.address?.contains("명동10길") == true, "lines: \(lines)")
+        #expect(guess.name == "명동교자 본점", "lines: \(lines)")
+    }
+
+    @Test func recognisesJapaneseAddress() async throws {
+        let lines = await ScreenshotText.recognize(jpeg: try render(["牡蠣屋", "広島県廿日市市宮島町539"]))
+        #expect(ScreenshotText.guess(from: lines).address?.contains("宮島町") == true, "lines: \(lines)")
+    }
+}
+#endif
+
+struct KoreanAddressTests {
+    @Test func romanizesRoadAddresses() {
+        #expect(ScreenshotText.romanizedKoreanAddress("서울특별시 중구 명동10길 29") == "29 Myeongdong 10-gil, Jung-gu, Seoul")
+        #expect(ScreenshotText.romanizedKoreanAddress("서울특별시 마포구 성미산로 161-4") == "161-4 Seongmisan-ro, Mapo-gu, Seoul")
+        #expect(ScreenshotText.romanizedKoreanAddress("広島県廿日市市宮島町539") == nil)
+    }
+
+    @Test func hoursAndTagsAreNoise() {
+        #expect(ScreenshotText.isNoise("營業中 · 10:30–21:00"))
+        #expect(ScreenshotText.isNoise("#• 10:30-21:00"))
+        #expect(!ScreenshotText.isNoise("명동교자 본점"))
+    }
+}

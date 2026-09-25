@@ -18,6 +18,11 @@ public struct ShareFlowView: View {
     let onFinish: (Outcome) -> Void
 
     @State private var analysis: ShareAnalysis
+    /// 分享進來的截圖（有的話在裝置上辨識文字，找出店名與地址）。
+    @State private var screenshot: Data?
+    @State private var screenshotLines: [String] = []
+    @State private var screenshotAddress: String?
+    @State private var readingScreenshot = false
     @State private var query: String
     @State private var category: SavedCategory = .place
     @State private var candidates: [PlaceOption] = []
@@ -45,6 +50,7 @@ public struct ShareFlowView: View {
         let analysis = ShareAnalysis(content)
         _analysis = State(initialValue: analysis)
         _query = State(initialValue: analysis.suggestedQuery ?? "")
+        _screenshot = State(initialValue: content.imageJPEG)
     }
 
     public var body: some View {
@@ -61,6 +67,7 @@ public struct ShareFlowView: View {
                 }
             } else {
                 placeSection
+                screenshotSuggestions
                 tripSection
                 if selected != nil, tripID != nil { routeSection }
                 actionSection
@@ -76,14 +83,53 @@ public struct ShareFlowView: View {
         Section("分享內容") {
             if let url = analysis.sourceURL {
                 Text(url.host.map { platformName == "網頁" ? $0 : "\(platformName) · \($0)" } ?? url.absoluteString)
+            } else if screenshot != nil {
+                LabeledContent("來源", value: "截圖")
             } else {
                 LabeledContent("來源", value: "文字")
             }
+            if let screenshot, let image = platformImage(screenshot) {
+                image.resizable().scaledToFit().frame(maxHeight: 180).frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            if readingScreenshot { ProgressView("讀取截圖中的文字…") }
             if let excerpt = analysis.excerpt {
                 Text(excerpt).font(.subheadline).lineLimit(4)
             }
-            ForEach(Array(analysis.missing.enumerated()), id: \.offset) { _, missing in
-                Label(missingText(missing), systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+            // 截圖讀得到文字時，「拿不到貼文內容／沒有店名」的提醒就不適用。
+            if screenshotLines.isEmpty {
+                ForEach(Array(analysis.missing.enumerated()), id: \.offset) { _, missing in
+                    Label(missingText(missing), systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
+    private func platformImage(_ data: Data) -> Image? {
+        #if canImport(UIKit)
+        UIImage(data: data).map(Image.init(uiImage:))
+        #else
+        NSImage(data: data).map(Image.init(nsImage:))
+        #endif
+    }
+
+    /// 截圖裡讀到、可能是店名或地址的文字；點一下就用它搜尋。
+    @ViewBuilder
+    private var screenshotSuggestions: some View {
+        if !screenshotLines.isEmpty {
+            Section {
+                ForEach(screenshotLines, id: \.self) { line in
+                    Button {
+                        query = line
+                        Task { await search() }
+                    } label: {
+                        Label(line, systemImage: line == screenshotAddress ? "mappin" : "text.quote")
+                    }
+                }
+            } header: {
+                Text("截圖中的文字")
+            } footer: {
+                Text("在手機上辨識，不會上傳。點一行就用它搜尋；地點仍由你從候選中選定。")
             }
         }
     }
@@ -126,6 +172,9 @@ public struct ShareFlowView: View {
             }
             if searched && candidates.isEmpty {
                 Text("Apple 地圖找不到；仍可先收藏名稱，之後再定位。").font(.caption).foregroundStyle(.secondary)
+                if !query.isEmpty {
+                    LocalMapSearchButtons(name: query, countryCode: LocalMapCountry.guess(name: query + (screenshotAddress ?? ""), timeZone: nil))
+                }
             }
         } header: {
             Text("地點")
@@ -204,11 +253,37 @@ public struct ShareFlowView: View {
             signedIn = false
             return
         }
+        // 有截圖、文字又看不出店名時，在裝置上辨識截圖文字。
+        if let screenshot, analysis.mapHint == nil, query.isEmpty || !analysis.missing.isEmpty {
+            readingScreenshot = true
+            let lines = await ScreenshotText.recognize(jpeg: screenshot)
+            readingScreenshot = false
+            let guess = ScreenshotText.guess(from: lines)
+            screenshotAddress = guess.address
+            screenshotLines = ([guess.name, guess.address].compactMap { $0 } + guess.otherLines)
+                .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+            if let best = guess.name ?? guess.address { query = best }
+        }
         if let coordinate = analysis.mapHint?.coordinate, query.isEmpty {
             candidates = await placeSearch.nearby(coordinate, limit: 5)
             searched = true
         } else if !query.isEmpty {
             await search()
+            // 用店名找不到時，改用截圖裡的地址找；韓文地址 Apple 地圖找不到，改用拼音地址找到那條路，再列出那附近的店家。
+            if candidates.isEmpty, let address = screenshotAddress {
+                if address != query {
+                    query = address
+                    await search()
+                }
+                if candidates.isEmpty, let roman = ScreenshotText.romanizedKoreanAddress(address) {
+                    let areas: SearchAreas = if let tripID { await repository.searchAreas(of: tripID) } else { .none }
+                    if let street = await placeSearch.search(roman, in: areas, limit: 1).first {
+                        let near = await placeSearch.nearby(Coordinate(latitude: street.draft.latitude, longitude: street.draft.longitude), limit: 8)
+                        candidates = near.isEmpty ? [street] : near
+                        searched = true
+                    }
+                }
+            }
         }
     }
 

@@ -72,7 +72,7 @@ public enum PayloadInspector {
                         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
                         let isImage = UTType(type)?.conforms(to: .image) == true
                         once.resume(Described(kind: .file, preview: url.lastPathComponent, byteCount: size,
-                                              imageJPEG: isImage ? ImageDownscale.jpeg(fileURL: url) : nil))
+                                              imageJPEG: isImage ? ImageDownscale.jpeg(fileURL: url, maxPixel: 2048) : nil))
                     } else {
                         once.resume(Described(kind: .error, error: error.map(describe) ?? "nil"))
                     }

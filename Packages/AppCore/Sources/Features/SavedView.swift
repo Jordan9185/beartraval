@@ -1,4 +1,5 @@
 import AppCore
+import PhotosUI
 import ShareCore
 import SwiftUI
 
@@ -391,6 +392,13 @@ struct AddSavedPlaceView: View {
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
     /// 貼進來的是分享連結（地圖、IG、Threads、網頁）時，用分享流程解析。
     private var pastedURL: URL? { ShareAnalysis.urls(in: query).first }
+    @State private var photo: PhotosPickerItem?
+    @State private var screenshot: ScreenshotImport?
+
+    struct ScreenshotImport: Identifiable, Hashable {
+        let id = UUID()
+        let jpeg: Data
+    }
 
     var body: some View {
         NavigationStack {
@@ -401,6 +409,13 @@ struct AddSavedPlaceView: View {
                     Picker("類別", selection: $category) {
                         ForEach(SavedCategory.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     }
+                }
+                Section {
+                    PhotosPicker(selection: $photo, matching: .images) {
+                        Label("從截圖辨識店名與地址", systemImage: "text.viewfinder")
+                    }
+                } footer: {
+                    Text("在手機上讀出截圖裡的店名、地址再搜尋，不會上傳。")
                 }
                 if let url = pastedURL {
                     Section {
@@ -440,6 +455,19 @@ struct AddSavedPlaceView: View {
                     }
                 }
                 if let errorMessage { ErrorText(errorMessage) }
+            }
+            .navigationDestination(item: $screenshot) { shot in
+                ShareFlowView(content: ShareContent(hasImage: true, imageJPEG: shot.jpeg), repository: session.trips,
+                              matcher: session.routes, placeSearch: session.placeSearch, saveDraft: nil) { _ in onDone() }
+                    .navigationTitle("辨識截圖")
+            }
+            .onChange(of: photo) {
+                Task {
+                    guard let data = try? await photo?.loadTransferable(type: Data.self),
+                          let jpeg = ImageDownscale.jpeg(from: data, maxPixel: 2048) else { return }
+                    photo = nil
+                    screenshot = ScreenshotImport(jpeg: jpeg)
+                }
             }
             .navigationTitle("新增收藏")
             .navigationBarTitleDisplayModeInline()
