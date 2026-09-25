@@ -18,6 +18,7 @@ struct TodayView: View {
     @State private var showsAccount = false
     @State private var selectedStop: Stop?
     @State private var todayBase: BaseRoute?
+    @State private var legToCompare: LegComparison?
 
     /// 順路門檻：加入後多花不超過此分鐘數才算「順路」。
     static let nearbyThresholdMinutes = 20
@@ -102,7 +103,10 @@ struct TodayView: View {
                     }
                     .buttonStyle(.plain)
                     if let leg = todayBase?.dayID == day.id ? todayBase?.leg(from: stop.id) : nil {
-                        LegRow(leg: leg, mode: day.day.transportMode, toName: nil)
+                        Button { legToCompare = comparison(leg, day: day, places: snapshot.places) } label: {
+                            LegRow(leg: leg, mode: day.day.transportMode, toName: nil)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 NavigationLink("完整行程") { TripDetailView(session: session, trip: snapshot.trip) }
@@ -177,6 +181,10 @@ struct TodayView: View {
                            canEdit: store.myRole?.canEdit == true)
                 .presentationDetents([.medium, .large])
         }
+        .sheet(item: $legToCompare) { leg in
+            LegModesView(session: session, leg: leg, canEdit: store.myRole?.canEdit == true) { Task { await store.reload() } }
+                .presentationDetents([.medium, .large])
+        }
         .sheet(item: $adding) { entry in
             if let place = entry.place {
                 ProposalReviewView(session: session, tripID: snapshot.trip.id, dayID: day.day.id, dayTitle: "第 \(index + 1) 天",
@@ -187,6 +195,13 @@ struct TodayView: View {
                 }
             }
         }
+    }
+
+    private func comparison(_ leg: BaseRoute.Leg, day: DayTimeline, places: [UUID: Place]) -> LegComparison? {
+        guard let fromStop = day.stops.first(where: { $0.id == leg.from }), let toStop = day.stops.first(where: { $0.id == leg.to }),
+              let from = fromStop.placeId.flatMap({ places[$0] }), let to = toStop.placeId.flatMap({ places[$0] }) else { return nil }
+        return LegComparison(from: from, to: to, departure: LegComparison.departure(day: day.day, from: fromStop),
+                             dayID: day.id, current: day.day.transportMode)
     }
 
     private func computeNearby(_ snapshot: TripSnapshot, _ index: Int) async {

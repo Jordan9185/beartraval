@@ -179,3 +179,107 @@ struct ResolveStopSheet: View {
         }
     }
 }
+
+/// 要比較交通方式的那一段路。
+struct LegComparison: Identifiable {
+    let id = UUID()
+    let from: Place
+    let to: Place
+    let departure: Date
+    let dayID: UUID
+    let current: TravelMode
+
+    /// 以這天當地的出發時間查詢（沒有時間就用 10:00）；已過去的時間改用現在。
+    static func departure(day: TripDay, from stop: Stop) -> Date {
+        guard let tz = TimeZone(identifier: day.timeZone), let midnight = LocalDate.midnight(day.localDate, in: tz) else { return Date() }
+        let minutes = stop.startTime.flatMap(LocalTime.minutes).map { $0 + (stop.dwellMinutes ?? 0) } ?? 10 * 60
+        return max(midnight.addingTimeInterval(Double(minutes) * 60), Date())
+    }
+}
+
+/// 同一段路三種交通方式比較（步行／大眾運輸／開車・計程車），可把這天改用其中一種。
+struct LegModesView: View {
+    let session: SessionModel
+    let leg: LegComparison
+    let canEdit: Bool
+    let onChanged: () -> Void
+    @State private var results: [(mode: TravelMode, time: LegTime)] = []
+    @State private var saving = false
+    @State private var errorMessage: String?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("\(leg.from.displayTitle) → \(leg.to.displayTitle)").font(.subheadline)
+                }
+                Section {
+                    if results.isEmpty { ProgressView("計算中…") }
+                    ForEach(results, id: \.mode) { result in
+                        HStack {
+                            Label(result.mode.displayName, systemImage: result.mode.symbol)
+                            Spacer()
+                            Text(Self.text(result.time)).foregroundStyle(result.time.minutes == nil ? .secondary : .primary).monospacedDigit()
+                            if result.mode == leg.current { Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityLabel("這天目前用的") }
+                        }
+                    }
+                } footer: {
+                    Text("計程車時間約等於開車，不含等車與塞車變化。算不出的就顯示無法估算，不用直線距離推算。")
+                }
+                if leg.from.isInKorea || leg.to.isInKorea {
+                    Section("大眾運輸在韓國請用當地地圖查") {
+                        LocalMapButtons(destination: leg.to.mapPoint, origin: leg.from.mapPoint, mode: .transit, address: leg.to.address)
+                    }
+                }
+                if canEdit {
+                    Section {
+                        ForEach(TravelMode.allCases.filter { $0 != leg.current }, id: \.self) { mode in
+                            Button("這天改用\(mode.displayName)") { Task { await apply(mode) } }.disabled(saving)
+                        }
+                    } footer: {
+                        Text("改的是這一天所有路段的計算方式；旅伴也會看到。")
+                    }
+                }
+                if let errorMessage { ErrorText(errorMessage) }
+            }
+            .navigationTitle("交通方式比較")
+            .navigationBarTitleDisplayModeInline()
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            .task {
+                let from = RoutePoint(coordinate: Coordinate(latitude: leg.from.latitude, longitude: leg.from.longitude), countryCode: leg.from.countryCode)
+                let to = RoutePoint(coordinate: Coordinate(latitude: leg.to.latitude, longitude: leg.to.longitude), countryCode: leg.to.countryCode)
+                results = await session.routes.compareModes(from: from, to: to, departure: leg.departure)
+            }
+        }
+    }
+
+    static func text(_ time: LegTime) -> String {
+        switch time {
+        case .minutes(let m): return "約 \(Int(m.rounded(.up))) 分"
+        case .unavailable(let reason): return reason == .notSupportedInRegion ? "無法估算（此地區不提供）" : "無法估算"
+        }
+    }
+
+    private func apply(_ mode: TravelMode) async {
+        saving = true
+        defer { saving = false }
+        do {
+            _ = try await session.trips.updateDay(leg.dayID, transportMode: mode)
+            onChanged()
+            dismiss()
+        } catch {
+            errorMessage = "更新失敗：\(userMessage(for: error))"
+        }
+    }
+}
+
+extension TravelMode {
+    var symbol: String {
+        switch self {
+        case .walking: "figure.walk"
+        case .transit: "tram.fill"
+        case .driving: "car.fill"
+        }
+    }
+}

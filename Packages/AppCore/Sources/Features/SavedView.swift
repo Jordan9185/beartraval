@@ -389,15 +389,31 @@ struct AddSavedPlaceView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
+    /// 貼進來的是分享連結（地圖、IG、Threads、網頁）時，用分享流程解析。
+    private var pastedURL: URL? { ShareAnalysis.urls(in: query).first }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    PlaceSearchField(text: $query, isSearching: searching) { Task { await search() } }
+                    PlaceSearchField(text: $query, placeholder: "店名、地點，或貼上分享連結", isSearching: searching) { Task { await search() } }
                         .accessibilityIdentifier("savedQuery")
                     Picker("類別", selection: $category) {
                         ForEach(SavedCategory.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    }
+                }
+                if let url = pastedURL {
+                    Section {
+                        NavigationLink {
+                            ShareFlowView(content: ShareContent(urls: [url], texts: [trimmed]), repository: session.trips,
+                                          matcher: session.routes, placeSearch: session.placeSearch, saveDraft: nil) { _ in onDone() }
+                                .navigationTitle("解析連結")
+                        } label: {
+                            Label("解析這個連結", systemImage: "link")
+                        }
+                        .accessibilityIdentifier("parseLink")
+                    } footer: {
+                        Text("地圖連結（Google、Apple、Naver、Kakao）會直接讀出地點；IG、Threads 若只拿得到連結，請補上店名。解析後可以收藏，或直接排進某一天（先看多花幾分鐘再確認）。")
                     }
                 }
                 if searching { ProgressView("搜尋中…") }

@@ -111,6 +111,8 @@ struct CreateTripView: View {
     @State private var start = Date()
     @State private var end = Date()
     @State private var timeZoneID = "Asia/Seoul"
+    @State private var transportMode: TravelMode = TravelMode.suggested(forTimeZone: "Asia/Seoul")
+    @State private var modeTouched = false
     @State private var rawText = ""
     @State private var importSession: ImportSession?
     @State private var errorMessage: String?
@@ -128,8 +130,11 @@ struct CreateTripView: View {
                     Picker("第一天的時區", selection: $timeZoneID) {
                         ForEach(Self.timeZones, id: \.self) { Text(TripTimeZones.displayName($0)).tag($0) }
                     }
+                    Picker("主要交通方式", selection: Binding(get: { transportMode }, set: { transportMode = $0; modeTouched = true })) {
+                        ForEach(TravelMode.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    }
                 } footer: {
-                    Text("跨國旅程建好後，可以在每一天的設定改時區。")
+                    Text("跨國旅程建好後，可以在每一天的設定改時區與交通方式。韓國的大眾運輸 Apple 地圖算不出時間，建議選開車／計程車或步行。")
                 }
                 Section {
                     // 固定高度：長文在框內捲動，不會把上方的名稱、日期、時區擠出畫面。
@@ -157,11 +162,15 @@ struct CreateTripView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .onChange(of: timeZoneID) { if !modeTouched { transportMode = TravelMode.suggested(forTimeZone: timeZoneID) } }
             .navigationTitle("建立旅程")
             .navigationDestination(item: $importSession) { importSession in
                 ImportFlowView(session: importSession, service: session.imports, placeSearch: session.placeSearch) { trip in
-                    onCreated(trip)
-                    dismiss()
+                    Task {
+                        await applyMode(trip)
+                        onCreated(trip)
+                        dismiss()
+                    }
                 }
             }
             .toolbar {
@@ -178,6 +187,12 @@ struct CreateTripView: View {
         !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// 新旅程每天預設大眾運輸；選了別的就整趟改掉（失敗不擋建立，之後可在旅程裡改）。
+    private func applyMode(_ trip: Trip) async {
+        guard transportMode != .transit else { return }
+        _ = try? await session.trips.setTripTransportMode(trip.id, mode: transportMode)
+    }
+
     private func save() async {
         isSaving = true
         defer { isSaving = false }
@@ -191,7 +206,9 @@ struct CreateTripView: View {
                 importSession = try await session.imports.createImport(
                     tripName: tripName, startDate: startDate, endDate: endDate, timeZone: timeZoneID, rawText: rawText)
             } else {
-                onCreated(try await session.trips.createTrip(name: tripName, startDate: startDate, endDate: endDate, timeZone: timeZoneID))
+                let trip = try await session.trips.createTrip(name: tripName, startDate: startDate, endDate: endDate, timeZone: timeZoneID)
+                await applyMode(trip)
+                onCreated(trip)
                 dismiss()
             }
             errorMessage = nil
@@ -216,6 +233,8 @@ struct TripDetailView: View {
     @State private var revision: Int?
     @State private var confirmDelete = false
     @State private var showsMembers = false
+    @State private var legToCompare: LegComparison?
+    @State private var showsTripMode = false
     var onDeleted: () -> Void = {}
     @Environment(\.dismiss) private var dismissView
 
@@ -235,7 +254,11 @@ struct TripDetailView: View {
                         }
                         .buttonStyle(.plain)
                         if let leg = baseRoutes[day.id]?.leg(from: stop.id) {
-                            LegRow(leg: leg, mode: day.day.transportMode, toName: stopName(leg.to, in: day))
+                            // 點路段可以比較步行／大眾運輸／開車・計程車。
+                            Button { legToCompare = comparison(leg, in: day) } label: {
+                                LegRow(leg: leg, mode: day.day.transportMode, toName: stopName(leg.to, in: day))
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                     // 一列說完這天的交通方式、路程與時區；可編輯時點進去改設定。
@@ -295,6 +318,9 @@ struct TripDetailView: View {
                 .disabled(timeline.isEmpty)
             Menu("更多", systemImage: "ellipsis.circle") {
                 Button("成員", systemImage: "person.2") { showsMembers = true }
+                if myRole?.canEdit == true {
+                    Button("整趟交通方式", systemImage: "car") { showsTripMode = true }
+                }
                 if myRole == .owner {
                     Button("刪除旅程", systemImage: "trash", role: .destructive) { confirmDelete = true }
                 }
@@ -306,6 +332,24 @@ struct TripDetailView: View {
             #endif
         }
         .navigationDestination(isPresented: $showsMembers) { MembersView(session: session, trip: trip, myRole: myRole) }
+        .sheet(item: $legToCompare) { leg in
+            LegModesView(session: session, leg: leg, canEdit: myRole?.canEdit == true) { Task { await reload() } }
+                .presentationDetents([.medium, .large])
+        }
+        .confirmationDialog("整趟旅程的交通方式", isPresented: $showsTripMode, titleVisibility: .visible) {
+            ForEach(TravelMode.allCases, id: \.self) { mode in
+                Button(mode.displayName) {
+                    Task {
+                        do {
+                            try await session.trips.setTripTransportMode(trip.id, mode: mode)
+                            await reload()
+                        } catch { errorMessage = "更新失敗：\(userMessage(for: error))" }
+                    }
+                }
+            }
+        } message: {
+            Text("每一天都改用同一種方式計算路程；之後仍可在個別日子調整。")
+        }
         .sheet(isPresented: $showsRouteMatch) {
             RouteMatchView(session: session, tripID: trip.id, timeline: timeline, places: places, onAdded: {
                 Task { await reload() }
@@ -323,6 +367,13 @@ struct TripDetailView: View {
     private func stopName(_ id: UUID, in day: DayTimeline) -> String? {
         guard let stop = day.stops.first(where: { $0.id == id }) else { return nil }
         return stop.placeId.flatMap { places[$0] }?.displayTitle(fallbackChinese: stop.rawLabel) ?? stop.rawLabel
+    }
+
+    private func comparison(_ leg: BaseRoute.Leg, in day: DayTimeline) -> LegComparison? {
+        guard let fromStop = day.stops.first(where: { $0.id == leg.from }), let toStop = day.stops.first(where: { $0.id == leg.to }),
+              let from = fromStop.placeId.flatMap({ places[$0] }), let to = toStop.placeId.flatMap({ places[$0] }) else { return nil }
+        return LegComparison(from: from, to: to, departure: LegComparison.departure(day: day.day, from: fromStop),
+                             dayID: day.id, current: day.day.transportMode)
     }
 
     private func editingContext(for stop: Stop) -> StopEditingContext? {

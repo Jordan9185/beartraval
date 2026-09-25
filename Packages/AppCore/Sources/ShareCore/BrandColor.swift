@@ -50,6 +50,10 @@ public struct PlaceSearchField: View {
         HStack {
             TextField(placeholder, text: $text)
                 .submitLabel(.search)
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                #endif
                 .onSubmit { if !isEmpty && !isSearching { onSearch() } }
             Button(isSearching ? "搜尋中…" : "搜尋", action: onSearch)
                 .buttonStyle(.borderless)

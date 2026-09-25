@@ -55,6 +55,17 @@ public enum TripTimeZones {
 
 extension TripRepository {
     /// 修改某一天的時區或交通方式（Owner／Editor）；會讓當天未確認的加入要求過期。
+    /// 整趟旅程每天都改用同一種交通方式；回傳有改到的天數。
+    @discardableResult
+    public func setTripTransportMode(_ tripID: UUID, mode: TravelMode) async throws -> Int {
+        struct Params: Encodable { let p_trip_id: UUID, p_transport_mode: TravelMode }
+        do {
+            return try await client.rpc("set_trip_transport_mode", params: Params(p_trip_id: tripID, p_transport_mode: mode)).execute().value
+        } catch {
+            throw BackendError.from(error)
+        }
+    }
+
     public func updateDay(_ dayID: UUID, timeZone: String? = nil, transportMode: TravelMode? = nil) async throws -> TripDay {
         struct Params: Encodable { let p_day_id: UUID, p_time_zone: String?, p_transport_mode: TravelMode? }
         do {

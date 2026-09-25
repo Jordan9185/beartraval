@@ -191,6 +191,15 @@ public struct RouteMatcher: Sendable {
         await cache.value(from: from, to: to, mode: mode, departure: departure, using: provider)
     }
 
+    /// 同一段路三種交通方式各要多久（使用者比較用；算不出的照實回傳無法估算）。
+    public func compareModes(from: RoutePoint, to: RoutePoint, departure: Date) async -> [(mode: TravelMode, time: LegTime)] {
+        var results: [(mode: TravelMode, time: LegTime)] = []
+        for mode in TravelMode.allCases {
+            results.append((mode, await leg(from, to, mode, departure)))
+        }
+        return results
+    }
+
     public func baseRoute(for day: DayPlan, mode: TravelMode) async -> BaseRoute {
         var legs: [BaseRoute.Leg] = []
         for i in day.stops.indices.dropLast() {

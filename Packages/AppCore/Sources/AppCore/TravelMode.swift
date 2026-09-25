@@ -6,11 +6,17 @@ public enum TravelMode: String, Codable, CaseIterable, Sendable {
     case transit
     case driving
 
+    /// 建立旅程時的預設：Apple 地圖在韓國不提供大眾運輸時間，改用開車／計程車。
+    public static func suggested(forTimeZone timeZone: String) -> TravelMode {
+        timeZone == "Asia/Seoul" ? .driving : .transit
+    }
+
     public var displayName: String {
         switch self {
         case .walking: "步行"
         case .transit: "大眾運輸"
-        case .driving: "開車"
+        // 計程車走的路線與時間和自己開車相同（不含等車時間）。
+        case .driving: "開車／計程車"
         }
     }
 }

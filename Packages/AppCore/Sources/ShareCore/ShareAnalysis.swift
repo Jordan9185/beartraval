@@ -32,7 +32,7 @@ public struct ShareContent: Codable, Equatable, Sendable {
                     if imageJPEG == nil, let jpeg = load.imageJPEG { imageJPEG = jpeg }
                     guard let preview = load.preview else { continue }
                     switch load.kind {
-                    case .url: if let url = URL(string: preview), url.scheme?.hasPrefix("http") == true, !urls.contains(url) { urls.append(url) }
+                    case .url: if let url = URL(string: preview), url.scheme?.lowercased().hasPrefix("http") == true, !urls.contains(url) { urls.append(url) }
                     case .text: texts.append(preview)
                     default: break
                     }
@@ -107,10 +107,10 @@ public struct ShareAnalysis: Equatable, Sendable {
         return .web
     }
 
-    static func urls(in text: String) -> [URL] {
+    public static func urls(in text: String) -> [URL] {
         guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return [] }
         return detector.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap(\.url)
-            .filter { $0.scheme?.hasPrefix("http") == true }
+            .filter { $0.scheme?.lowercased().hasPrefix("http") == true }
     }
 
     /// 第一行去掉網址後、非 hashtag／帳號的文字，最多 60 字。

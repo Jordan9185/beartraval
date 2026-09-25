@@ -74,3 +74,12 @@ struct PayloadURLTests {
         #expect(PayloadInspector.describe(item: long as NSURL, typeIdentifier: "public.url").preview == long.absoluteString)
     }
 }
+
+struct PastedLinkTests {
+    /// 鍵盤自動大寫會變成「HTTPS://」，仍要認得是連結。
+    @Test func detectsLinksRegardlessOfSchemeCase() {
+        #expect(ShareAnalysis.urls(in: "HTTPS://maps.apple.com/?ll=37.5512,126.9882&q=N%20Seoul%20Tower").count == 1)
+        #expect(ShareAnalysis.urls(in: "去這間 https://naver.me/abc 很好吃").first?.host == "naver.me")
+        #expect(ShareAnalysis.urls(in: "光化門").isEmpty)
+    }
+}

@@ -24,3 +24,11 @@ select app.create_invite(:'trip_id', 'viewer') as token \gset
 select tests.login(:'viewer');
 select app.accept_invite(:'token');
 select tests.throws(format($$select app.update_day(%L, 'Asia/Seoul')$$, :'d3'), 'PT403', 'viewer cannot change day settings');
+
+-- Whole-trip transport mode: only days that change are bumped; viewers can't.
+select tests.throws(format($$select app.set_trip_transport_mode(%L, 'driving')$$, :'trip_id'), 'PT403', 'viewer cannot change trip mode');
+select tests.login(:'owner');
+select tests.ok(app.set_trip_transport_mode(:'trip_id', 'driving') = 3, 'all three days switched to driving');
+select tests.ok((select bool_and(transport_mode = 'driving') from app.trip_days where trip_id = :'trip_id'), 'every day is driving');
+select tests.ok((select route_revision = 2 from app.trip_days where id = :'d3'), 'changed day bumps its revision');
+select tests.ok(app.set_trip_transport_mode(:'trip_id', 'driving') = 0, 'no-op when already driving');
