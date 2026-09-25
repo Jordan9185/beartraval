@@ -1,4 +1,5 @@
 import AppCore
+import PhotosUI
 import ShareCore
 import SwiftUI
 
@@ -10,6 +11,7 @@ struct ShoppingTab: View {
     @State private var myRole: TripRole?
     @State private var sync: TripSync?
     @State private var reloadToken = 0
+    @State private var importing = false
 
     var body: some View {
         NavigationStack {
@@ -26,7 +28,26 @@ struct ShoppingTab: View {
             .navigationTitle("購物清單")
             .toolbar {
                 if trips.count > 1 {
-                    Picker("旅程", selection: $tripID) { ForEach(trips) { Text($0.name).tag(Optional($0.id)) } }
+                    ToolbarItem(placement: .automatic) {
+                        Picker("旅程", selection: $tripID) { ForEach(trips) { Text($0.name).tag(Optional($0.id)) } }
+                    }
+                }
+                if myRole?.canEdit == true {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("從貼文或截圖加入", systemImage: "sparkles") { importing = true }
+                            .accessibilityIdentifier("importProducts")
+                    }
+                }
+            }
+            .sheet(isPresented: $importing) {
+                NavigationStack {
+                    ProductImportView(content: ShareContent(), repository: session.trips) { _ in
+                        importing = false
+                        reloadToken += 1
+                    }
+                    .navigationTitle("從貼文加入")
+                    .navigationBarTitleDisplayModeInline()
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { importing = false } } }
                 }
             }
             .task {
@@ -63,6 +84,8 @@ public struct ShoppingListView<MerchantScreen: View>: View {
 
     @State private var entries: [ShoppingEntry] = []
     @State private var newName = ""
+    @State private var newPhoto: PhotosPickerItem?
+    @State private var newImage: Data?
     @State private var errorMessage: String?
     @State private var loaded = false
 
@@ -89,6 +112,11 @@ public struct ShoppingListView<MerchantScreen: View>: View {
             if canEdit {
                 Section {
                     HStack {
+                        PhotosPicker(selection: $newPhoto, matching: .images) {
+                            Image(systemName: newImage == nil ? "camera" : "photo.fill")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(newImage == nil ? "附上照片" : "已附照片")
                         TextField("新增想買的商品", text: $newName).onSubmit { Task { await add() } }
                             .accessibilityIdentifier("newItemField")
                         Button("新增") { Task { await add() } }
@@ -100,9 +128,16 @@ public struct ShoppingListView<MerchantScreen: View>: View {
             }
             if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             ForEach(entries) { entry in
-                ShoppingRow(entry: entry, me: service.currentUserID, canEdit: canEdit,
-                            toggle: { Task { await togglePurchased(entry) } },
-                            merchantScreen: { merchantScreen(entry) })
+                NavigationLink {
+                    ShoppingItemDetailView(service: service, tripID: tripID, entry: entry, canEdit: canEdit,
+                                           merchantScreen: canEdit && entry.status == .unscheduled ? AnyView(merchantScreen(entry)) : nil) {
+                        Task { await reload() }
+                    }
+                } label: {
+                    ShoppingRow(entry: entry, me: service.currentUserID, canEdit: canEdit, service: service,
+                                toggle: { Task { await togglePurchased(entry) } },
+                                merchantScreen: { merchantScreen(entry) })
+                }
             }
         }
         .overlay {
@@ -112,6 +147,12 @@ public struct ShoppingListView<MerchantScreen: View>: View {
         }
         .refreshable { await reload() }
         .task(id: "\(tripID)-\(reloadToken)") { await reload() }
+        .onChange(of: newPhoto) {
+            Task {
+                guard let data = try? await newPhoto?.loadTransferable(type: Data.self) else { return }
+                newImage = ImageDownscale.jpeg(from: data)
+            }
+        }
     }
 
     private func reload() async {
@@ -129,8 +170,11 @@ public struct ShoppingListView<MerchantScreen: View>: View {
         let name = newName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
         do {
-            _ = try await service.addShoppingItem(tripID: tripID, name: name, note: nil, url: nil, clientOpID: UUID())
+            let item = try await service.addShoppingItem(tripID: tripID, name: name, note: nil, url: nil, clientOpID: UUID())
+            if let newImage { try await service.setShoppingImage(tripID: tripID, itemID: item.id, jpeg: newImage) }
             newName = ""
+            newImage = nil
+            newPhoto = nil
             await reload()
         } catch {
             errorMessage = "新增失敗：\(error.localizedDescription)"
@@ -162,11 +206,15 @@ struct ShoppingRow<MerchantScreen: View>: View {
     let entry: ShoppingEntry
     let me: UUID?
     let canEdit: Bool
+    let service: any ShoppingService
     let toggle: () -> Void
     let merchantScreen: () -> MerchantScreen
 
     var body: some View {
         HStack(alignment: .top) {
+            if let path = entry.item.imagePath {
+                ShoppingImage(path: path, service: service).frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
+            }
             Button(action: toggle) {
                 Image(systemName: entry.isPurchased ? "checkmark.circle.fill" : "circle").font(.title2)
             }
@@ -188,9 +236,7 @@ struct ShoppingRow<MerchantScreen: View>: View {
                 .font(.caption)
                 .accessibilityIdentifier("status-\(entry.item.name)")
                 Text("\(entry.interestedUserIDs.count) 人想買").font(.caption2).foregroundStyle(.secondary)
-                if canEdit && entry.status == .unscheduled {
-                    NavigationLink("找可能販售的店…", destination: merchantScreen).font(.caption)
-                }
+
             }
         }
     }
@@ -298,5 +344,91 @@ struct MerchantSearchView: View {
         let url = officialURL.trimmingCharacters(in: .whitespaces)
         try? await session.trips.addMerchant(itemID: entry.id, placeID: place.id, evidence: evidence,
                                              url: url.isEmpty ? nil : url, note: "Apple 地圖搜尋「\(query)」")
+    }
+}
+
+/// 私有 bucket 的商品照片（簽名網址）。
+struct ShoppingImage: View {
+    let path: String
+    let service: any ShoppingService
+    var contentMode: ContentMode = .fill
+    @State private var url: URL?
+
+    var body: some View {
+        AsyncImage(url: url) { image in
+            image.resizable().aspectRatio(contentMode: contentMode)
+        } placeholder: {
+            Rectangle().fill(.quaternary)
+        }
+        .task(id: path) { url = await service.shoppingImageURL(path: path) }
+    }
+}
+
+/// 商品詳情：照片、來源、到社群找這個商品、換照片。
+struct ShoppingItemDetailView: View {
+    let service: any ShoppingService
+    let tripID: UUID
+    let entry: ShoppingEntry
+    let canEdit: Bool
+    var merchantScreen: AnyView? = nil
+    let onChanged: () -> Void
+    @State private var photo: PhotosPickerItem?
+    @State private var uploading = false
+    @State private var errorMessage: String?
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Form {
+            if let path = entry.item.imagePath {
+                Section {
+                    ShoppingImage(path: path, service: service, contentMode: .fit)
+                        .frame(maxWidth: .infinity, minHeight: 200, maxHeight: 360)
+                }
+            }
+            Section {
+                Text(entry.item.name).font(.headline)
+                if let note = entry.item.note { Text(note).font(.callout) }
+                if let link = entry.item.url.flatMap(URL.init(string:)) {
+                    Link(link.host ?? link.absoluteString, destination: link).font(.callout)
+                }
+                if canEdit {
+                    PhotosPicker(selection: $photo, matching: .images) {
+                        Label(uploading ? "上傳中…" : entry.item.imagePath == nil ? "附上照片" : "換照片", systemImage: "photo")
+                    }
+                    .disabled(uploading)
+                }
+                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            }
+            if let merchantScreen {
+                Section {
+                    NavigationLink("找可能販售的店…") { merchantScreen }
+                        .accessibilityIdentifier("findMerchants")
+                }
+            }
+            Section {
+                ForEach(ProductSearchLinks.links(for: entry.item.name), id: \.self) { link in
+                    Button("在 \(link.title) 搜尋", systemImage: "magnifyingglass") { openURL(link.url) }
+                }
+            } header: {
+                Text("找找看")
+            } footer: {
+                Text("看別人的開箱、在哪裡買得到。是否有賣、有沒有庫存以店家為準。")
+            }
+        }
+        .navigationTitle("商品")
+        .navigationBarTitleDisplayModeInline()
+        .onChange(of: photo) {
+            Task {
+                guard let data = try? await photo?.loadTransferable(type: Data.self), let jpeg = ImageDownscale.jpeg(from: data) else { return }
+                uploading = true
+                defer { uploading = false }
+                do {
+                    try await service.setShoppingImage(tripID: tripID, itemID: entry.id, jpeg: jpeg)
+                    onChanged()
+                } catch {
+                    errorMessage = "上傳失敗：\(error.localizedDescription)"
+                }
+            }
+        }
     }
 }

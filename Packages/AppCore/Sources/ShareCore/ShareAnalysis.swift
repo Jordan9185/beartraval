@@ -9,23 +9,27 @@ public struct ShareContent: Codable, Equatable, Sendable {
     /// 主機 App 給的標題（例如 Safari 的頁面標題）。
     public var title: String?
     public var hasImage: Bool
+    /// 第一張圖的縮圖（有拿到時）；購物清單附圖、AI 辨識商品用。
+    public var imageJPEG: Data?
 
-    public init(urls: [URL] = [], texts: [String] = [], title: String? = nil, hasImage: Bool = false) {
+    public init(urls: [URL] = [], texts: [String] = [], title: String? = nil, hasImage: Bool = false, imageJPEG: Data? = nil) {
         self.urls = urls
         self.texts = texts
         self.title = title
         self.hasImage = hasImage
+        self.imageJPEG = imageJPEG
     }
 
     /// 由 Payload Inspector 的紀錄整理。
     public init(record: PayloadRecord) {
-        var urls: [URL] = [], texts: [String] = [], hasImage = false, title: String?
+        var urls: [URL] = [], texts: [String] = [], hasImage = false, title: String?, imageJPEG: Data?
         for item in record.items {
             if let t = item.attributedContentText?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { texts.append(t) }
             if title == nil, let t = item.attributedTitle, !t.isEmpty { title = t }
             for attachment in item.attachments {
                 if attachment.registeredTypeIdentifiers.contains(where: { UTType($0)?.conforms(to: .image) == true }) { hasImage = true }
                 for load in attachment.loads {
+                    if imageJPEG == nil, let jpeg = load.imageJPEG { imageJPEG = jpeg }
                     guard let preview = load.preview else { continue }
                     switch load.kind {
                     case .url: if let url = URL(string: preview), url.scheme?.hasPrefix("http") == true, !urls.contains(url) { urls.append(url) }
@@ -39,7 +43,7 @@ public struct ShareContent: Codable, Equatable, Sendable {
         for text in texts {
             for url in ShareAnalysis.urls(in: text) where !urls.contains(url) { urls.append(url) }
         }
-        self.init(urls: urls, texts: texts, title: title, hasImage: hasImage)
+        self.init(urls: urls, texts: texts, title: title, hasImage: hasImage, imageJPEG: imageJPEG)
     }
 }
 

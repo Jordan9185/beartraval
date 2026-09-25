@@ -429,3 +429,7 @@ verify_jwt = true
 # 刪除帳號（App Review 要求；WP11）。
 [functions.delete-account]
 verify_jwt = true
+
+# 從分享的貼文辨識商品（購物清單）；只回傳草稿，不寫入。
+[functions.extract-products]
+verify_jwt = true

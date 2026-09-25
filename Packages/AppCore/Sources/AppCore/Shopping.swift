@@ -10,8 +10,11 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
     /// nil = 新增者已刪除帳號（匿名化）。
     public var addedBy: UUID?
     public var plannedStopId: UUID?
+    /// 私有 bucket `shopping-images` 內的路徑（`<trip_id>/<檔名>`）；顯示時換成簽名網址。
+    public var imagePath: String?
 
-    public init(id: UUID, tripId: UUID, name: String, note: String? = nil, url: String? = nil, addedBy: UUID?, plannedStopId: UUID? = nil) {
+    public init(id: UUID, tripId: UUID, name: String, note: String? = nil, url: String? = nil, addedBy: UUID?, plannedStopId: UUID? = nil,
+                imagePath: String? = nil) {
         self.id = id
         self.tripId = tripId
         self.name = name
@@ -19,6 +22,7 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
         self.url = url
         self.addedBy = addedBy
         self.plannedStopId = plannedStopId
+        self.imagePath = imagePath
     }
 
     enum CodingKeys: String, CodingKey {
@@ -26,6 +30,7 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
         case tripId = "trip_id"
         case addedBy = "added_by"
         case plannedStopId = "planned_stop_id"
+        case imagePath = "image_path"
     }
 }
 
@@ -155,6 +160,15 @@ public protocol ShoppingService: Sendable {
     func merchants(of itemID: UUID) async throws -> [MerchantCandidate]
     func addMerchant(itemID: UUID, placeID: UUID, evidence: MerchantCandidate.EvidenceType, url: String?, note: String?) async throws
     var currentUserID: UUID? { get }
+    /// 上傳商品照片（JPEG）並設到商品上。
+    func setShoppingImage(tripID: UUID, itemID: UUID, jpeg: Data) async throws
+    /// 照片的暫時網址（私有 bucket 的簽名網址）；沒有或讀不到時為 nil。
+    func shoppingImageURL(path: String) async -> URL?
+}
+
+extension ShoppingService {
+    public func setShoppingImage(tripID: UUID, itemID: UUID, jpeg: Data) async throws {}
+    public func shoppingImageURL(path: String) async -> URL? { nil }
 }
 
 extension TripRepository: ShoppingService {

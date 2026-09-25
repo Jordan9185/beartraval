@@ -72,3 +72,14 @@ select tests.throws(format($$select app.record_purchase(%L, false)$$, :'item2'),
 select tests.login(:'owner');
 select app.commit_itinerary(:'day_id', 1, '[]');
 select tests.ok((select planned_stop_id is null from app.shopping_items where id = :'item_id'), 'deleting stop unschedules item');
+
+-- Images: only in the trip's own folder; viewers can't set them.
+select tests.login(:'editor');
+select tests.ok((app.set_shopping_image(:'item_id', :'trip_id' || '/item.jpg')).image_path = :'trip_id' || '/item.jpg',
+                'editor sets an image in the trip folder');
+select tests.throws(format($$select app.set_shopping_image(%L, '00000000-0000-0000-0000-000000000000/x.jpg')$$, :'item_id'),
+                    'PT422', 'image from another trip folder rejected');
+select tests.ok((app.set_shopping_image(:'item_id', null)).image_path is null, 'image can be removed');
+select tests.login(:'viewer');
+select tests.throws(format($$select app.set_shopping_image(%L, %L)$$, :'item_id', :'trip_id' || '/v.jpg'), 'PT403', 'viewer cannot set image');
+select tests.ok(app.uuid_or_null('not-a-uuid') is null, 'bad folder name is not a trip');

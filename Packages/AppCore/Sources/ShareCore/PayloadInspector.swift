@@ -1,3 +1,4 @@
+import AppCore
 import Foundation
 import UniformTypeIdentifiers
 
@@ -62,7 +63,9 @@ public enum PayloadInspector {
                     // 檔案在 callback 結束後會被刪除，只能在這裡讀大小。
                     if let url {
                         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
-                        once.resume(Described(kind: .file, preview: url.lastPathComponent, byteCount: size))
+                        let isImage = UTType(type)?.conforms(to: .image) == true
+                        once.resume(Described(kind: .file, preview: url.lastPathComponent, byteCount: size,
+                                              imageJPEG: isImage ? ImageDownscale.jpeg(fileURL: url) : nil))
                     } else {
                         once.resume(Described(kind: .error, error: error.map(describe) ?? "nil"))
                     }
@@ -83,7 +86,8 @@ public enum PayloadInspector {
             preview: result.preview,
             byteCount: result.byteCount,
             durationMs: milliseconds(since: start),
-            error: result.error
+            error: result.error,
+            imageJPEG: result.imageJPEG
         )
     }
 
@@ -92,6 +96,7 @@ public enum PayloadInspector {
         var preview: String? = nil
         var byteCount: Int? = nil
         var error: String? = nil
+        var imageJPEG: Data? = nil
     }
 
     static func describe(item: (any NSSecureCoding)?, typeIdentifier: String? = nil) -> Described {

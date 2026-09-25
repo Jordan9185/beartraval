@@ -38,6 +38,13 @@ struct ShareRootView: View {
     let finish: () -> Void
     @State private var done: String?
     @State private var showsInspector = false
+    @State private var mode: Mode = .place
+
+    /// 分享進來的是地點（收藏／加入行程）還是想買的商品（購物清單）；兩個清單分開（規格規則 5）。
+    enum Mode: String, CaseIterable {
+        case place = "地點"
+        case product = "商品"
+    }
 
     var body: some View {
         NavigationStack {
@@ -47,13 +54,28 @@ struct ShareRootView: View {
                         .task { try? await Task.sleep(for: .seconds(1.2)); finish() }
                 } else if let record = model.record {
                     let content = ShareContent(record: record)
-                    ShareFlowView(content: content, repository: model.repository, matcher: model.matcher,
-                                  placeSearch: MapKitPlaceSearch(),
-                                  saveDraft: { try ShareDraftStore.shared()?.save(ShareDraft(content: content)) }) { outcome in
-                        done = switch outcome {
-                        case .added: "已加入行程"
-                        case .saved(let duplicate): duplicate ? "已在收藏清單，已標記想去" : "已加入收藏"
-                        case .draftSaved: "已存成草稿，開啟 App 後繼續"
+                    VStack(spacing: 0) {
+                        Picker("類型", selection: $mode) {
+                            ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                        switch mode {
+                        case .place:
+                            ShareFlowView(content: content, repository: model.repository, matcher: model.matcher,
+                                          placeSearch: MapKitPlaceSearch(),
+                                          saveDraft: { try ShareDraftStore.shared()?.save(ShareDraft(content: content)) }) { outcome in
+                                done = switch outcome {
+                                case .added: "已加入行程"
+                                case .saved(let duplicate): duplicate ? "已在收藏清單，已標記想去" : "已加入收藏"
+                                case .draftSaved: "已存成草稿，開啟 App 後繼續"
+                                }
+                            }
+                        case .product:
+                            ProductImportView(content: content, repository: model.repository) { count in
+                                done = "已加入購物清單（\(count) 項）"
+                            }
                         }
                     }
                 } else {
