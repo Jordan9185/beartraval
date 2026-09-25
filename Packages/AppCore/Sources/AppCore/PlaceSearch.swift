@@ -6,10 +6,15 @@ public protocol PlaceSearching: Sendable {
     func search(_ query: String, near city: String?, limit: Int) async -> [PlaceOption]
     /// 座標附近的 POI（地圖連結只有座標時使用）。
     func nearby(_ coordinate: Coordinate, limit: Int) async -> [PlaceOption]
+    /// 以某個中心點附近為範圍搜尋（旅程所在城市），避免搜到其他國家的同名地點。
+    func search(_ query: String, around center: Coordinate?, limit: Int) async -> [PlaceOption]
 }
 
 extension PlaceSearching {
     public func nearby(_ coordinate: Coordinate, limit: Int) async -> [PlaceOption] { [] }
+    public func search(_ query: String, around center: Coordinate?, limit: Int) async -> [PlaceOption] {
+        await search(query, near: nil, limit: limit)
+    }
 }
 
 /// Apple MapKit POI 搜尋（決策 D3）。
@@ -23,6 +28,20 @@ public struct MapKitPlaceSearch: PlaceSearching {
         request.resultTypes = [.pointOfInterest, .address]
         guard let items = try? await MKLocalSearch(request: request).start().mapItems else { return [] }
         return items.prefix(limit).map { PlaceOption(draft: Self.draft(from: $0)) }
+    }
+
+    public func search(_ query: String, around center: Coordinate?, limit: Int = 5) async -> [PlaceOption] {
+        guard let center else { return await search(query, near: nil, limit: limit) }
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        request.resultTypes = [.pointOfInterest, .address]
+        request.region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: center.latitude, longitude: center.longitude),
+                                            latitudinalMeters: 30_000, longitudinalMeters: 30_000)
+        guard let items = try? await MKLocalSearch(request: request).start().mapItems else { return [] }
+        // 只留範圍附近（100 km 內）的結果，其他國家的同名地點不列入候選。
+        let origin = CLLocation(latitude: center.latitude, longitude: center.longitude)
+        return items.filter { Self.location($0).distance(from: origin) < 100_000 }
+            .prefix(limit).map { PlaceOption(draft: Self.draft(from: $0)) }
     }
 
     public func nearby(_ coordinate: Coordinate, limit: Int = 5) async -> [PlaceOption] {

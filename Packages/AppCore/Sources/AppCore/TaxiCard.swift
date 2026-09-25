@@ -41,28 +41,31 @@ public struct TaxiCard: Equatable, Sendable {
         }
     }
 
-    /// 固定句子與其中文翻譯。
-    static func phrases(_ language: Language) -> (request: String, extras: [(String, String)]) {
+    /// 固定句子（當地敬語、請求口吻，不用命令句）與逐句的中文翻譯。
+    /// 不加「請跳表」這類可能讓司機覺得被懷疑的補充。
+    static func phrases(_ language: Language) -> (request: String, requestZh: String, extras: [(String, String)]) {
         switch language {
         case .korean:
-            ("기사님, 이곳으로 가 주세요.", [("미터기로 가 주세요.", "請按跳表計費。")])
+            ("기사님, 안녕하세요. 이곳으로 가 주실 수 있을까요? 감사합니다.",
+             "司機您好。可以麻煩您載我到這裡嗎？謝謝您。", [])
         case .japanese:
-            ("運転手さん、ここまでお願いします。", [])
+            ("恐れ入りますが、こちらまでお願いできますでしょうか。よろしくお願いいたします。",
+             "不好意思，可以麻煩您載我到這裡嗎？麻煩您了。", [])
         case .chinese:
-            ("司機您好，麻煩載我到這裡。", [])
+            ("司機您好，不好意思，可以麻煩您載我到這裡嗎？謝謝您。",
+             "司機您好，不好意思，可以麻煩您載我到這裡嗎？謝謝您。", [])
         case .english:
-            ("Please take me to this place.", [])
+            ("Hello, could you please take me to this place? Thank you very much.",
+             "您好，可以麻煩您載我到這個地方嗎？非常感謝。", [])
         }
     }
 
-    public static let requestZh = "司機您好，麻煩載我到這裡。"
-
     public init(place: Place, fallbackChineseLabel: String? = nil) {
         let lang = Self.language(for: place.countryCode)
-        let (request, extras) = Self.phrases(lang)
+        let (request, requestZh, extras) = Self.phrases(lang)
         self.language = lang
         self.request = request
-        self.requestZh = Self.requestZh
+        self.requestZh = requestZh
         self.name = place.originalName
         let zh = place.chineseName ?? fallbackChineseLabel.flatMap { PlaceNaming.looksChinese($0) ? $0 : nil }
         self.nameZh = zh == place.originalName ? nil : zh

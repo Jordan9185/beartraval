@@ -15,6 +15,7 @@ struct TodayView: View {
     @State private var showsAssistant = false
     @State private var showsAccount = false
     @State private var selectedStop: Stop?
+    @State private var todayBase: BaseRoute?
 
     /// 順路門檻：加入後多花不超過此分鐘數才算「順路」。
     static let nearbyThresholdMinutes = 20
@@ -86,6 +87,9 @@ struct TodayView: View {
                         if stop.kind == .purchase { Image(systemName: "bag").font(.caption) }
                     } }
                     .buttonStyle(.plain)
+                    if let leg = todayBase?.dayID == day.id ? todayBase?.leg(from: stop.id) : nil {
+                        LegRow(leg: leg, mode: day.day.transportMode, toName: nil)
+                    }
                 }
                 NavigationLink("完整行程") { TripDetailView(session: session, trip: snapshot.trip) }
             } header: {
@@ -138,7 +142,12 @@ struct TodayView: View {
         .task(id: "\(snapshot.revision)-\(index)") { await computeNearby(snapshot, index) }
         .sheet(item: $selectedStop) { stop in
             StopDetailView(stop: stop, place: stop.placeId.flatMap { snapshot.places[$0] }, mode: day.day.transportMode,
-                           previous: day.stops.prefix { $0.id != stop.id }.last(where: \.isRoutable)?.placeId.flatMap { snapshot.places[$0] })
+                           previous: day.stops.prefix { $0.id != stop.id }.last(where: \.isRoutable)?.placeId.flatMap { snapshot.places[$0] },
+                           editing: store.myRole?.canEdit == true ? StopEditingContext(session: session, day: day,
+                                                                                       searchCenter: Coordinate.center(of: Array(snapshot.places.values))) {
+                               selectedStop = nil
+                               Task { await store.reload() }
+                           } : nil)
                 .presentationDetents([.medium, .large])
         }
         .sheet(item: $adding) { entry in
@@ -156,8 +165,10 @@ struct TodayView: View {
     private func computeNearby(_ snapshot: TripSnapshot, _ index: Int) async {
         guard let plan = DayPlan.from(snapshot.timeline[index], places: snapshot.places), !plan.stops.isEmpty else {
             nearby = []
+            todayBase = nil
             return
         }
+        todayBase = await session.routes.baseRoute(for: plan, mode: snapshot.timeline[index].day.transportMode)
         computingNearby = true
         defer { computingNearby = false }
         var result: [(SavedEntry, DayMatch)] = []

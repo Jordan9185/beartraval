@@ -110,7 +110,23 @@ extension TripSnapshot {
     }
 }
 
+extension Coordinate {
+    /// 一組地點的中心（搜尋範圍用）。
+    public static func center(of places: some Collection<Place>) -> Coordinate? {
+        guard !places.isEmpty else { return nil }
+        let n = Double(places.count)
+        return Coordinate(latitude: places.map(\.latitude).reduce(0, +) / n, longitude: places.map(\.longitude).reduce(0, +) / n)
+    }
+}
+
 extension TripRepository {
+    /// 旅程已確認地點的中心；還沒有地點時為 nil。
+    public func center(of tripID: UUID) async -> Coordinate? {
+        guard let stops = try? await stops(of: tripID),
+              let list = try? await places(ids: Array(Set(stops.compactMap(\.placeId)))) else { return nil }
+        return Coordinate.center(of: list)
+    }
+
     /// 一次載入 Trip 的全部資料並記下 revision（載入前後 revision 不同時重試一次）。
     public func snapshot(of trip: Trip) async throws -> TripSnapshot {
         for _ in 0..<2 {

@@ -234,7 +234,8 @@ public struct ShareFlowView: View {
         selected = nil
         matches = []
         pending = nil
-        candidates = await placeSearch.search(text, near: nil, limit: 6)
+        let center: Coordinate? = if let repository, let tripID { await repository.center(of: tripID) } else { nil }
+        candidates = await placeSearch.search(text, around: center, limit: 6)
         searched = true
     }
 

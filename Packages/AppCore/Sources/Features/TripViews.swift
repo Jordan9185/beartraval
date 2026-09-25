@@ -184,6 +184,9 @@ struct TripDetailView: View {
                             StopRow(stop: stop, place: stop.placeId.flatMap { places[$0] })
                         }
                         .buttonStyle(.plain)
+                        if let leg = baseRoutes[day.id]?.leg(from: stop.id) {
+                            LegRow(leg: leg, mode: day.day.transportMode, toName: stopName(leg.to, in: day))
+                        }
                     }
                     RouteStatusRow(day: day, base: baseRoutes[day.id])
                 } header: {
@@ -208,7 +211,8 @@ struct TripDetailView: View {
         .sheet(item: $selectedStop) { stop in
             StopDetailView(stop: stop, place: stop.placeId.flatMap { places[$0] },
                            mode: timeline.first { $0.id == stop.dayId }?.day.transportMode ?? .transit,
-                           previous: previousPlace(before: stop))
+                           previous: previousPlace(before: stop),
+                           editing: editingContext(for: stop))
                 .presentationDetents([.medium])
         }
         .navigationTitle(trip.name)
@@ -239,6 +243,19 @@ struct TripDetailView: View {
             await startSync()
         }
         .onDisappear { Task { await sync?.stop() } }
+    }
+
+    private func stopName(_ id: UUID, in day: DayTimeline) -> String? {
+        guard let stop = day.stops.first(where: { $0.id == id }) else { return nil }
+        return stop.placeId.flatMap { places[$0] }?.displayTitle(fallbackChinese: stop.rawLabel) ?? stop.rawLabel
+    }
+
+    private func editingContext(for stop: Stop) -> StopEditingContext? {
+        guard myRole?.canEdit == true, let day = timeline.first(where: { $0.id == stop.dayId }) else { return nil }
+        return StopEditingContext(session: session, day: day, searchCenter: Coordinate.center(of: Array(places.values))) {
+            selectedStop = nil
+            Task { await reload() }
+        }
     }
 
     /// 外開在地地圖時的起點：同一天前一個已確認地點的 Stop（§4.3.1）。
@@ -316,6 +333,9 @@ struct StopDetailView: View {
     let place: Place?
     let mode: TravelMode
     let previous: Place?
+    /// Owner／Editor 才有；待確認的地點可以在這裡確認、改字或移除。
+    var editing: StopEditingContext? = nil
+    @Environment(\.dismiss) private var dismissDetail
 
     var body: some View {
         NavigationStack {
@@ -327,6 +347,9 @@ struct StopDetailView: View {
                     if let dwell = stop.dwellMinutes { LabeledContent("停留", value: "\(dwell) 分") }
                     LabeledContent("類型", value: stop.fixed ? "固定" : "彈性")
                     if place == nil { Text("地點待確認，不參與路線").foregroundStyle(.orange) }
+                }
+                if place == nil, let editing {
+                    PendingStopActions(context: editing, stop: stop) { dismissDetail() }
                 }
                 if let place {
                     Section { TaxiCardButton(place: place, fallbackChineseLabel: stop.rawLabel) }
@@ -399,7 +422,7 @@ struct RouteStatusRow: View {
         }
         return switch base.status {
         case .noRoute: "尚未建立"
-        case .complete(let total): "約 \(total) 分"
+        case .complete(let total): "全天約 \(total) 分"
         case .partial(let n): "\(n) 段無法估算"
         case .unavailable(.notSupportedInRegion): "無法估算（此地區不提供）"
         case .unavailable: "無法估算"

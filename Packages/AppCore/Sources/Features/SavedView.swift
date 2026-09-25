@@ -293,7 +293,7 @@ struct ResolvePlaceSheet: View {
     }
 
     private func search() async {
-        results = await session.placeSearch.search(query, near: nil, limit: 6)
+        results = await session.placeSearch.search(query, around: await session.trips.center(of: entry.saved.tripId), limit: 6)
         errorMessage = results.isEmpty ? "找不到符合的地點" : nil
     }
 
