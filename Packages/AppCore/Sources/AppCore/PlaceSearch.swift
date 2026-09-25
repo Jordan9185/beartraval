@@ -1,6 +1,18 @@
 import Foundation
 import MapKit
 
+/// 搜尋結果要分清楚「查無此地」與「搜尋暫時不能用」（離線、被節流）：
+/// 後者不可當成「Apple 地圖沒收錄」自動處理（審查 H5）。
+public enum PlaceLookup: Equatable, Sendable {
+    case found([PlaceOption])
+    case notFound
+    case unavailable
+
+    public var options: [PlaceOption] {
+        if case .found(let options) = self { options } else { [] }
+    }
+}
+
 public protocol PlaceSearching: Sendable {
     /// 回傳候選分店（最多 `limit` 筆）；找不到時回空陣列。
     func search(_ query: String, near city: String?, limit: Int) async -> [PlaceOption]
@@ -10,6 +22,8 @@ public protocol PlaceSearching: Sendable {
     func search(_ query: String, around center: Coordinate?, limit: Int) async -> [PlaceOption]
     /// 城市或島嶼的中心點（例如 "Onomichi"），找不到時為 nil。
     func locate(city: String) async -> Coordinate?
+    /// 同 `search(_:around:limit:)`，但分得出查無結果與搜尋失敗。
+    func lookup(_ query: String, around center: Coordinate?, limit: Int) async -> PlaceLookup
 }
 
 extension PlaceSearching {
@@ -18,6 +32,10 @@ extension PlaceSearching {
         await search(query, near: nil, limit: limit)
     }
     public func locate(city: String) async -> Coordinate? { nil }
+    public func lookup(_ query: String, around center: Coordinate?, limit: Int) async -> PlaceLookup {
+        let options = await search(query, around: center, limit: limit)
+        return options.isEmpty ? .notFound : .found(options)
+    }
 }
 
 /// Apple MapKit POI 搜尋（決策 D3）。
@@ -34,17 +52,23 @@ public struct MapKitPlaceSearch: PlaceSearching {
     }
 
     public func search(_ query: String, around center: Coordinate?, limit: Int = 5) async -> [PlaceOption] {
-        guard let center else { return await search(query, near: nil, limit: limit) }
+        await lookup(query, around: center, limit: limit).options
+    }
+
+    public func lookup(_ query: String, around center: Coordinate?, limit: Int = 5) async -> PlaceLookup {
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = query
         request.resultTypes = [.pointOfInterest, .address]
-        request.region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: center.latitude, longitude: center.longitude),
-                                            latitudinalMeters: 30_000, longitudinalMeters: 30_000)
-        let items = await Self.run(request)
+        if let center {
+            request.region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: center.latitude, longitude: center.longitude),
+                                                latitudinalMeters: 30_000, longitudinalMeters: 30_000)
+        }
+        guard let items = await Self.attempt(request) else { return .unavailable }
         // 只留範圍附近（100 km 內）的結果，其他國家的同名地點不列入候選。
-        let origin = CLLocation(latitude: center.latitude, longitude: center.longitude)
-        return items.filter { Self.location($0).distance(from: origin) < 100_000 }
+        let origin = center.map { CLLocation(latitude: $0.latitude, longitude: $0.longitude) }
+        let options = items.filter { item in origin.map { Self.location(item).distance(from: $0) < 100_000 } ?? true }
             .prefix(limit).map { PlaceOption(draft: Self.draft(from: $0)) }
+        return options.isEmpty ? .notFound : .found(Array(options))
     }
 
     public func locate(city: String) async -> Coordinate? {
@@ -59,17 +83,24 @@ public struct MapKitPlaceSearch: PlaceSearching {
     /// MapKit 每分鐘約 50 次查詢，超過會回 `loadingThrottled`；匯入時一次查幾十個地點很容易碰到，
     /// 所以被節流時等一下再試，不把它當成「找不到」。
     static func run(_ request: MKLocalSearch.Request) async -> [MKMapItem] {
+        await attempt(request) ?? []
+    }
+
+    /// 找不到時回空陣列；網路錯誤或重試後仍被節流時回 nil（搜尋失敗，不是查無此地）。
+    static func attempt(_ request: MKLocalSearch.Request) async -> [MKMapItem]? {
         for wait in [10, 20, 30, 0] {
             do {
                 return try await MKLocalSearch(request: request).start().mapItems
+            } catch let error as MKError where error.code == .placemarkNotFound {
+                return []
             } catch let error as MKError where error.code == .loadingThrottled && wait > 0 {
                 try? await Task.sleep(for: .seconds(wait))
-                if Task.isCancelled { return [] }
+                if Task.isCancelled { return nil }
             } catch {
-                return []
+                return nil
             }
         }
-        return []
+        return nil
     }
 
     public func nearby(_ coordinate: Coordinate, limit: Int = 5) async -> [PlaceOption] {

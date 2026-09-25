@@ -41,6 +41,10 @@ Deno.serve(async (req) => {
   const { data: trip } = await db.from("trips").select("*").eq("id", body.trip_id).maybeSingle();
   if (!trip) return json({ error: "NOT_FOUND" }, 404);
 
+  // Per-user limit on AI calls.
+  const { data: allowed } = await db.rpc("consume_ai_quota", { p_kind: "ask" });
+  if (allowed !== true) return json({ status: "failed", reason: "rate_limited" });
+
   const [days, stops, saved, interests, items, events, merchants, members] = await Promise.all([
     db.from("trip_days").select("*").eq("trip_id", trip.id).order("display_order"),
     db.from("stops").select("*").eq("trip_id", trip.id).is("deleted_at", null).order("sort_order"),

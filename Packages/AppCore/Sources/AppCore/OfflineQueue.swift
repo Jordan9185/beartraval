@@ -45,6 +45,12 @@ public actor OfflineQueue {
         OfflineQueue(file: AppGroup.containerURL?.appending(path: "offline-queue.json"))
     }
 
+    /// 登出時清掉：排隊的操作屬於上一個帳號，不可用下一個帳號送出。
+    public func clear() {
+        items = []
+        persist()
+    }
+
     public func enqueue(_ operation: QueuedOperation) {
         items.append(QueuedItem(operation: operation))
         persist()
@@ -56,18 +62,31 @@ public actor OfflineQueue {
         public var remaining = 0
     }
 
+    /// 進行中的送出。App 會從多處同時呼叫 flush（啟動、恢復連線、重新整理），
+    /// actor 在 await 期間可被重入，所以重疊的呼叫共用同一次送出，避免同一筆送兩次或誤刪下一筆。
+    private var flushing: Task<FlushResult, Never>?
+
     public func flush(using executor: any QueuedOperationExecutor) async -> FlushResult {
+        if let flushing { return await flushing.value }
+        let task = Task { await self.drain(using: executor) }
+        flushing = task
+        let result = await task.value
+        flushing = nil
+        return result
+    }
+
+    private func drain(using executor: any QueuedOperationExecutor) async -> FlushResult {
         var result = FlushResult()
         while let item = items.first {
             do {
                 try await executor.execute(item)
                 result.sent += 1
-                items.removeFirst()
+                remove(item.id)
             } catch let error as BackendError where !Self.isTransient(error) {
                 result.rejected.append(item)
-                items.removeFirst()
+                remove(item.id)
             } catch {
-                items[0].attempts += 1
+                if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].attempts += 1 }
                 break
             }
             persist()
@@ -75,6 +94,10 @@ public actor OfflineQueue {
         persist()
         result.remaining = items.count
         return result
+    }
+
+    private func remove(_ id: UUID) {
+        items.removeAll { $0.id == id }
     }
 
     static func isTransient(_ error: BackendError) -> Bool {

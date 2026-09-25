@@ -154,6 +154,19 @@ struct ConfirmPlacesTests {
         #expect(PlaceMatch.confident(for: stop("Matin Kim", nil), in: [option("a", "Matin Kim"), option("b", "Matin Kim")]) == nil)
     }
 
+    /// 離線或被節流不是「沒收錄」：不自動保留為文字，可重新搜尋（審查 H5）。
+    @Test func searchFailureIsNotTreatedAsNotFound() {
+        var state = ConfirmPlacesState(session: session, draft: draft)
+        state.applySearch(.unavailable, at: 0)
+        #expect(state.items[0].decision == nil && !state.items[0].autoDecided && state.items[0].searchFailed)
+        #expect(state.failedSearchCount == 1)
+        #expect(state.needsAttention.contains(0))
+        state.resetFailedSearches()
+        #expect(!state.items[0].searched && !state.items[0].searchFailed)
+        state.applySearch(.notFound, at: 0)
+        #expect(state.items[0].decision == .pendingText && state.items[0].autoDecided)
+    }
+
     @Test func searchResultsDecideClearCasesOnly() {
         var state = ConfirmPlacesState(session: session, draft: draft)
         state.applySearchResults([option("gj", "광장시장")], at: 0)

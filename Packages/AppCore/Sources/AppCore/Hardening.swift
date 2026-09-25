@@ -111,6 +111,11 @@ public struct SnapshotCache: Sendable {
     public func remove(tripID: UUID) {
         try? FileManager.default.removeItem(at: directory.appending(path: "\(tripID.uuidString).json"))
     }
+
+    /// 登出時清掉，下一個帳號離線開 App 不會看到上一個帳號的旅程。
+    public func removeAll() {
+        try? FileManager.default.removeItem(at: directory)
+    }
 }
 
 // MARK: - 可觀測性：路線與 AI 呼叫的延遲、錯誤

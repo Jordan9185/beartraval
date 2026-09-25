@@ -55,6 +55,22 @@ struct OfflineQueueTests {
         #expect(result.remaining == 0)
     }
 
+    /// 多處同時 flush：每筆只送一次、不閃退（審查 H1）。
+    @Test func overlappingFlushesSendEachItemOnce() async {
+        let queue = OfflineQueue(file: nil)
+        await queue.enqueue(op)
+        await queue.enqueue(op)
+        let executor = SlowExecutor()
+        async let a = queue.flush(using: executor)
+        async let b = queue.flush(using: executor)
+        async let c = queue.flush(using: executor)
+        let results = await [a, b, c]
+        #expect(await executor.executed.count == 2)
+        #expect(Set(await executor.executed).count == 2)
+        #expect(results.allSatisfy { $0.remaining == 0 })
+        #expect(await queue.items.isEmpty)
+    }
+
     @Test func persistsAcrossInstances() async throws {
         let file = FileManager.default.temporaryDirectory.appending(path: "queue-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: file) }
@@ -62,5 +78,14 @@ struct OfflineQueueTests {
         let reloaded = OfflineQueue(file: file)
         #expect(await reloaded.items.count == 1)
         #expect(await reloaded.items.first?.operation == op)
+    }
+}
+
+actor SlowExecutor: QueuedOperationExecutor {
+    var executed: [UUID] = []
+
+    func execute(_ item: QueuedItem) async throws {
+        try await Task.sleep(for: .milliseconds(50))
+        executed.append(item.id)
     }
 }

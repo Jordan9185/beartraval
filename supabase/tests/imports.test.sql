@@ -40,6 +40,20 @@ reset role;
 select tests.ok((select parse_progress ->> 'last_place' = '광장시장' from app.import_sessions where id = :'import_id'),
                 'progress recorded while parsing');
 set role service_role;
+-- Only one parse at a time: a second claim while parsing is refused; an abandoned one can be reclaimed.
+select app.begin_parse(:'import_id') as second_claim \gset
+reset role;
+select tests.ok(not :'second_claim'::boolean, 'second parse refused while one is running');
+update app.import_sessions set updated_at = now() - interval '9 minutes' where id = :'import_id';
+set role service_role;
+select app.begin_parse(:'import_id') as stale_claim \gset
+reset role;
+select tests.ok(:'stale_claim'::boolean and (select parse_progress is null from app.import_sessions where id = :'import_id'),
+                'abandoned parse can be claimed again');
+set role authenticated;
+select tests.throws(format($$select app.begin_parse(%L)$$, :'import_id'), '42501', 'client cannot claim a parse');
+reset role;
+set role service_role;
 select app.record_parse_result(:'import_id', 'failed', null, 'invalid_output', 'claude-opus-5');
 reset role;
 set role authenticated;

@@ -27,20 +27,29 @@ export async function askTrip(
   question: string,
   options: { model?: string; effort?: "low" | "medium" | "high" | "xhigh" | "max" } = {},
 ): Promise<AskOutcome> {
-  const response = await client.beta.messages.parse({
-    model: options.model ?? DEFAULT_MODEL,
-    // Thinking counts toward max_tokens on Opus 5.5 (always on); leave room for it.
-    max_tokens: 16000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-    thinking: { type: "adaptive" },
-    output_config: {
-      format: betaZodOutputFormat(AssistantAnswer),
-      effort: options.effort ?? DEFAULT_EFFORT,
-    },
-    system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-    messages: [{ role: "user", content: userMessage(context, question) }],
-  });
+  let response;
+  try {
+    response = await client.beta.messages.parse({
+      model: options.model ?? DEFAULT_MODEL,
+      // Thinking counts toward max_tokens on Opus 5.5 (always on); leave room for it.
+      max_tokens: 16000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      thinking: { type: "adaptive" },
+      output_config: {
+        format: betaZodOutputFormat(AssistantAnswer),
+        effort: options.effort ?? DEFAULT_EFFORT,
+      },
+      system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: userMessage(context, question) }],
+    });
+  } catch (error) {
+    // The SDK throws when the structured output isn't valid JSON (cut off, refusal).
+    if (error instanceof Error && error.message.startsWith("Failed to parse structured output")) {
+      return { status: "failed", reason: "invalid_output" };
+    }
+    throw error;
+  }
 
   if (response.stop_reason === "refusal") {
     return { status: "failed", reason: "refusal", detail: response.stop_details?.category ?? undefined };

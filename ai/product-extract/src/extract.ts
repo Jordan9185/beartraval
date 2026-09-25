@@ -26,16 +26,25 @@ export async function extractProducts(
   }
   content.push({ type: "text", text: userText(input) });
 
-  const response = await client.beta.messages.parse({
-    model: options.model ?? DEFAULT_MODEL,
-    max_tokens: 8000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-    thinking: { type: "adaptive" },
-    output_config: { format: betaZodOutputFormat(ExtractResult), effort: DEFAULT_EFFORT },
-    system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-    messages: [{ role: "user", content }],
-  });
+  let response;
+  try {
+    response = await client.beta.messages.parse({
+      model: options.model ?? DEFAULT_MODEL,
+      max_tokens: 8000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      thinking: { type: "adaptive" },
+      output_config: { format: betaZodOutputFormat(ExtractResult), effort: DEFAULT_EFFORT },
+      system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content }],
+    });
+  } catch (error) {
+    // The SDK throws when the structured output isn't valid JSON (cut off, refusal).
+    if (error instanceof Error && error.message.startsWith("Failed to parse structured output")) {
+      return { status: "failed", reason: "invalid_output" };
+    }
+    throw error;
+  }
 
   if (response.stop_reason === "refusal") return { status: "failed", reason: "refusal" };
   if (response.stop_reason === "max_tokens") return { status: "failed", reason: "max_tokens" };

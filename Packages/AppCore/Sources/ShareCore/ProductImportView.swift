@@ -132,7 +132,11 @@ public struct ProductImportView: View {
             extracted = true
             errorMessage = nil
         } catch ProductExtractionError.failed(let reason) {
-            errorMessage = reason == "missing_api_key" ? "AI 服務尚未設定。" : "辨識失敗，可以直接手動輸入。"
+            errorMessage = switch reason {
+            case "missing_api_key": "AI 服務尚未設定。"
+            case "rate_limited": "AI 辨識次數已達上限，請稍後再試，或直接手動輸入。"
+            default: "辨識失敗，可以直接手動輸入。"
+            }
         } catch let error as BackendError {
             errorMessage = error.userMessage
         } catch {

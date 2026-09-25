@@ -67,3 +67,7 @@ select tests.ok((app.save_place(:'trip_id', 'Gwangjang dup', 'eat', :'gj')) ->> 
 select app.dismiss_saved(:'pending_id');
 select tests.ok((select status = 'dismissed' from app.saved_places where id = :'pending_id'), 'dismissed');
 select tests.ok((select count(*) from app.trip_events where trip_id = :'trip_id' and kind = 'saved.changed') >= 4, 'saved changes emit events');
+
+-- Removing the stop puts the saved entry back on the "to add" list.
+select app.commit_itinerary(:'day_id', 1, '[]'::jsonb);
+select tests.ok((select status = 'saved' from app.saved_places where id = :'saved_id'), 'removed stop returns saved entry to the list');

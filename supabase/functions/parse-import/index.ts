@@ -52,7 +52,16 @@ Deno.serve(async (req) => {
     return json({ status: "failed", reason: "missing_api_key" });
   }
 
-  await record("parsing", null, null, null);
+  // Per-user limit on AI calls (each parse costs money).
+  const { data: allowed } = await asUser.rpc("consume_ai_quota", { p_kind: "parse" });
+  if (allowed !== true) {
+    await record("failed", null, "rate_limited", null);
+    return json({ status: "failed", reason: "rate_limited" }, 429);
+  }
+
+  // Only one parse per import at a time; a retry while one is running just waits for it.
+  const { data: claimed } = await admin.rpc("begin_parse", { p_import_id: importId });
+  if (!claimed) return json({ status: "parsing" }, 409);
 
   // Progress for the waiting screen: at most one write every 1.5 s, in order.
   let lastWrite = 0;

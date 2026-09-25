@@ -94,8 +94,10 @@ public struct ImportFlowView: View {
     }
 
     private var failureText: String {
-        switch session.parseError {
+        if session.parseStatus == .parsing { return "解析花的時間比預期長，可能還在進行。請稍後按重試查看結果。" }
+        return switch session.parseError {
         case "missing_api_key": "解析服務尚未設定（缺少 API key）。"
+        case "rate_limited": "AI 解析次數已達上限（每小時 10 次），請稍後再試。"
         case "refusal": "無法處理這段文字。"
         case "max_tokens": "文字太長，請分段匯入。"
         case "invalid_output": "解析結果格式不正確。"
@@ -117,16 +119,28 @@ public struct ImportFlowView: View {
             }
         }
         defer { poll.cancel() }
+        var latest: ImportSession
         do {
-            let updated = try await service.parse(importID: session.id)
-            if updated.parseStatus == .parsed { apply(updated) } else {
-                session = updated
-                phase = .failed
-            }
+            latest = try await service.parse(importID: session.id)
         } catch {
+            phase = .failed
+            return
+        }
+        // 請求約 60 秒就逾時，但長行程要 1～3 分鐘：伺服器還在解析時繼續等結果，
+        // 不當成失敗，也不重送（重送會再付一次 AI 費用；審查 H4）。
+        let deadline = Date().addingTimeInterval(Self.maxParseWait)
+        while latest.parseStatus == .parsing && Date() < deadline && !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(3))
+            if let next = try? await service.session(importID: session.id) { latest = next }
+        }
+        if latest.parseStatus == .parsed { apply(latest) } else {
+            session = latest
             phase = .failed
         }
     }
+
+    /// 超過就停止等待（伺服器端函式最長約 400 秒）。
+    static let maxParseWait: TimeInterval = 450
 
     private func apply(_ updated: ImportSession) {
         session = updated
@@ -193,7 +207,14 @@ struct ConfirmPlacesView: View {
                         Text("搜尋地點 \(searchDone)/\(searchTotal)").font(.caption)
                     }
                 }
-                if state.undecidedCount > 0 {
+                if state.failedSearchCount > 0 && searchDone == searchTotal {
+                    Label("\(state.failedSearchCount) 個地點的地圖搜尋暫時無法使用（可能離線）", systemImage: "wifi.slash")
+                        .font(.caption).foregroundStyle(.orange)
+                    Button("重新搜尋") { retryFailedSearches() }
+                        .accessibilityIdentifier("retrySearch")
+                }
+                // 搜尋跑完才給批次操作，否則本來能自動定位的地點也會被標成未定位。
+                if state.undecidedCount > 0 && searchDone == searchTotal {
                     Button("其餘 \(state.undecidedCount) 項先只保留名稱") { state.keepUndecidedAsText() }
                         .accessibilityIdentifier("keepUndecided")
                 }
@@ -285,7 +306,7 @@ struct ConfirmPlacesView: View {
     /// 每個地點在自己的城市一帶搜尋，跨國旅程才不會拿首爾去搜廣島的地點。
     private func searchAll() async {
         var centers: [String: Coordinate?] = [:]
-        var cache: [String: [PlaceOption]] = [:]
+        var cache: [String: PlaceLookup] = [:]
         for index in state.items.indices where !state.items[index].searched {
             let item = state.items[index]
             guard item.needsSearch, let query = item.stop.searchQuery ?? item.stop.placeName else {
@@ -303,22 +324,27 @@ struct ConfirmPlacesView: View {
                 }
             }
             // 先用當地語言的查詢；找不到再用原文名稱（例如「LAVITA Hotel」比「라비타 호텔 청담」好找）。
-            var results: [PlaceOption] = []
+            // 城市定位不到時不加區域，也不把城市名塞進查詢（會把結果帶偏）。
+            var result = PlaceLookup.notFound
             for text in [query, item.stop.placeName].compactMap({ $0 }).uniqued() {
                 let key = "\(text)|\(area ?? "")"
                 if let cached = cache[key] {
-                    results = cached
+                    result = cached
                 } else {
-                    // 城市定位不到時不加區域，也不把城市名塞進查詢（會把結果帶偏）。
-                    results = center != nil ? await placeSearch.search(text, around: center, limit: 5)
-                                            : await placeSearch.search(text, near: nil, limit: 5)
+                    result = await placeSearch.lookup(text, around: center, limit: 5)
                     if Task.isCancelled { return }
-                    cache[key] = results
+                    // 失敗不快取，重新搜尋時才會真的再查。
+                    if result != .unavailable { cache[key] = result }
                 }
-                if !results.isEmpty { break }
+                if result != .notFound { break }
             }
-            state.applySearchResults(results, at: index)
+            state.applySearch(result, at: index)
         }
+    }
+
+    private func retryFailedSearches() {
+        state.resetFailedSearches()
+        Task { await searchAll() }
     }
 }
 
@@ -378,7 +404,9 @@ struct ConfirmItemView: View {
             }
             .accessibilityIdentifier("candidate-\(item.id)-\(option.name)")
         }
-        if item.searched && item.candidates.isEmpty && item.needsSearch {
+        if item.searchFailed {
+            Text("地圖搜尋暫時無法使用，請稍後重新搜尋。").font(.caption).foregroundStyle(.orange)
+        } else if item.searched && item.candidates.isEmpty && item.needsSearch {
             Text("Apple 地圖沒收錄這個地點。").font(.caption).foregroundStyle(.secondary)
         }
         if item.searched && item.needsSearch && (item.candidates.isEmpty || item.decision == .pendingText) {

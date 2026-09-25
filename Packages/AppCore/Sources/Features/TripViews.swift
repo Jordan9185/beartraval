@@ -4,6 +4,8 @@ import SwiftUI
 /// Trip 分頁：列出自己參與的 Trip，可建立空 Trip。
 struct TripListView: View {
     let session: SessionModel
+    /// 旅程清單有變：要改看的旅程（nil 表示維持目前的），以及是否切到「今天」。
+    var onTripsChanged: (UUID?, Bool) -> Void = { _, _ in }
     @State private var trips: [Trip] = []
     @State private var loaded = false
     @State private var errorMessage: String?
@@ -36,17 +38,26 @@ struct TripListView: View {
                 }
             }
             .navigationTitle("旅程")
-            .navigationDestination(for: Trip.self) { TripDetailView(session: session, trip: $0) }
+            .navigationDestination(for: Trip.self) { trip in
+                TripDetailView(session: session, trip: trip) {
+                    trips.removeAll { $0.id == trip.id }
+                    onTripsChanged(nil, false)
+                }
+            }
             .toolbar {
                 Button("加入好友的旅程", systemImage: "person.badge.plus") { showsJoin = true }
                 Button("建立旅程", systemImage: "plus") { showsCreate = true }
             }
             .sheet(isPresented: $showsJoin) {
-                JoinTripView(session: session, initialToken: nil) { _ in Task { await reload() } }
+                JoinTripView(session: session, initialToken: nil) { tripID in
+                    Task { await reload() }
+                    onTripsChanged(tripID, true)
+                }
             }
             .sheet(isPresented: $showsCreate) {
                 CreateTripView(session: session) { trip in
                     trips.insert(trip, at: 0)
+                    onTripsChanged(trip.id, false)
                 }
             }
             .refreshable { await reload() }
@@ -176,6 +187,7 @@ struct TripDetailView: View {
     @State private var selectedStop: Stop?
     @State private var revision: Int?
     @State private var confirmDelete = false
+    var onDeleted: () -> Void = {}
     @Environment(\.dismiss) private var dismissView
 
     var body: some View {
@@ -228,6 +240,7 @@ struct TripDetailView: View {
                     do {
                         try await session.trips.deleteTrip(trip.id)
                         SnapshotCache.shared()?.remove(tripID: trip.id)
+                        onDeleted()
                         dismissView()
                     } catch let e as BackendError { errorMessage = e.userMessage } catch {}
                 }

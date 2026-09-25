@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { tripCalendar, userMessage } from "../src/prompt.ts";
-import { progressOf } from "../src/parse.ts";
+import { progressOf, structuredOutputFailure } from "../src/parse.ts";
 import { ParseResult, type ParseInput, type ParsedStop } from "../src/schema.ts";
 import { isCleanStop, validateDraft } from "../src/validate.ts";
 import { CASES } from "../eval/cases.ts";
@@ -141,4 +141,12 @@ test("pasted text can't close the itinerary tag", () => {
 test("progress counts stops and the latest place in partial JSON", () => {
   const partial = '{"days":[{"date":"2026-10-23","day_label":"DAY 1","stops":[{"source_excerpt":"a","place_name":"MAKMADE"},{"source_excerpt":"b","place_name":"Matin \\"K';
   assert.deepEqual(progressOf(partial), { stage: "writing", days: 1, stops: 2, last_place: "MAKMADE" });
+});
+
+test("SDK parse errors become parse failures, other errors don't", () => {
+  const parseError = new Error("Failed to parse structured output: SyntaxError: Unexpected end of JSON input");
+  assert.equal(structuredOutputFailure(parseError, "max_tokens")?.reason, "max_tokens");
+  assert.equal(structuredOutputFailure(parseError, "refusal")?.reason, "refusal");
+  assert.equal(structuredOutputFailure(parseError, "end_turn")?.reason, "invalid_output");
+  assert.equal(structuredOutputFailure(new Error("fetch failed"), null), null);
 });

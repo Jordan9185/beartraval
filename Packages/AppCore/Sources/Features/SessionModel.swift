@@ -37,11 +37,13 @@ public final class SessionModel {
     }
 
     private func observe() async {
-        for await (_, session) in client.auth.authStateChanges {
-            // 本機存的 session 可能已過期；過期的視為未登入，SDK 會嘗試自動更新。
-            if let session, !session.isExpired {
+        for await (event, session) in client.auth.authStateChanges {
+            // 本機存的 session 過期時 SDK 會自動更新；離線時更新不了，但仍要讓使用者看快取的旅程，
+            // 所以只有明確登出（或沒有 session）才回登入頁，不因過期就登出（審查 H6）。
+            if event != .signedOut, let session {
                 state = .signedIn(email: session.user.email)
             } else {
+                if state != .signedOut && state != .loading { await clearLocalData() }
                 state = .signedOut
             }
         }
@@ -82,6 +84,12 @@ public final class SessionModel {
 
     public func signOut() async {
         try? await client.auth.signOut()
+        await clearLocalData()
+    }
+
+    private func clearLocalData() async {
+        TripStore.clearCaches()
+        await offlineQueue.clear()
     }
 }
 

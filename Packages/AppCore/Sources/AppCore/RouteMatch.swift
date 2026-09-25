@@ -198,6 +198,14 @@ public struct RouteMatcher: Sendable {
         let stops = day.stops
         let n = stops.count
         let base = await baseRoute(for: day, mode: mode)
+        // 沒有已定位的 Stop 時沒有路線可比：仍可排為當天第一站，但路程是「無法估算」，
+        // 不可當成「+0 分」而被選為最佳日（規格 §1、審查 H2）。
+        guard n > 0 else {
+            let only = Insertion(index: 0, previousStopID: nil, nextStopID: nil, addedTravelMinutes: nil,
+                                 addedDwellMinutes: candidate.dwellMinutes, fixedCheck: .noFixedAfter, approximate: false)
+            return DayMatch(dayID: day.dayID, routeRevision: day.routeRevision, mode: mode, provider: provider.id,
+                            excludedPendingCount: day.excludedPendingCount, result: .matched(best: only, all: [only]))
+        }
 
         var positions = Array(0...n)
         if !allowEndpoints && n >= 2 { positions = Array(1...(n - 1)) }

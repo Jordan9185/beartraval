@@ -34,6 +34,8 @@ public struct ConfirmItem: Identifiable, Equatable, Sendable {
     public var date: String?
     public var candidates: [PlaceOption] = []
     public var searched = false
+    /// 地圖搜尋失敗（離線、被節流）：不自動決定，等使用者重新搜尋。
+    public var searchFailed = false
     public var decision: Decision?
     /// 疑似固定的 Stop 需使用者確認（nil = 尚未確認）。
     public var fixed: Bool?
@@ -105,9 +107,30 @@ public struct ConfirmPlacesState: Equatable, Sendable {
 
     /// 搜尋結果回來後：名稱明確相符就代為選定（規格 §3：已確認／待確認／無法辨識），
     /// 分店不明或有多個相符候選時一律留給使用者（AC-01）。
+    public mutating func applySearch(_ lookup: PlaceLookup, at index: Int) {
+        switch lookup {
+        case .found(let options): applySearchResults(options, at: index)
+        case .notFound: applySearchResults([], at: index)
+        case .unavailable:
+            items[index].searched = true
+            items[index].searchFailed = true
+        }
+    }
+
+    /// 搜尋失敗的項目重新排隊搜尋。
+    public mutating func resetFailedSearches() {
+        for index in items.indices where items[index].searchFailed {
+            items[index].searched = false
+            items[index].searchFailed = false
+        }
+    }
+
+    public var failedSearchCount: Int { items.filter(\.searchFailed).count }
+
     public mutating func applySearchResults(_ candidates: [PlaceOption], at index: Int) {
         items[index].candidates = candidates
         items[index].searched = true
+        items[index].searchFailed = false
         guard items[index].decision == nil else { return }
         if candidates.isEmpty {
             // 無法辨識：不猜，保留為文字，之後可在行程裡再確認（常見於 Apple 地圖沒收錄的韓國小店）。

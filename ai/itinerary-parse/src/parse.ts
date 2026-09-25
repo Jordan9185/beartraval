@@ -48,6 +48,20 @@ function unescape(raw: string | undefined): string | null {
   }
 }
 
+/// Maps an SDK error to a parse failure when it came from the model's output;
+/// returns null for other errors (network, API), which the caller retries.
+export function structuredOutputFailure(
+  error: unknown,
+  stopReason: string | null,
+): { status: "failed"; reason: "refusal" | "max_tokens" | "invalid_output"; detail?: string } | null {
+  if (stopReason === "max_tokens") return { status: "failed", reason: "max_tokens" };
+  if (stopReason === "refusal") return { status: "failed", reason: "refusal" };
+  if (error instanceof Error && error.message.startsWith("Failed to parse structured output")) {
+    return { status: "failed", reason: "invalid_output", detail: error.message.slice(0, 200) };
+  }
+  return null;
+}
+
 export type ParseOutcome =
   | {
       status: "parsed";
@@ -80,7 +94,21 @@ export async function parseItinerary(
   });
   options.onProgress?.({ stage: "reading", days: 0, stops: 0, last_place: null });
   stream.on("text", (_delta, snapshot) => options.onProgress?.(progressOf(snapshot)));
-  const response = await stream.finalMessage();
+  // The SDK parses the structured output inside finalMessage() and throws when the
+  // text isn't valid JSON (cut off at max_tokens, or a refusal). Keep the stop
+  // reason from the stream so those still come back as failures, not crashes.
+  let stopReason: string | null = null;
+  stream.on("streamEvent", (event) => {
+    if (event.type === "message_delta" && event.delta.stop_reason) stopReason = event.delta.stop_reason;
+  });
+  let response: Awaited<ReturnType<typeof stream.finalMessage>>;
+  try {
+    response = await stream.finalMessage();
+  } catch (error) {
+    const failure = structuredOutputFailure(error, stopReason);
+    if (failure) return failure;
+    throw error;
+  }
 
   if (response.stop_reason === "refusal") {
     return { status: "failed", reason: "refusal", detail: response.stop_details?.category ?? undefined };

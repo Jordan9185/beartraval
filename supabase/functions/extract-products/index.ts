@@ -45,6 +45,10 @@ Deno.serve(async (req) => {
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) return json({ status: "failed", reason: "missing_api_key" });
 
+  // Per-user limit on AI calls.
+  const { data: allowed } = await db.rpc("consume_ai_quota", { p_kind: "extract" });
+  if (allowed !== true) return json({ status: "failed", reason: "rate_limited" });
+
   const started = Date.now();
   try {
     const outcome = await extractProducts(new Anthropic({ apiKey }), {

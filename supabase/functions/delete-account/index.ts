@@ -26,10 +26,17 @@ Deno.serve(async (req) => {
     console.log(JSON.stringify({ fn: "delete-account", status: "prepare_failed" }));
     return json({ error: "DELETE_FAILED" }, 500);
   }
-  const removed = await admin.auth.admin.deleteUser(userId);
+  // The auth user can't be deleted in the same transaction as the preparation.
+  // Preparation is idempotent, so retry here and, if it still fails, tell the app
+  // the account is only partly deleted and a retry will finish it.
+  let removed = await admin.auth.admin.deleteUser(userId);
+  for (let attempt = 1; removed.error && attempt < 3; attempt++) {
+    await new Promise((r) => setTimeout(r, 500 * attempt));
+    removed = await admin.auth.admin.deleteUser(userId);
+  }
   if (removed.error) {
     console.log(JSON.stringify({ fn: "delete-account", status: "delete_failed" }));
-    return json({ error: "DELETE_FAILED" }, 500);
+    return json({ error: "DELETE_INCOMPLETE" }, 500);
   }
   console.log(JSON.stringify({ fn: "delete-account", status: "deleted", ...prep.data }));
   return json({ status: "deleted", ...prep.data });

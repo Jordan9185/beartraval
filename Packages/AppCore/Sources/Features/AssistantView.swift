@@ -41,7 +41,9 @@ struct AssistantView: View {
                         case nil:
                             ProgressView("思考中…")
                         case .failed(let reason)?:
-                            Text(reason == "missing_api_key" ? "AI 服務尚未設定。" : "暫時無法回答，請稍後再試。").foregroundStyle(.secondary)
+                            Text(reason == "missing_api_key" ? "AI 服務尚未設定。"
+                                 : reason == "rate_limited" ? "AI 使用次數已達上限，請稍後再試。" : "暫時無法回答，請稍後再試。")
+                                .foregroundStyle(.secondary)
                         case .answered(let answer)?:
                             if answer.cannotDetermine {
                                 Label("無法從行程資料判斷", systemImage: "questionmark.circle").foregroundStyle(.orange)

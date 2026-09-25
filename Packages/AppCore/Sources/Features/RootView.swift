@@ -25,12 +25,15 @@ public struct RootView: View {
                 ProgressView()
             case .signedOut:
                 LoginView(session: session)
+                    // 換帳號時重建今天／地圖用的資料，不沿用上一個帳號的旅程。
+                    .onAppear { store = nil; choseInitialTab = false }
             case .signedIn:
                 tabs(session)
                     .sheet(isPresented: Binding(get: { session.pendingInviteToken != nil },
                                                 set: { if !$0 { session.pendingInviteToken = nil } })) {
-                        JoinTripView(session: session, initialToken: session.pendingInviteToken) { _ in
+                        JoinTripView(session: session, initialToken: session.pendingInviteToken) { tripID in
                             session.pendingInviteToken = nil
+                            tripsChanged(open: tripID, showToday: true)
                         }
                     }
                     .task { await session.flushOfflineQueue() }
@@ -59,7 +62,7 @@ public struct RootView: View {
 
     private func tabView(_ session: SessionModel) -> some View {
         TabView(selection: $tab) {
-            TripListView(session: session)
+            TripListView(session: session) { tripID, showToday in tripsChanged(open: tripID, showToday: showToday) }
                 .tabItem { Label("旅程", systemImage: "calendar") }
                 .tag(Tab.trip)
             TodayView(session: session, store: tripStore(session), onDebug: debugAction) { tab = .trip }
@@ -84,6 +87,14 @@ public struct RootView: View {
         .task {
             if store == nil { store = TripStore(repository: session.trips) }
             await store?.start()
+        }
+    }
+
+    /// 旅程清單有變（建立、加入、刪除）：今天與地圖改用最新資料，不再停在「尚未建立旅程」（審查 H3）。
+    private func tripsChanged(open tripID: UUID?, showToday: Bool) {
+        Task {
+            await store?.open(tripID: tripID)
+            if showToday { tab = .today }
         }
     }
 

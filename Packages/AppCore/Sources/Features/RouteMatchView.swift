@@ -228,7 +228,7 @@ struct DayMatchRow: View {
         case .unavailable(let reason):
             Text(reason == .notSupportedInRegion
                  ? "無法估算：Apple 地圖在這個地區不提供\(match.mode.displayName)路線。可改用步行或開車試算。"
-                 : "無法估算這段路線。")
+                 : reason.userMessage)
                 .foregroundStyle(.secondary)
         }
         if match.excludedPendingCount > 0 {

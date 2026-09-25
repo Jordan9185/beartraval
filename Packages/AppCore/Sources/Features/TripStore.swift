@@ -25,6 +25,27 @@ public final class TripStore {
     }
 
     public func start() async {
+        await refreshTrips()
+        loaded = true
+        if selectedTripID == nil { selectedTripID = defaultTrip(trips)?.id } else { await reload(resubscribe: true) }
+    }
+
+    /// 建立、加入或刪除旅程後呼叫：重新取得旅程清單。`tripID` 有值時改看這個旅程，
+    /// 否則保留目前選的旅程（它已不存在時改選預設旅程）。
+    public func open(tripID: UUID?) async {
+        await refreshTrips()
+        loaded = true
+        let target = tripID.flatMap { id in trips.contains { $0.id == id } ? id : nil }
+            ?? selectedTripID.flatMap { id in trips.contains { $0.id == id } ? id : nil }
+            ?? defaultTrip(trips)?.id
+        if target == selectedTripID {
+            await reload(resubscribe: true)
+        } else {
+            selectedTripID = target
+        }
+    }
+
+    private func refreshTrips() async {
         do {
             trips = try await repository.myTrips()
             try? JSONEncoder().encode(trips).write(to: Self.tripsCacheURL ?? URL(fileURLWithPath: "/dev/null"))
@@ -35,8 +56,12 @@ public final class TripStore {
             }
             errorMessage = (error as? BackendError)?.userMessage ?? "讀取失敗"
         }
-        loaded = true
-        if selectedTripID == nil { selectedTripID = defaultTrip(trips)?.id } else { await reload(resubscribe: true) }
+    }
+
+    /// 登出時清掉本機的旅程快取（App Group 內，App 與 Extension 共用）。
+    public static func clearCaches() {
+        if let url = tripsCacheURL { try? FileManager.default.removeItem(at: url) }
+        SnapshotCache.shared()?.removeAll()
     }
 
     static var tripsCacheURL: URL? {

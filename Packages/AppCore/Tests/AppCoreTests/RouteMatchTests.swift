@@ -75,6 +75,19 @@ struct RouteMatchTests {
         #expect(hotelDay.best?.addedTravelMinutes == 30)
     }
 
+    /// 沒有已定位 Stop 的日子不可算成 +0 分、也不可被選為最佳日（審查 H2）。
+    @Test func dayWithoutLocatedStopsIsUnavailable() async {
+        let provider = FakeProvider(legs([(a, b, 10), (a, x, 4), (x, b, 8), (x, a, 30), (b, x, 30)]))
+        let matcher = RouteMatcher(provider: provider)
+        let empty = await matcher.match(RouteCandidate(point: x, dwellMinutes: 30), into: plan([], pending: 3), mode: .walking)
+        let only = try! #require(empty.best)
+        #expect(only.index == 0 && only.previousStopID == nil && only.nextStopID == nil)
+        #expect(only.addedTravelMinutes == nil, "無法估算，不是 +0 分")
+        #expect(empty.excludedPendingCount == 3)
+        let busy = await matcher.match(RouteCandidate(point: x, dwellMinutes: 30), into: plan([stop(a), stop(b)]), mode: .walking)
+        #expect(RouteMatcher.bestDay([empty, busy])?.dayID == busy.dayID)
+    }
+
     @Test func koreaTransitIsUnavailableWithoutCallingProvider() async {
         let provider = FakeProvider([:])
         let match = await RouteMatcher(provider: provider).match(RouteCandidate(point: kr, dwellMinutes: 30), into: plan([stop(kr), stop(kr)]), mode: .transit)

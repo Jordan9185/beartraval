@@ -82,3 +82,10 @@ select tests.ok((select count(*) from app.get_trip_changes(:'trip_id', :trip_rev
                 'catch-up returns only missed events');
 
 reset role;
+
+-- NULL revision or stops are rejected, not treated as "skip the check" or "delete everything".
+select tests.login(:'owner');
+select id as null_day from app.trip_days where trip_id = :'trip_id' order by display_order limit 1 \gset
+select tests.throws(format($$select app.commit_itinerary(%L, null, '[]')$$, :'null_day'), 'PT422', 'null revision rejected');
+select tests.throws(format($$select app.commit_itinerary(%L, 0, null)$$, :'null_day'), 'PT422', 'null stops rejected');
+

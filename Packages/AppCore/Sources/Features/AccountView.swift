@@ -85,9 +85,9 @@ struct AccountView: View {
             await session.signOut()
             dismiss()
         } catch let e as BackendError {
-            errorMessage = e == .other("DELETE_FAILED") ? "刪除失敗，請稍後再試。" : e.userMessage
+            errorMessage = e == .unauthenticated ? e.userMessage : "刪除沒有完成，請再按一次「刪除帳號」。"
         } catch {
-            errorMessage = "刪除失敗，請稍後再試。"
+            errorMessage = "刪除沒有完成，請再按一次「刪除帳號」。"
         }
     }
 }

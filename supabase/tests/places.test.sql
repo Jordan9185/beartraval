@@ -23,10 +23,13 @@ select (app.upsert_place('apple_mapkit', 'gwangjang', 'Gwangjang Market', 37.570
 select tests.ok((select country_code = 'KR' and name_local = '광장시장' from app.places where id = :'place_id'),
                 'place stored with normalized country code');
 
--- Another user registering the same provider id gets the existing row back unchanged.
+-- Another user registering the same provider id at the same spot gets the existing row back unchanged.
 select tests.login(:'outsider');
-select tests.ok((app.upsert_place('apple_mapkit', 'gwangjang', 'Renamed', 0, 0)).id = :'place_id',
+select tests.ok((app.upsert_place('apple_mapkit', 'gwangjang', 'Renamed', 37.5702, 126.9998)).id = :'place_id',
                 'same provider id returns existing place');
+-- Far from the registered spot: the caller gets their own row, the existing one is untouched.
+select tests.ok((app.upsert_place('apple_mapkit', 'gwangjang', 'Planted', 0, 0)).id <> :'place_id',
+                'mismatched coordinates get a separate place');
 reset role;
 select tests.ok((select name = 'Gwangjang Market' and latitude = 37.5700 from app.places where id = :'place_id'),
                 'existing place not overwritten');
@@ -50,7 +53,18 @@ select tests.ok((select resolution_status = 'resolved' from app.stops where day_
 select tests.login(:'owner');
 select app.upsert_place('apple_mapkit', 'kyoja', '明洞餃子', 37.5625, 126.9856, null, null, 'KR', '明洞餃子');
 select tests.login(:'outsider');
-select app.upsert_place('apple_mapkit', 'kyoja', 'Myeongdong Kyoja', 0, 0, '명동교자 본점', null, 'KR', '別的名字');
+select app.upsert_place('apple_mapkit', 'kyoja', 'Myeongdong Kyoja', 37.5626, 126.9857, '명동교자 본점', null, 'KR', '別的名字');
 reset role;
 select tests.ok((select name = '明洞餃子' and name_local = '명동교자 본점' and name_zh = '明洞餃子' and latitude = 37.5625
                    from app.places where provider_place_id = 'kyoja'), 'missing local name filled, others kept');
+
+-- Once another trip uses a place, a stranger can't fill in its names.
+set role authenticated;
+select tests.login(:'owner');
+select (app.upsert_place('apple_mapkit', 'tower', 'N Seoul Tower', 37.5512, 126.9882)).id as tower_id \gset
+select app.commit_itinerary(:'day_id', 1, format('[{"place_id": %s, "raw_label": "tower"}]', to_json(:'tower_id'::text))::jsonb);
+select tests.login(:'outsider');
+select app.upsert_place('apple_mapkit', 'tower', 'N Seoul Tower', 37.5512, 126.9882, 'N서울타워', null, 'KR', '陌生人取的名字');
+reset role;
+select tests.ok((select name_zh is null and name_local is null from app.places where id = :'tower_id'),
+                'stranger cannot rename a place other trips use');
