@@ -48,6 +48,11 @@ select tests.ok((select count(*) from app.saved_interests where saved_id = :'sav
 select ((app.save_place(:'trip_id', 'IG 貼文裡的店（名稱不明）', 'eat', null,
         '{"type": "share", "url": "https://www.instagram.com/p/abc/", "canonical_url": "https://www.instagram.com/p/abc/"}')) ->> 'id') as pending_id \gset
 select tests.ok((select place_id is null and status = 'saved' from app.saved_places where id = :'pending_id'), 'unconfirmed saved kept without place');
+select app.set_saved_address_hint(:'pending_id', '서울특별시 성동구 연무장길 1', 'https://example.com/store');
+select tests.ok((select address_hint = '서울특별시 성동구 연무장길 1' and address_source_url = 'https://example.com/store'
+                   from app.saved_places where id = :'pending_id'), 'recognised address remains with an unlocated saved entry');
+select tests.throws(format($$select app.set_saved_address_hint(%L, '서울특별시 성동구 연무장길 1', 'http://example.com')$$, :'pending_id'),
+                    'PT422', 'saved address source requires https');
 select tests.throws(format($$select app.resolve_saved(%L, %L)$$, :'pending_id', :'onion'), 'PT409', 'resolving to an already saved place rejected');
 select app.resolve_saved(:'pending_id', :'gj');
 select tests.ok((select place_id = :'gj' from app.saved_places where id = :'pending_id'), 'manual fill resolves place');
@@ -60,6 +65,8 @@ select tests.ok((select count(*) from app.saved_places where trip_id = :'trip_id
 select tests.throws(format($$select app.save_place(%L, 'x')$$, :'trip_id'), 'PT403', 'viewer cannot save');
 select tests.throws(format($$select app.set_saved_interest(%L, true)$$, :'saved_id'), 'PT403', 'viewer cannot mark interest');
 select tests.throws(format($$select app.resolve_saved(%L, %L)$$, :'saved_id', :'third'), 'PT403', 'viewer cannot resolve');
+select tests.throws(format($$select app.set_saved_address_hint(%L, '서울특별시 성동구 연무장길 1')$$, :'saved_id'),
+                    'PT403', 'viewer cannot change recognised address');
 select tests.throws(format($$select app.dismiss_saved(%L)$$, :'saved_id'), 'PT403', 'viewer cannot dismiss');
 
 -- Adding the place to the itinerary moves the Saved entry out of the list.

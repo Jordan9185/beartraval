@@ -90,6 +90,13 @@ struct DayPlanTests {
 }
 
 struct SavedFilterTests {
+    @Test func unlocatedSavedKeepsRecognisedAddress() throws {
+        let json = #"{"id":"6f9619ff-8b86-d011-b42d-00c04fc964f1","trip_id":"6f9619ff-8b86-d011-b42d-00c04fc964f2","place_id":null,"raw_label":"無垢屋人參雞","category":"eat","status":"saved","address_hint":"서울특별시 성동구 연무장길 1","address_source_url":"https://example.com/store"}"#
+        let saved = try JSONDecoder().decode(SavedPlace.self, from: Data(json.utf8))
+        let entry = SavedEntry(saved: saved, place: nil, source: nil, interestedUserIDs: [])
+        #expect(entry.addressLabel == "서울특별시 성동구 연무장길 1")
+        #expect(entry.saved.addressSourceURL == "https://example.com/store")
+    }
     func entry(_ category: SavedCategory, _ status: SavedPlace.Status = .saved, interested: Int = 0) -> SavedEntry {
         SavedEntry(saved: SavedPlace(id: UUID(), tripId: UUID(), placeId: nil, rawLabel: "x", category: category, sourceId: nil, addedBy: UUID(), status: status),
                    place: nil, source: nil, interestedUserIDs: Set((0..<interested).map { _ in UUID() }))

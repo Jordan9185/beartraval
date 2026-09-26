@@ -6,6 +6,8 @@ import SwiftUI
 /// Saved 分頁（規格 §3.5）：共同收藏的地點，不是正式行程。
 struct SavedView: View {
     let session: SessionModel
+    var preferredTripID: UUID? = nil
+    var onTripSelected: (UUID?) -> Void = { _ in }
     @State private var trips: [Trip] = []
     @State private var tripID: UUID?
     @State private var entries: [SavedEntry] = []
@@ -168,11 +170,18 @@ struct SavedView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { Task { await reload(); await refreshInboxUntilSettled() } }
             }
-            .onChange(of: tripID) { Task { await switchTrip() } }
+            .onChange(of: tripID) { _, selected in
+                if selected != nil { onTripSelected(selected) }
+                Task { await switchTrip() }
+            }
+            .onChange(of: preferredTripID) { _, selected in
+                if let selected, selected != tripID, trips.contains(where: { $0.id == selected }) { tripID = selected }
+            }
             .sheet(item: $openDraft) { draft in
                 NavigationStack {
                     ShareFlowView(content: draft.content, repository: session.trips, matcher: session.routes,
-                                  placeSearch: session.placeSearch, saveDraft: nil) { _ in
+                                  placeSearch: session.placeSearch, saveDraft: nil,
+                                  discoveryRepository: inbox, preferredTripID: tripID) { _ in
                         ShareDraftStore.shared()?.remove(draft.id)
                         openDraft = nil
                         Task { await reload() }
@@ -206,7 +215,7 @@ struct SavedView: View {
         drafts = ShareDraftStore.shared()?.all() ?? []
         do {
             trips = try await session.trips.myTrips()
-            if tripID == nil { tripID = ShareFlowView.defaultTrip(trips)?.id }
+            if tripID == nil { tripID = trips.first { $0.id == preferredTripID }?.id ?? ShareFlowView.defaultTrip(trips)?.id }
         } catch {
             errorMessage = "讀取失敗：\(userMessage(for: error))"
         }
@@ -350,6 +359,9 @@ struct SavedRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(entry.title)
+            if let address = entry.addressLabel {
+                Text(address).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+            }
             Text(SavedRow.status(entry, me: me)).font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 16) {
                 Button {
@@ -397,7 +409,7 @@ struct SavedDetailView: View {
             Form {
                 Section {
                     Text(entry.title).font(.title3.weight(.semibold))
-                    if let address = entry.place?.address { Text(address).font(.caption).foregroundStyle(.secondary) }
+                    if let address = entry.addressLabel { Text(address).font(.subheadline).textSelection(.enabled) }
                     Text(SavedRow.status(entry, me: me)).font(.caption).foregroundStyle(.secondary)
                     if !entry.isConfirmed {
                         Label("未定位，不計入路線", systemImage: "mappin.slash").font(.caption).foregroundStyle(.secondary)
@@ -406,6 +418,9 @@ struct SavedDetailView: View {
                 if let source = entry.source, let url = source.url.flatMap(URL.init(string:)) {
                     Section("來源") { Link(url.host ?? url.absoluteString, destination: url) }
                 }
+                if let source = entry.saved.addressSourceURL.flatMap(URL.init(string:)), source.scheme == "https" {
+                    Section("地址查找依據") { Link(source.host ?? "查看網頁來源", destination: source) }
+                }
                 Section {
                     if let place = entry.place {
                         NavigateButton(destination: place.mapPoint, mode: .walking)
@@ -413,7 +428,7 @@ struct SavedDetailView: View {
                     } else {
                         let country = LocalMapCountry.guess(name: entry.saved.rawLabel, timeZone: nil)
                         TaxiCardButton(unlocatedName: entry.saved.rawLabel, countryCode: country)
-                        LocalMapSearchButtons(name: entry.saved.rawLabel, countryCode: country)
+                        LocalMapSearchButtons(name: [entry.saved.rawLabel, entry.saved.addressHint].compactMap { $0 }.joined(separator: " "), countryCode: country)
                     }
                 }
                 if let place = entry.place, place.isInKorea {
@@ -559,7 +574,8 @@ struct AddSavedPlaceView: View {
                         NavigationLink {
                             ShareFlowView(content: ShareContent(urls: [url], texts: [trimmed]), repository: session.trips,
                                           matcher: session.routes, placeSearch: session.placeSearch, saveDraft: nil,
-                                          discoveryRepository: InboxRepository(client: session.client)) { _ in onDone() }
+                                          discoveryRepository: InboxRepository(client: session.client),
+                                          preferredTripID: tripID) { _ in onDone() }
                                 .navigationTitle("解析連結")
                         } label: {
                             Label("解析這個連結", systemImage: "link")
@@ -597,7 +613,8 @@ struct AddSavedPlaceView: View {
             .navigationDestination(item: $screenshot) { shot in
                 ShareFlowView(content: ShareContent(hasImage: true, imageJPEG: shot.jpeg), repository: session.trips,
                               matcher: session.routes, placeSearch: session.placeSearch, saveDraft: nil,
-                              discoveryRepository: InboxRepository(client: session.client)) { _ in onDone() }
+                              discoveryRepository: InboxRepository(client: session.client),
+                              preferredTripID: tripID) { _ in onDone() }
                     .navigationTitle("辨識截圖")
             }
             .onChange(of: photo) {

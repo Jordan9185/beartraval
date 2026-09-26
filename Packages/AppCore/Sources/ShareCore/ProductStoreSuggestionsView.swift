@@ -9,6 +9,8 @@ public struct ProductStoreSuggestionsView: View {
     let region: String
     let countryCode: String?
     let onSelect: ((DiscoveredPlace) -> Void)?
+    let searchOnAppear: Bool
+    let onResults: (([ShoppingStoreSuggestion]) async throws -> Void)?
 
     @State private var candidates: [DiscoveredPlace] = []
     @State private var loading = false
@@ -16,13 +18,19 @@ public struct ProductStoreSuggestionsView: View {
     @State private var errorMessage: String?
 
     public init(repository: InboxRepository, productName: String, storeHint: String? = nil,
-                region: String, countryCode: String?, onSelect: ((DiscoveredPlace) -> Void)? = nil) {
+                region: String, countryCode: String?, initialSuggestions: [ShoppingStoreSuggestion] = [],
+                searchOnAppear: Bool = true, onSelect: ((DiscoveredPlace) -> Void)? = nil,
+                onResults: (([ShoppingStoreSuggestion]) async throws -> Void)? = nil) {
         self.repository = repository
         self.productName = productName
         self.storeHint = storeHint
         self.region = region
         self.countryCode = countryCode
         self.onSelect = onSelect
+        self.searchOnAppear = searchOnAppear
+        self.onResults = onResults
+        _candidates = State(initialValue: initialSuggestions.map(DiscoveredPlace.init(saved:)))
+        _finished = State(initialValue: !searchOnAppear)
     }
 
     public var body: some View {
@@ -44,8 +52,13 @@ public struct ProductStoreSuggestionsView: View {
                     }
                 }
             }
+            if finished && !candidates.isEmpty {
+                Button("重新查店家") { Task { await search() } }.font(.caption)
+            }
         }
-        .task(id: "\(productName)|\(storeHint ?? "")|\(region)") { await search() }
+        .task(id: "\(productName)|\(storeHint ?? "")|\(region)") {
+            if searchOnAppear { await search() }
+        }
     }
 
     private func candidateRow(_ candidate: DiscoveredPlace) -> some View {
@@ -56,15 +69,15 @@ public struct ProductStoreSuggestionsView: View {
                 Text(address).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
             Text("是否販售與庫存待確認").font(.caption).foregroundStyle(.secondary)
-            DisclosureGroup("來源與地圖") {
+            if let onSelect {
+                Button("用這間店查行程定位") { onSelect(candidate) }
+                    .buttonStyle(.bordered)
+            }
+            LocalMapSearchButtons(name: candidate.searchQuery, countryCode: countryCode)
+            DisclosureGroup("查找依據") {
                 Text(candidate.reason).font(.caption).foregroundStyle(.secondary)
-                LocalMapSearchButtons(name: candidate.searchQuery, countryCode: countryCode)
-                    .buttonStyle(.borderless)
                 if let url = URL(string: candidate.sourceURL), url.scheme == "https" {
-                    Link("查看店家來源", destination: url).font(.caption)
-                }
-                if let onSelect {
-                    Button("用這間店查行程定位") { onSelect(candidate) }
+                    Link("查看網頁來源", destination: url).font(.caption)
                 }
             }
         }
@@ -82,8 +95,11 @@ public struct ProductStoreSuggestionsView: View {
         do {
             let location = [countryCode, region].compactMap { $0 }.joined(separator: " ")
             candidates = try await repository.discoverStores(product: product, storeHint: storeHint, region: location)
+            try await onResults?(candidates.map(ShoppingStoreSuggestion.init(discovered:)))
         } catch let error as PlaceDiscoveryError {
             errorMessage = error.userMessage
+        } catch let error as BackendError {
+            errorMessage = candidates.isEmpty ? error.userMessage : "已找到店家，但暫時無法儲存；請重試。"
         } catch {
             errorMessage = "店家查找失敗：\(userMessage(for: error))"
         }

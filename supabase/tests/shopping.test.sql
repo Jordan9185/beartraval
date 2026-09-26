@@ -24,8 +24,16 @@ select tests.ok((select id from app.add_shopping_item(:'trip_id', 'ReFa CARAT', 
                 'retried add returns same item');
 select tests.ok((select count(*) from app.shopping_interests where item_id = :'item_id') = 1, 'adder wants it');
 
+select app.set_shopping_store_suggestions(:'item_id', '[{"name":"IVYNYU LAB","korean_name":"아이비뉴랩","address_local":"서울특별시 성동구 연무장길 1","search_query":"아이비뉴랩 성수","reason":"店面來源","source_url":"https://example.com/store"}]'::jsonb);
+select tests.ok((select store_suggestions_checked and store_suggestions -> 0 ->> 'address_local' = '서울특별시 성동구 연무장길 1'
+                   from app.shopping_items where id = :'item_id'), 'recognised store address persists on shopping item');
+select tests.throws(format($$select app.set_shopping_store_suggestions(%L, '[{"name":"店面","search_query":"店面","reason":"線索","source_url":"http://example.com"}]'::jsonb)$$, :'item_id'),
+                    'PT422', 'store suggestion requires an https source');
+
 select tests.login(:'viewer');
 select tests.throws(format($$select app.add_shopping_item(%L, 'x')$$, :'trip_id'), 'PT403', 'viewer cannot add items');
+select tests.throws(format($$select app.set_shopping_store_suggestions(%L, '[]'::jsonb)$$, :'item_id'),
+                    'PT403', 'viewer cannot change recognised store suggestions');
 
 -- AC-10: merchant candidates carry evidence, never stock.
 select tests.login(:'editor');

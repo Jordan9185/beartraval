@@ -5,6 +5,13 @@ import Testing
 struct ShoppingTests {
     let me = UUID(), amy = UUID()
 
+    @Test func recognisedStoreSurvivesShoppingReload() throws {
+        let json = #"{"id":"6f9619ff-8b86-d011-b42d-00c04fc964f1","trip_id":"6f9619ff-8b86-d011-b42d-00c04fc964f2","name":"LOE 香水","store_suggestions_checked":true,"store_suggestions":[{"name":"LOE 聖水店","korean_name":"로에 성수","address_local":"서울특별시 성동구 연무장길 1","search_query":"로에 성수","reason":"網頁提到這間店","source_url":"https://example.com/store"}]}"#
+        let item = try JSONDecoder().decode(ShoppingItem.self, from: Data(json.utf8))
+        #expect(item.storeSuggestionsChecked == true)
+        #expect(item.savedStoreSuggestions.first?.addressLocal == "서울특별시 성동구 연무장길 1")
+    }
+
     func entry(planned: Bool = false, date: String? = nil, events: [PurchaseEvent.Kind] = []) -> ShoppingEntry {
         let item = ShoppingItem(id: UUID(), tripId: UUID(), name: "ReFa", addedBy: me, plannedStopId: planned ? UUID() : nil)
         let ev = events.enumerated().map { PurchaseEvent(id: $0.offset, itemId: item.id, actorId: amy, type: $0.element, createdAt: Date()) }

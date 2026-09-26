@@ -131,12 +131,29 @@ public struct DiscoveredPlace: Decodable, Identifiable, Sendable {
 
     public var id: String { name + "|" + sourceURL }
 
+    public init(saved: ShoppingStoreSuggestion) {
+        name = saved.name
+        koreanName = saved.koreanName
+        addressLocal = saved.addressLocal
+        searchQuery = saved.searchQuery
+        reason = saved.reason
+        sourceURL = saved.sourceURL
+    }
+
     enum CodingKeys: String, CodingKey {
         case name, reason
         case koreanName = "korean_name"
         case addressLocal = "address_local"
         case searchQuery = "search_query"
         case sourceURL = "source_url"
+    }
+}
+
+extension ShoppingStoreSuggestion {
+    public init(discovered: DiscoveredPlace) {
+        self.init(name: discovered.name, koreanName: discovered.koreanName,
+                  addressLocal: discovered.addressLocal, searchQuery: discovered.searchQuery,
+                  reason: discovered.reason, sourceURL: discovered.sourceURL)
     }
 }
 

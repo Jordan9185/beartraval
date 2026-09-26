@@ -20,12 +20,19 @@ public struct LocalMapSearchButtons: View {
 
     public var body: some View {
         if countryCode == "KR" {
-            Button("在 Naver 地圖查看") { open(.naver) }
-            Button("在 Kakao 地圖查看") { open(.kakao) }
+            HStack(spacing: 8) {
+                Button("Naver 地圖") { open(.naver) }
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                Button("Kakao 地圖") { open(.kakao) }
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.bordered)
         } else {
-            Button("在 Google 地圖查看") {
+            Button("Google 地圖") {
                 openURL(LocalMapLink.googleSearchURL(query: name, appInstalled: installed("comgooglemaps")))
             }
+            .frame(minHeight: 44)
+            .buttonStyle(.bordered)
         }
     }
 

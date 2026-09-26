@@ -1,6 +1,36 @@
 import Foundation
 import Supabase
 
+/// 可回查的店家線索；尚未確認此商品在該店販售，也沒有庫存資訊。
+public struct ShoppingStoreSuggestion: Codable, Hashable, Sendable {
+    public var name: String
+    public var koreanName: String?
+    public var addressLocal: String?
+    public var searchQuery: String
+    public var reason: String
+    public var sourceURL: String
+
+    public var displayName: String { koreanName ?? name }
+
+    public init(name: String, koreanName: String?, addressLocal: String?, searchQuery: String,
+                reason: String, sourceURL: String) {
+        self.name = name
+        self.koreanName = koreanName
+        self.addressLocal = addressLocal
+        self.searchQuery = searchQuery
+        self.reason = reason
+        self.sourceURL = sourceURL
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, reason
+        case koreanName = "korean_name"
+        case addressLocal = "address_local"
+        case searchQuery = "search_query"
+        case sourceURL = "source_url"
+    }
+}
+
 public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
     public var id: UUID
     public var tripId: UUID
@@ -15,9 +45,14 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
     /// 分享內容提到的店名；只是搜尋線索，不能當販售或庫存事實。
     public var storeHint: String?
     public var storeEvidence: String?
+    public var storeSuggestions: [ShoppingStoreSuggestion]?
+    public var storeSuggestionsChecked: Bool?
+
+    public var savedStoreSuggestions: [ShoppingStoreSuggestion] { storeSuggestions ?? [] }
 
     public init(id: UUID, tripId: UUID, name: String, note: String? = nil, url: String? = nil, addedBy: UUID?, plannedStopId: UUID? = nil,
-                imagePath: String? = nil, storeHint: String? = nil, storeEvidence: String? = nil) {
+                imagePath: String? = nil, storeHint: String? = nil, storeEvidence: String? = nil,
+                storeSuggestions: [ShoppingStoreSuggestion]? = nil, storeSuggestionsChecked: Bool? = nil) {
         self.id = id
         self.tripId = tripId
         self.name = name
@@ -28,6 +63,8 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
         self.imagePath = imagePath
         self.storeHint = storeHint
         self.storeEvidence = storeEvidence
+        self.storeSuggestions = storeSuggestions
+        self.storeSuggestionsChecked = storeSuggestionsChecked
     }
 
     enum CodingKeys: String, CodingKey {
@@ -38,6 +75,8 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
         case imagePath = "image_path"
         case storeHint = "store_hint"
         case storeEvidence = "store_evidence"
+        case storeSuggestions = "store_suggestions"
+        case storeSuggestionsChecked = "store_suggestions_checked"
     }
 }
 
@@ -262,6 +301,14 @@ extension TripRepository: ShoppingService {
         do {
             try await client.rpc("set_shopping_store_hint", params: Params(
                 p_item_id: itemID, p_store_hint: name, p_store_evidence: evidence)).execute()
+        } catch { throw BackendError.from(error) }
+    }
+
+    public func setShoppingStoreSuggestions(itemID: UUID, suggestions: [ShoppingStoreSuggestion]) async throws {
+        struct Params: Encodable { let p_item_id: UUID, p_suggestions: [ShoppingStoreSuggestion] }
+        do {
+            try await client.rpc("set_shopping_store_suggestions", params: Params(
+                p_item_id: itemID, p_suggestions: Array(suggestions.prefix(3)))).execute()
         } catch { throw BackendError.from(error) }
     }
 

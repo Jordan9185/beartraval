@@ -87,10 +87,14 @@ public struct RootView: View {
             TripMapView(session: session, store: tripStore(session)) { tab = .trip }
                 .tabItem { Label("地圖", systemImage: "map") }
                 .tag(Tab.map)
-            SavedView(session: session)
+            SavedView(session: session, preferredTripID: store?.selectedTripID) { selected in
+                store?.selectedTripID = selected
+            }
                 .tabItem { Label("收藏", systemImage: "bookmark") }
                 .tag(Tab.saved)
-            ShoppingTab(session: session)
+            ShoppingTab(session: session, preferredTripID: store?.selectedTripID) { selected in
+                store?.selectedTripID = selected
+            }
                 .tabItem { Label("購物", systemImage: "bag") }
                 .tag(Tab.shopping)
         }

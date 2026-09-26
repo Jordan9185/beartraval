@@ -6,6 +6,8 @@ import SwiftUI
 /// Shopping 分頁（規格 §3.6）：想買的商品，與 Saved（地點）分開。
 struct ShoppingTab: View {
     let session: SessionModel
+    var preferredTripID: UUID? = nil
+    var onTripSelected: (UUID?) -> Void = { _ in }
     private struct ImportRequest: Identifiable {
         let id = UUID()
         let content: ShareContent
@@ -72,7 +74,8 @@ struct ShoppingTab: View {
             }
             .sheet(item: $importRequest) { request in
                 NavigationStack {
-                    ProductImportView(content: request.content, repository: session.trips, discoveryRepository: inbox) { _ in
+                    ProductImportView(content: request.content, repository: session.trips, discoveryRepository: inbox,
+                                      preferredTripID: tripID) { _ in
                         importRequest = nil
                         reloadToken += 1
                     }
@@ -83,13 +86,19 @@ struct ShoppingTab: View {
             }
             .task {
                 trips = (try? await session.trips.myTrips()) ?? []
-                if tripID == nil { tripID = ShareFlowView.defaultTrip(trips)?.id }
+                if tripID == nil { tripID = trips.first { $0.id == preferredTripID }?.id ?? ShareFlowView.defaultTrip(trips)?.id }
                 await refreshPersonalUntilSettled()
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { Task { await refreshPersonalUntilSettled() } }
             }
-            .onChange(of: tripID, initial: true) { Task { await subscribe() } }
+            .onChange(of: preferredTripID) { _, selected in
+                if let selected, selected != tripID, trips.contains(where: { $0.id == selected }) { tripID = selected }
+            }
+            .onChange(of: tripID, initial: true) { _, selected in
+                if selected != nil { onTripSelected(selected) }
+                Task { await subscribe() }
+            }
         }
     }
 
@@ -185,6 +194,8 @@ public struct ShoppingListView: View {
 
     private var rowContext: ShoppingRowContext {
         ShoppingRowContext(service: service, tripID: tripID, canEdit: canEdit, merchantScreen: merchantScreen,
+                           discoveryRepository: personalRepository, regionName: tripRegionName ?? "",
+                           regionCountry: tripCountryCode,
                            itineraryMatches: itineraryMatches, itineraryMatchesLoaded: itineraryMatchesLoaded,
                            toggle: { entry in Task { await togglePurchased(entry) } },
                            changed: { Task { await reload() } })
@@ -333,6 +344,9 @@ struct ShoppingRowContext {
     let tripID: UUID
     let canEdit: Bool
     let merchantScreen: (ShoppingEntry) -> AnyView
+    let discoveryRepository: InboxRepository?
+    let regionName: String
+    let regionCountry: String?
     let itineraryMatches: [UUID: [ShoppingItineraryMatch]]
     let itineraryMatchesLoaded: Bool
     let toggle: (ShoppingEntry) -> Void
@@ -365,6 +379,8 @@ struct ShoppingEntryLink: View {
         NavigationLink {
             ShoppingItemDetailView(service: context.service, tripID: context.tripID, entry: entry, canEdit: context.canEdit,
                                    merchantScreen: context.canEdit && entry.status == .unscheduled ? context.merchantScreen(entry) : nil,
+                                   discoveryRepository: context.discoveryRepository, regionName: context.regionName,
+                                   regionCountry: context.regionCountry,
                                    itineraryMatches: context.itineraryMatches[entry.id] ?? [],
                                    itineraryMatchesLoaded: context.itineraryMatchesLoaded,
                                    onChanged: context.changed)
@@ -402,6 +418,12 @@ struct ShoppingRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.item.name).strikethrough(entry.isPurchased)
+                if let store = entry.item.savedStoreSuggestions.first {
+                    Text("店家線索：\(store.displayName)\(store.addressLocal.map { " · \($0)" } ?? "")")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                } else if let hint = entry.item.storeHint {
+                    Text("貼文提到：\(hint)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
                 // 一行狀態：狀態 · 想買人數。
                 HStack(spacing: 0) {
                     Group {
@@ -463,11 +485,17 @@ struct MerchantSearchView: View {
             Section("AI 查找的實體店候選") {
                 ProductStoreSuggestionsView(repository: InboxRepository(client: session.client),
                                             productName: entry.item.name, storeHint: entry.item.storeHint,
-                                            region: regionName, countryCode: regionCountry) { candidate in
-                    selectedResearch = candidate
-                    query = candidate.koreanName ?? candidate.name
-                    Task { await search() }
-                }
+                                            region: regionName, countryCode: regionCountry,
+                                            initialSuggestions: entry.item.savedStoreSuggestions,
+                                            searchOnAppear: entry.item.storeSuggestionsChecked != true,
+                                            onSelect: { candidate in
+                                                selectedResearch = candidate
+                                                query = candidate.koreanName ?? candidate.name
+                                                Task { await search() }
+                                            }, onResults: { suggestions in
+                                                try await session.trips.setShoppingStoreSuggestions(itemID: entry.id, suggestions: suggestions)
+                                                onScheduled()
+                                            })
             }
             Section {
                 PlaceSearchField(text: $query, placeholder: "品牌或店名", isSearching: searching) { Task { await search() } }
@@ -580,6 +608,9 @@ struct ShoppingItemDetailView: View {
     let entry: ShoppingEntry
     let canEdit: Bool
     var merchantScreen: AnyView? = nil
+    var discoveryRepository: InboxRepository? = nil
+    var regionName = ""
+    var regionCountry: String? = nil
     var itineraryMatches: [ShoppingItineraryMatch] = []
     var itineraryMatchesLoaded = false
     let onChanged: () -> Void
@@ -609,6 +640,22 @@ struct ShoppingItemDetailView: View {
                     .disabled(uploading)
                 }
                 if let errorMessage { ErrorText(errorMessage) }
+            }
+            if let discoveryRepository, !regionName.isEmpty,
+               (!entry.item.savedStoreSuggestions.isEmpty || canEdit) {
+                Section("辨識出的店家與地址") {
+                    ProductStoreSuggestionsView(repository: discoveryRepository,
+                                                productName: entry.item.name, storeHint: entry.item.storeHint,
+                                                region: regionName, countryCode: regionCountry,
+                                                initialSuggestions: entry.item.savedStoreSuggestions,
+                                                searchOnAppear: canEdit && entry.item.storeSuggestionsChecked != true,
+                                                onResults: canEdit ? { suggestions in
+                                                    guard let repository = service as? TripRepository else { return }
+                                                    try await repository.setShoppingStoreSuggestions(itemID: entry.id,
+                                                                                                     suggestions: suggestions)
+                                                    onChanged()
+                                                } : nil)
+                }
             }
             if let merchantScreen {
                 Section {

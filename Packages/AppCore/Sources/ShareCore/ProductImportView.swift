@@ -9,6 +9,7 @@ public struct ProductImportView: View {
     let repository: TripRepository?
     let discoveryRepository: InboxRepository?
     let sourceURL: URL?
+    let preferredTripID: UUID?
     let onFinish: (Int) -> Void
 
     @State private var text: String
@@ -24,6 +25,7 @@ public struct ProductImportView: View {
     @State private var saving = false
     @State private var errorMessage: String?
     @State private var editingDraftIDs: Set<UUID> = []
+    @State private var saveOperationIDs: [UUID: [UUID: UUID]] = [:]
     @FocusState private var focus: Field?
 
     enum Field: Hashable {
@@ -46,10 +48,12 @@ public struct ProductImportView: View {
     }
 
     public init(content: ShareContent, repository: TripRepository?, discoveryRepository: InboxRepository? = nil,
+                preferredTripID: UUID? = nil,
                 onFinish: @escaping (Int) -> Void) {
         self.repository = repository
         self.discoveryRepository = discoveryRepository
         self.sourceURL = content.urls.first
+        self.preferredTripID = preferredTripID
         self.onFinish = onFinish
         _text = State(initialValue: ([content.title] + content.texts).compactMap { $0 }.joined(separator: "\n"))
         _imageJPEG = State(initialValue: content.imageJPEG)
@@ -108,6 +112,7 @@ public struct ProductImportView: View {
                         Button {
                             if editingDraftIDs.contains(draft.id) {
                                 editingDraftIDs.remove(draft.id)
+                                draft.lookupName = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
                                 focus = nil
                             } else {
                                 editingDraftIDs.insert(draft.id)
@@ -174,7 +179,9 @@ public struct ProductImportView: View {
             guard let repository else { return }
             trips = (try? await repository.editableTrips()) ?? []
             tripsLoaded = true
-            if tripID == nil { tripID = ShareFlowView.defaultTrip(trips)?.id }
+            if tripID == nil {
+                tripID = trips.first { $0.id == preferredTripID }?.id ?? ShareFlowView.defaultTrip(trips)?.id
+            }
             // 分享進來就帶著截圖或貼文時，直接辨識，不必再按一次。
             if hasInput && !extracted { await extract() }
         }
@@ -244,11 +251,21 @@ public struct ProductImportView: View {
             for draft in drafts where draft.selected {
                 let name = draft.name.trimmingCharacters(in: .whitespaces)
                 guard !name.isEmpty else { continue }
+                let operationID = saveOperationIDs[tripID]?[draft.id] ?? UUID()
+                saveOperationIDs[tripID, default: [:]][draft.id] = operationID
                 let item = try await repository.addShoppingItem(tripID: tripID, name: String(name.prefix(200)), note: nil,
-                                                                url: sourceURL?.absoluteString, clientOpID: draft.id)
+                                                                url: sourceURL?.absoluteString, clientOpID: operationID)
                 added += 1
                 if let storeHint = draft.storeHint {
                     try await repository.setShoppingStoreHint(itemID: item.id, name: storeHint, evidence: draft.storeEvidence)
+                }
+                if let discoveryRepository, let selectedTrip, name.count >= 2 {
+                    let country = LocalMapCountry.guess(name: selectedTrip.name, timeZone: selectedTrip.timeZone)
+                    let region = [country, selectedTrip.name].compactMap { $0 }.joined(separator: " ")
+                    let found = try await discoveryRepository.discoverStores(
+                        product: name, storeHint: draft.storeHint, region: region)
+                    try await repository.setShoppingStoreSuggestions(itemID: item.id,
+                        suggestions: found.map(ShoppingStoreSuggestion.init(discovered:)))
                 }
                 if let imageJPEG { try await repository.setShoppingImage(tripID: tripID, itemID: item.id, jpeg: imageJPEG) }
             }

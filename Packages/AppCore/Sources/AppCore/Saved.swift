@@ -41,8 +41,12 @@ public struct SavedPlace: Codable, Identifiable, Hashable, Sendable {
     /// nil = 新增者已刪除帳號（匿名化）。
     public var addedBy: UUID?
     public var status: Status
+    /// 截圖或有來源的網頁查得的地址線索；不代表已確認座標。
+    public var addressHint: String?
+    public var addressSourceURL: String?
 
-    public init(id: UUID, tripId: UUID, placeId: UUID?, rawLabel: String, category: SavedCategory, sourceId: UUID?, addedBy: UUID?, status: Status) {
+    public init(id: UUID, tripId: UUID, placeId: UUID?, rawLabel: String, category: SavedCategory, sourceId: UUID?, addedBy: UUID?, status: Status,
+                addressHint: String? = nil, addressSourceURL: String? = nil) {
         self.id = id
         self.tripId = tripId
         self.placeId = placeId
@@ -51,6 +55,8 @@ public struct SavedPlace: Codable, Identifiable, Hashable, Sendable {
         self.sourceId = sourceId
         self.addedBy = addedBy
         self.status = status
+        self.addressHint = addressHint
+        self.addressSourceURL = addressSourceURL
     }
 
     enum CodingKeys: String, CodingKey {
@@ -60,6 +66,8 @@ public struct SavedPlace: Codable, Identifiable, Hashable, Sendable {
         case rawLabel = "raw_label"
         case sourceId = "source_id"
         case addedBy = "added_by"
+        case addressHint = "address_hint"
+        case addressSourceURL = "address_source_url"
     }
 }
 
@@ -106,6 +114,7 @@ public struct SavedEntry: Identifiable, Codable, Hashable, Sendable {
     public var id: UUID { saved.id }
     public var title: String { place?.displayTitle(fallbackChinese: saved.rawLabel) ?? saved.rawLabel }
     public var isConfirmed: Bool { saved.placeId != nil }
+    public var addressLabel: String? { place?.localAddress ?? saved.addressHint ?? place?.address }
 
     public init(saved: SavedPlace, place: Place?, source: SourceReference?, interestedUserIDs: Set<UUID>) {
         self.saved = saved
@@ -200,6 +209,15 @@ extension TripRepository {
         struct Params: Encodable { let p_saved_id: UUID, p_interested: Bool }
         do { try await client.rpc("set_saved_interest", params: Params(p_saved_id: savedID, p_interested: interested)).execute() }
         catch { throw BackendError.from(error) }
+    }
+
+    public func setSavedAddressHint(savedID: UUID, address: String, sourceURL: String?) async throws {
+        struct Params: Encodable { let p_saved_id: UUID, p_address_hint: String, p_source_url: String? }
+        do {
+            try await client.rpc("set_saved_address_hint", params: Params(
+                p_saved_id: savedID, p_address_hint: address, p_source_url: sourceURL
+            )).execute()
+        } catch { throw BackendError.from(error) }
     }
 
     public func resolveSaved(savedID: UUID, placeID: UUID) async throws {

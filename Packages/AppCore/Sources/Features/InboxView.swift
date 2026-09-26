@@ -346,11 +346,24 @@ private struct InboxPublishView: View {
                 if let hint = item.storeHint {
                     try await tripRepository.setShoppingStoreHint(itemID: shopping.id, name: hint, evidence: item.storeEvidence)
                 }
+                if let trip = trips.first(where: { $0.id == selectedTripID }) {
+                    let country = LocalMapCountry.guess(name: trip.name, timeZone: trip.timeZone)
+                    let region = [country, trip.name].compactMap { $0 }.joined(separator: " ")
+                    let candidates = try await repository.discoverStores(product: item.displayName,
+                        storeHint: item.storeHint, region: region)
+                    try await tripRepository.setShoppingStoreSuggestions(itemID: shopping.id,
+                        suggestions: candidates.map(ShoppingStoreSuggestion.init(discovered:)))
+                }
             } else {
                 // 同一篇可能有多間店；來源保留 URL，但不以單一 canonical URL 把不同店誤合併。
                 let source = SavedSource(type: "share", url: sourceURL, canonicalUrl: nil, summary: item.sourceSpan)
-                _ = try await tripRepository.savePlace(tripID: selectedTripID, label: item.displayName,
+                let (saved, _) = try await tripRepository.savePlace(tripID: selectedTripID, label: item.displayName,
                     category: .place, placeID: item.placeID, source: source, clientOpID: operationID)
+                if let only = item.discoveryCandidates?.count == 1 ? item.discoveryCandidates?.first : nil,
+                   let address = only.addressLocal {
+                    try await tripRepository.setSavedAddressHint(savedID: saved.id, address: address,
+                        sourceURL: only.sourceURL)
+                }
             }
             onPublished()
         } catch { errorMessage = "加入失敗：\(error.localizedDescription)" }

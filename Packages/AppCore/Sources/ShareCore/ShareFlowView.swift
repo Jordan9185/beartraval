@@ -16,6 +16,7 @@ public struct ShareFlowView: View {
     let placeSearch: any PlaceSearching
     let saveDraft: (() throws -> Void)?
     let discoveryRepository: InboxRepository?
+    let preferredTripID: UUID?
     let onFinish: (Outcome) -> Void
 
     @State private var analysis: ShareAnalysis
@@ -31,6 +32,7 @@ public struct ShareFlowView: View {
     /// 截圖的 OCR 與 AI 查找尚未結束時，不顯示可能錯誤的暫存店名及後續操作。
     @State private var awaitingScreenshotResult = false
     @State private var discovered: [DiscoveredPlace] = []
+    @State private var chosenDiscovery: DiscoveredPlace?
     @State private var discovering = false
     @State private var discoveryMessage: String?
     @State private var query: String
@@ -51,15 +53,18 @@ public struct ShareFlowView: View {
     @State private var notice: String?
     @State private var errorMessage: String?
     @State private var busy = false
+    @State private var saveOperationID = UUID()
 
     public init(content: ShareContent, repository: TripRepository?, matcher: RouteMatcher, placeSearch: any PlaceSearching,
                 saveDraft: (() throws -> Void)?, discoveryRepository: InboxRepository? = nil,
+                preferredTripID: UUID? = nil,
                 onFinish: @escaping (Outcome) -> Void) {
         self.repository = repository
         self.matcher = matcher
         self.placeSearch = placeSearch
         self.saveDraft = saveDraft
         self.discoveryRepository = discoveryRepository
+        self.preferredTripID = preferredTripID
         self.onFinish = onFinish
         let analysis = ShareAnalysis(content)
         _analysis = State(initialValue: analysis)
@@ -101,6 +106,7 @@ public struct ShareFlowView: View {
             if let errorMessage { ErrorText(errorMessage) }
         }
         .task { await start() }
+        .onChange(of: tripID) { saveOperationID = UUID() }
     }
 
     // MARK: 來源與缺少的資訊
@@ -195,20 +201,20 @@ public struct ShareFlowView: View {
                         if let address = suggestion.addressLocal {
                             Text(address).font(.subheadline).textSelection(.enabled)
                         }
-                        if let url = URL(string: suggestion.sourceURL), url.scheme == "https" {
-                            Link("查看查找來源", destination: url).font(.caption)
+                        Button("帶入這間店") {
+                            chosenDiscovery = suggestion
+                            query = suggestion.koreanName ?? suggestion.name
+                            if let address = suggestion.addressLocal { screenshotAddress = address }
+                            country = "KR"
+                            Task { await search() }
                         }
-                        if discovered.count > 1 || query != (suggestion.koreanName ?? suggestion.name) {
-                            Button("使用這間店") {
-                                query = suggestion.koreanName ?? suggestion.name
-                                if let address = suggestion.addressLocal { screenshotAddress = address }
-                                country = "KR"
-                                Task { await search() }
-                            }
-                        }
-                        DisclosureGroup("核對依據與當地地圖") {
+                        .buttonStyle(.bordered)
+                        LocalMapSearchButtons(name: suggestion.searchQuery, countryCode: "KR")
+                        DisclosureGroup("查找依據") {
                             Text(suggestion.reason).font(.caption).foregroundStyle(.secondary)
-                            LocalMapSearchButtons(name: suggestion.searchQuery, countryCode: "KR")
+                            if let url = URL(string: suggestion.sourceURL), url.scheme == "https" {
+                                Link("查看網頁來源", destination: url).font(.caption)
+                            }
                         }
                     }
                 }
@@ -379,7 +385,7 @@ public struct ShareFlowView: View {
         do {
             trips = try await repository.editableTrips()
             signedIn = true
-            tripID = Self.defaultTrip(trips)?.id
+            tripID = trips.first { $0.id == preferredTripID }?.id ?? Self.defaultTrip(trips)?.id
         } catch {
             readingScreenshot = false
             awaitingScreenshotResult = false
@@ -466,6 +472,7 @@ public struct ShareFlowView: View {
                 context: recognizedLines.joined(separator: "\n"))
             if !discovered.isEmpty { country = "KR" }
             if discovered.count == 1, let match = discovered.first, query == clue {
+                chosenDiscovery = match
                 query = match.koreanName ?? match.name
                 if let address = match.addressLocal { screenshotAddress = address }
                 discoveryMessage = match.addressLocal == nil
@@ -558,7 +565,16 @@ public struct ShareFlowView: View {
                 label = place.displayTitle
             }
             let source = SavedSource(url: analysis.sourceURL?.absoluteString, canonicalUrl: analysis.canonicalURL, summary: analysis.excerpt)
-            let (_, duplicate) = try await repository.savePlace(tripID: tripID, label: label, category: category, placeID: placeID, source: source)
+            let (saved, duplicate) = try await repository.savePlace(tripID: tripID, label: label, category: category,
+                placeID: placeID, source: source, clientOpID: saveOperationID)
+            let address = screenshotAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+            if address.count >= 3 {
+                let matched = chosenDiscovery.flatMap { candidate -> String? in
+                    let name = candidate.koreanName ?? candidate.name
+                    return query == name && candidate.addressLocal == address ? candidate.sourceURL : nil
+                }
+                try await repository.setSavedAddressHint(savedID: saved.id, address: address, sourceURL: matched)
+            }
             onFinish(.saved(duplicate: duplicate))
         } catch {
             errorMessage = "收藏失敗：\(userMessage(for: error))"
