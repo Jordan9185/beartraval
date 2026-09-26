@@ -21,6 +21,7 @@
 | [docs/spec/claude-ios-planning-brief.md](docs/spec/claude-ios-planning-brief.md) | 規劃任務說明 |
 | [docs/acceptance/mvp-acceptance.md](docs/acceptance/mvp-acceptance.md) | MVP 驗收報告：AC-01～AC-14 證據與待辦 |
 | [docs/planning/mvp-technical-plan.md](docs/planning/mvp-technical-plan.md) | MVP 技術規劃 v0.1（決策 D1–D13；D9 尚未實作）：架構、Work Packages、資料契約、Route Match、Share 驗證、驗收計畫 |
+| [docs/planning/share-inbox-delivery-plan.md](docs/planning/share-inbox-delivery-plan.md) | 下一階段分享收件、自動整理與行程模板的開發計畫；尚未實作 |
 | [AGENTS.md](AGENTS.md)、[docs/handoff/](docs/handoff/) | 給 coding agent（Codex 等）的工作說明與最新交接：目前狀態、待處理、踩過的坑 |
 
 參考 wireframe：<https://ai-travel-companion-mvp-wireframe.jordan8125.chatgpt.site/>（示意資料，非正式架構）
