@@ -16,17 +16,20 @@ Deno.serve(async (req) => {
   let query: string | null = null;
   let context = "";
   let force = false;
+  let purpose: "place" | "product_store" = "place";
   try {
     const body = await req.json();
     itemID = typeof body.item_id === "string" ? body.item_id : null;
     query = typeof body.query === "string" ? body.query.trim() : null;
     context = typeof body.context === "string" ? body.context.slice(0, 1000) : "";
     force = body.force === true;
+    if (body.purpose === "product_store") purpose = "product_store";
   }
   catch { return json({ error: "INVALID_REQUEST" }, 400); }
   if ((itemID && !UUID.test(itemID)) || (!itemID && (!query || query.length < 2 || query.length > 200))) {
     return json({ error: "INVALID_REQUEST" }, 400);
   }
+  if (itemID && purpose !== "place") return json({ error: "INVALID_REQUEST" }, 400);
 
   const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
     global: { headers: { Authorization: authorization } }, db: { schema: "app" },
@@ -63,7 +66,7 @@ Deno.serve(async (req) => {
   if (allowed !== true) return json({ status: "failed", reason: "rate_limited" });
   try {
     const candidates = await discoverPlaces(new Anthropic({ apiKey: key }), query!,
-      context, Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5");
+      context, Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5", purpose);
     const checkedAt = new Date().toISOString();
     if (item) {
       const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -73,7 +76,7 @@ Deno.serve(async (req) => {
         .eq("id", item.id).eq("revision", item.revision);
       if (saveError) console.warn("discover-places cache not saved", { item_id: item.id });
     }
-    console.log("discover-places", { item_id: itemID, candidates: candidates.length });
+    console.log("discover-places", { item_id: itemID, purpose, candidates: candidates.length });
     return json({ status: candidates.length > 0 ? "found" : "none", candidates, checked_at: checkedAt });
   } catch (failure) {
     const providerStatus = failure instanceof Anthropic.APIError ? failure.status : null;

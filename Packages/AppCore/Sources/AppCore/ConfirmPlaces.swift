@@ -152,6 +152,30 @@ public struct ConfirmPlacesState: Equatable, Sendable {
         }
     }
 
+    /// 使用者按一次確認：只採用名稱唯一且相符的建議地點；其他分店仍逐項確認。
+    public var suggestedMatchCount: Int {
+        items.indices.filter { suggestedMatch(at: $0) != nil }.count
+    }
+
+    public mutating func confirmSuggestedMatches() {
+        for index in items.indices {
+            guard let match = suggestedMatch(at: index) else { continue }
+            items[index].decision = .place(match)
+            items[index].autoDecided = true
+        }
+    }
+
+    private func suggestedMatch(at index: Int) -> PlaceOption? {
+        let item = items[index]
+        guard item.decision == nil, item.searched, !item.searchFailed, !item.candidates.isEmpty,
+              (item.stop.sourceExcerpt.hasPrefix("AI 建議：")
+               || item.stop.sourceExcerpt.hasPrefix("使用者指定："))
+        else { return nil }
+        var stop = item.stop
+        stop.confidence = "high"
+        return PlaceMatch.confident(for: stop, in: item.candidates)
+    }
+
     /// 使用者一次確認：疑似固定的項目都設為固定。
     public mutating func confirmSuspectedFixed() {
         for index in items.indices where items[index].fixed == nil {

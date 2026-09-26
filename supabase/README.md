@@ -144,7 +144,7 @@ supabase status     # 取得 anon key
 
 ## Edge Function：`parse-import`（AI Gateway）
 
-`functions/parse-import` 以使用者 JWT 讀取 ImportSession（RLS），用 `ai/itinerary-parse` 的 `parseItinerary()` 呼叫 Claude，把草稿寫回 `parse_result`（service role）。草稿不是正式行程，使用者在 App 逐一確認後才由 `commit_import` 寫入。
+`functions/parse-import` 以使用者 JWT 讀取 ImportSession（RLS）。有明確日期／Day 標記的原行程用 `parseItinerary()` 按原文解析；只有目的地、天數或尚未排日期的想去清單用 `suggestItinerary()` 搜尋公開資料並依表單日期提出樣板。網路推薦需有支持店名的引用；使用者明確指定但來源暫缺的地點仍可保留為待定位草稿。結果寫回 `parse_result`（service role），不是正式行程，使用者在 App 確認後才由 `commit_import` 寫入。
 
 - API key：本機放 `supabase/functions/.env`（`ANTHROPIC_API_KEY=...`，已 gitignore），雲端用 `supabase secrets set ANTHROPIC_API_KEY=...`。
 - 沒有 key 時回 `missing_api_key`，session 標為 failed，原文保留。
@@ -165,7 +165,7 @@ supabase status     # 取得 anon key
 
 ## Edge Function：`discover-places`
 
-以使用者 JWT 查詢自己未定位的收藏線索，或接收收藏頁直接從截圖 OCR 得到的查詢字串，使用即時網頁搜尋取得最多三間有來源網址的具名餐廳候選。候選包含韓文店名與來源引用中逐字可核對的韓文地址；沒有地址證據就回 `null`。收件項目的候選與查詢時間保存在本人項目，避免重複搜尋；直接截圖查詢尚未有收件項目，不落庫。App 直接顯示 Naver／Kakao 入口，另用 MapKit 查行程定位點並由使用者確認。搜尋結果與 MapKit 地點都不代表目前熱門程度、營業狀態或可訂位。
+以使用者 JWT 查詢自己未定位的收藏線索，或接收收藏頁截圖與行程匯入中的地點線索，使用即時網頁搜尋取得最多三間有來源網址的具名店家候選。`purpose: product_store` 可依商品、貼文店名線索及旅程地區查實體門市；來源必須支持具名店面，僅有品牌門市的來源不能證明該商品有賣。候選地址必須在來源引用文字中逐字可核對；沒有地址證據就回 `null`。收件項目的候選與查詢時間保存在本人項目，避免重複搜尋；直接查詢不落庫。App 顯示在地地圖入口，另用 MapKit 查行程定位點並由使用者確認。網頁與地圖結果都不代表目前熱門程度、營業狀態、商品庫存或可訂位。
 
 ## iOS 整合測試
 

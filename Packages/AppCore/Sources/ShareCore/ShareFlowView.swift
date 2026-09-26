@@ -66,13 +66,13 @@ public struct ShareFlowView: View {
         _query = State(initialValue: analysis.suggestedQuery ?? "")
         _screenshot = State(initialValue: content.imageJPEG)
         // 一開始就標成辨識中，登入檢查那段時間不會先閃出「沒有店名」的提醒。
-        _readingScreenshot = State(initialValue: Self.wantsScreenshotText(content.imageJPEG, analysis, query: analysis.suggestedQuery ?? ""))
-        _awaitingScreenshotResult = State(initialValue: Self.wantsScreenshotText(content.imageJPEG, analysis, query: analysis.suggestedQuery ?? ""))
+        _readingScreenshot = State(initialValue: Self.wantsScreenshotText(content.imageJPEG, analysis))
+        _awaitingScreenshotResult = State(initialValue: Self.wantsScreenshotText(content.imageJPEG, analysis))
     }
 
-    /// 有截圖、文字又看不出店名時，才需要辨識截圖文字。
-    private static func wantsScreenshotText(_ screenshot: Data?, _ analysis: ShareAnalysis, query: String) -> Bool {
-        screenshot != nil && analysis.mapHint == nil && (query.isEmpty || !analysis.missing.isEmpty)
+    /// 有截圖就讀圖片線索；貼文標題或搜尋欄可能不是照片中的店名。
+    private static func wantsScreenshotText(_ screenshot: Data?, _ analysis: ShareAnalysis) -> Bool {
+        screenshot != nil && analysis.mapHint == nil
     }
 
     public var body: some View {
@@ -94,10 +94,9 @@ public struct ShareFlowView: View {
             } else {
                 discoverySection
                 placeSection
-                screenshotSuggestions
                 tripSection
-                if selected != nil, tripID != nil { routeSection }
                 actionSection
+                if selected != nil, tripID != nil { routeSection }
             }
             if let errorMessage { ErrorText(errorMessage) }
         }
@@ -108,23 +107,22 @@ public struct ShareFlowView: View {
 
     private var sourceSection: some View {
         Section("分享內容") {
-            if let url = analysis.sourceURL {
-                Text(url.host.map { platformName == "網頁" ? $0 : "\(platformName) · \($0)" } ?? url.absoluteString)
-            } else if screenshot != nil {
-                LabeledContent("來源", value: "截圖")
-            } else {
-                LabeledContent("來源", value: "文字")
-            }
-            if let screenshot, let image = platformImage(screenshot) {
-                image.resizable().scaledToFit().frame(maxHeight: 180).frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
+            Text(analysis.sourceURL?.host.map { platformName == "網頁" ? $0 : "\(platformName) · \($0)" }
+                 ?? (screenshot == nil ? "文字" : "截圖"))
+                .font(.subheadline).foregroundStyle(.secondary)
             if readingScreenshot { ProgressView("讀取截圖中的文字…") }
-            if let excerpt = analysis.excerpt {
-                Text(excerpt).font(.subheadline).lineLimit(4)
+            if screenshot != nil || analysis.excerpt != nil {
+                DisclosureGroup("查看原始內容") {
+                    if let screenshot, let image = platformImage(screenshot) {
+                        image.resizable().scaledToFit().frame(maxHeight: 180).frame(maxWidth: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    if let excerpt = analysis.excerpt {
+                        Text(excerpt).font(.subheadline).textSelection(.enabled)
+                    }
+                }
             }
-            // 截圖讀得到文字時，「拿不到貼文內容／沒有店名」的提醒就不適用。
-            if screenshotLines.isEmpty && !readingScreenshot && !awaitingScreenshotResult {
+            if screenshotLines.isEmpty && !readingScreenshot && !awaitingScreenshotResult && query.isEmpty {
                 ForEach(Array(analysis.missing.enumerated()), id: \.offset) { _, missing in
                     Label(missingText(missing), systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
                 }
@@ -140,11 +138,11 @@ public struct ShareFlowView: View {
         #endif
     }
 
-    /// 截圖裡讀到、可能是店名或地址的文字；點一下就用它搜尋。
+    /// 原始 OCR 只供修正辨識結果，不佔據主要確認畫面。
     @ViewBuilder
     private var screenshotSuggestions: some View {
         if !screenshotLines.isEmpty {
-            Section {
+            DisclosureGroup("改用截圖中的其他文字") {
                 ForEach(screenshotLines, id: \.self) { line in
                     Button {
                         if ScreenshotText.isAddress(line) {
@@ -157,10 +155,6 @@ public struct ShareFlowView: View {
                         Label(line, systemImage: ScreenshotText.isAddress(line) ? "mappin" : "text.quote")
                     }
                 }
-            } header: {
-                Text("截圖中的文字")
-            } footer: {
-                Text("在手機上辨識，不會上傳。點店名會用它搜尋、點地址會填進地址欄；地點仍由你從候選中選定。")
             }
         }
     }
@@ -191,92 +185,89 @@ public struct ShareFlowView: View {
 
     @ViewBuilder
     private var discoverySection: some View {
-        if screenshot != nil {
-            if discovering { ProgressView("AI 正在查韓文店名與地址…") }
-            if let discoveryMessage { Text(discoveryMessage).font(.caption).foregroundStyle(.secondary) }
-            if !discovered.isEmpty {
-                Section {
-                    ForEach(discovered) { suggestion in
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(suggestion.koreanName ?? suggestion.name).font(.headline)
-                            if let address = suggestion.addressLocal {
-                                Text("韓文地址線索：\(address)").textSelection(.enabled)
-                            }
-                            Text(suggestion.reason).font(.caption).foregroundStyle(.secondary)
-                            LocalMapSearchButtons(name: suggestion.searchQuery, countryCode: "KR")
-                            if let url = URL(string: suggestion.sourceURL), url.scheme == "https" {
-                                Link("查看網路來源", destination: url).font(.caption)
-                            }
-                            Button("帶入這間店的店名與地址") {
+        if screenshot != nil && (country == "KR" || !discovered.isEmpty || discoveryMessage != nil) {
+            Section {
+                if discovering { ProgressView("正在查店名與地址…") }
+                if let discoveryMessage { Text(discoveryMessage).font(.caption).foregroundStyle(.secondary) }
+                ForEach(discovered) { suggestion in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(suggestion.koreanName ?? suggestion.name).font(.headline)
+                        if let address = suggestion.addressLocal {
+                            Text(address).font(.subheadline).textSelection(.enabled)
+                        }
+                        if let url = URL(string: suggestion.sourceURL), url.scheme == "https" {
+                            Link("查看查找來源", destination: url).font(.caption)
+                        }
+                        if discovered.count > 1 || query != (suggestion.koreanName ?? suggestion.name) {
+                            Button("使用這間店") {
                                 query = suggestion.koreanName ?? suggestion.name
                                 if let address = suggestion.addressLocal { screenshotAddress = address }
                                 country = "KR"
                                 Task { await search() }
                             }
                         }
+                        DisclosureGroup("核對依據與當地地圖") {
+                            Text(suggestion.reason).font(.caption).foregroundStyle(.secondary)
+                            LocalMapSearchButtons(name: suggestion.searchQuery, countryCode: "KR")
+                        }
                     }
-                    Button("重新查韓文店名與地址") { Task { await discoverScreenshot() } }
-                } header: {
-                    Text("AI 找到的韓國店家候選")
-                } footer: {
-                    Text("地址只顯示網頁來源明示的原文；請在 Naver／Kakao 核對分店。行程定位仍須選定地圖點。")
                 }
-            }
-            if !discovering && discovered.isEmpty && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button("用目前文字查韓文店名與地址") { Task { await discoverScreenshot() } }
+                if !discovering && discovered.isEmpty && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button("查找可能的韓國店家") { Task { await discoverScreenshot() } }
+                }
+            } header: {
+                Text("AI 查到的店家")
+            } footer: {
+                Text("地址來自可查看的網頁資料；若要用於行程路線，請另選地圖定位點。")
             }
         }
     }
 
     @ViewBuilder
     private var placeSection: some View {
-        Section {
-            if screenshot != nil {
-                // 截圖辨識出來的店名、地址都可以改。
-                LabeledContent("店名") { PlaceSearchField(text: $query) { Task { await search() } } }
-                LabeledContent("地址") {
-                    TextField("截圖中的地址（選填）", text: $screenshotAddress, axis: .vertical)
-                        .autocorrectionDisabled()
-                }
-                Picker("國家／地區", selection: $country) {
-                    Text("看不出來").tag(String?.none)
-                    ForEach(Self.countries, id: \.code) { Text($0.name).tag(Optional($0.code)) }
-                }
-                if country == "KR" && discovered.isEmpty && !query.isEmpty {
-                    LocalMapSearchButtons(name: query, countryCode: "KR")
-                }
-            } else {
-                PlaceSearchField(text: $query) { Task { await search() } }
-            }
-            Picker("類別", selection: Binding(get: { category }, set: { category = $0; categoryChosen = true })) {
-                ForEach(SavedCategory.allCases, id: \.self) { Text($0.displayName).tag($0) }
-            }
-        } header: {
-            Text("地點")
-        } footer: {
-            if screenshot != nil { Text("辨識有錯可以直接改；店名改完按「搜尋」重找。") }
-        }
-        Section {
-            ForEach(candidates) { option in
-                // 再點一次同一個候選就取消選取（誤觸時用）。
-                Button { toggle(option) } label: {
-                    PlaceOptionRow(title: option.displayTitle, address: option.address, selected: selected == option)
-                }
-            }
-            if searched && candidates.isEmpty {
-                Text("地圖暫時找不到可確認的定位點；上方仍可查看韓文店名、地址和在地地圖。")
-                    .font(.caption).foregroundStyle(.secondary)
-                if !query.isEmpty {
-                    LocalMapSearchButtons(name: query, countryCode: country ?? LocalMapCountry.guess(name: query + screenshotAddress, timeZone: nil))
-                }
+        Section("辨識結果") {
+            Text(query.isEmpty ? "尚未找到店名" : query).font(.headline)
+            if !screenshotAddress.isEmpty {
+                Text(screenshotAddress).font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
             }
             if let selected {
-                Button("取消選取「\(selected.displayTitle)」", role: .cancel) { toggle(selected) }
+                Label("已確認定位：\(selected.displayTitle)", systemImage: "mappin.circle.fill")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if searched {
+                Text("尚未確認地圖定位；收藏後可再補，不會計入路線。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-        } header: {
-            if searched { Text("供行程定位的地圖候選") }
-        } footer: {
-            if selected == nil && !candidates.isEmpty { Text("請選擇正確的店家或分店；再點一次可以取消。") }
+            DisclosureGroup("修正店名、地址或類別") {
+                PlaceSearchField(text: $query) { Task { await search() } }
+                if screenshot != nil {
+                    TextField("地址（選填）", text: $screenshotAddress, axis: .vertical)
+                        .autocorrectionDisabled()
+                    Picker("國家／地區", selection: $country) {
+                        Text("看不出來").tag(String?.none)
+                        ForEach(Self.countries, id: \.code) { Text($0.name).tag(Optional($0.code)) }
+                    }
+                    screenshotSuggestions
+                }
+                Picker("類別", selection: Binding(get: { category }, set: { category = $0; categoryChosen = true })) {
+                    ForEach(SavedCategory.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                }
+            }
+            if searched {
+                DisclosureGroup("確認行程定位（\(candidates.count) 個地圖候選）") {
+                    ForEach(candidates) { option in
+                        Button { toggle(option) } label: {
+                            PlaceOptionRow(title: option.displayTitle, address: option.address, selected: selected == option)
+                        }
+                    }
+                    if candidates.isEmpty {
+                        Text("地圖暫時找不到定位點；仍可收藏店名。")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if !query.isEmpty {
+                            LocalMapSearchButtons(name: query, countryCode: country ?? LocalMapCountry.guess(name: query + screenshotAddress, timeZone: nil))
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -318,14 +309,17 @@ public struct ShareFlowView: View {
     // MARK: Trip 與順路
 
     private var tripSection: some View {
-        Section("加入哪個旅程") {
-            if trips.isEmpty {
-                Text(signedIn == nil ? "載入中…" : "沒有可以新增的旅程。請先在 App 建立旅程，或請擁有者給你編輯權限。").foregroundStyle(.secondary)
-            } else {
+        Group {
+            if trips.count > 1 {
+                Section("加入哪個旅程") {
                 Picker("旅程", selection: $tripID) {
                     ForEach(trips) { Text($0.name).tag(Optional($0.id)) }
                 }
                 .onChange(of: tripID) { Task { await computeMatches() } }
+                }
+            } else if trips.isEmpty {
+                Section { Text(signedIn == nil ? "載入中…" : "沒有可以新增的旅程。請先建立旅程，或請擁有者給你編輯權限。")
+                    .foregroundStyle(.secondary) }
             }
         }
     }
@@ -358,10 +352,10 @@ public struct ShareFlowView: View {
 
     private var actionSection: some View {
         Section {
-            Button(busy ? "處理中…" : "先收藏") { Task { await save() } }
+            Button(busy ? "處理中…" : "收藏這個地點") { Task { await save() } }
                 .disabled(busy || tripID == nil || (selected == nil && query.trimmingCharacters(in: .whitespaces).isEmpty))
         } footer: {
-            Text(selected == nil ? "未選地點時只收藏名稱，之後可補定位；未定位前不計入路線。" : "收藏到共同的收藏清單，不會改動正式行程。")
+            Text(selected == nil ? "先收藏名稱，定位可之後再補。" : "收藏到旅程的共同清單，不會改動正式行程。")
         }
     }
 
@@ -392,8 +386,8 @@ public struct ShareFlowView: View {
             signedIn = false
             return
         }
-        // 有截圖、文字又看不出店名時，在裝置上辨識截圖文字。
-        if let screenshot, Self.wantsScreenshotText(screenshot, analysis, query: query) {
+        // 只要有截圖就讀取店家招牌，避免貼文標題蓋過照片中的實際店名。
+        if let screenshot, Self.wantsScreenshotText(screenshot, analysis) {
             readingScreenshot = true
             let lines = await ScreenshotText.recognize(jpeg: screenshot)
             recognizedLines = lines

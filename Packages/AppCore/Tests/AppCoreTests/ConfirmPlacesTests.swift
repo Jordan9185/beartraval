@@ -180,6 +180,28 @@ struct ConfirmPlacesTests {
         #expect(state.items[3].decision == .pendingText && state.items[3].autoDecided)
         #expect(state.needsAttention == [1, 2, 3])  // 3 還沒有日期（10/9 不在旅程內）
     }
+
+    @Test func suggestedPlacesNeedOneExplicitConfirmationAndUniqueNames() {
+        let proposal = ParseDraft(days: [.init(date: "2026-10-01", dayLabel: "Day 1", stops: [
+            ParsedStop(sourceExcerpt: "AI 建議：淺草寺；來源：https://example.com", placeName: "淺草寺",
+                       searchQuery: "淺草寺", confidence: "medium"),
+            ParsedStop(sourceExcerpt: "使用者指定：東京鐵塔", placeName: "東京鐵塔",
+                       searchQuery: "東京鐵塔", confidence: "medium"),
+            ParsedStop(sourceExcerpt: "AI 建議：Aesop；來源：https://example.com", placeName: "Aesop",
+                       searchQuery: "Aesop", confidence: "medium", needsConfirmation: [.ambiguousBranch]),
+        ])], cityCandidates: ["Tokyo"], warnings: [])
+        var state = ConfirmPlacesState(session: session, draft: proposal)
+        state.applySearchResults([option("temple", "淺草寺")], at: 0)
+        state.applySearchResults([option("tower", "東京鐵塔")], at: 1)
+        state.applySearchResults([option("aesop-a", "Aesop"), option("aesop-b", "Aesop")], at: 2)
+        #expect(state.items.allSatisfy { $0.decision == nil })
+        #expect(state.suggestedMatchCount == 2)
+        state.confirmSuggestedMatches()
+        #expect(state.items[0].decision == .place(option("temple", "淺草寺")))
+        #expect(state.items[1].decision == .place(option("tower", "東京鐵塔")))
+        #expect(state.items[2].decision == nil)
+        #expect(state.suggestedMatchCount == 0)
+    }
 }
 
 struct LocalMapSearchTests {

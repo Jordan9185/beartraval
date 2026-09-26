@@ -9,11 +9,14 @@ Issue #3。把使用者貼上的行程文字轉成**草稿**，交給 Confirm Pl
 | `src/schema.ts` | 輸出格式（Zod）：`days[] → stops[]`，含原文片段、地點名稱、分店線索、時間、疑似固定、待確認原因。**沒有「已提交」狀態** |
 | `src/prompt.ts` | System prompt 與使用者訊息（附每個旅行日的星期，讓「週五」能對到日期） |
 | `src/parse.ts` | `parseItinerary()`：呼叫 Claude（structured outputs），失敗回 `PARSE_FAILED` 類型的結果；AI Gateway 與評測共用 |
+| `src/suggest.ts` | 只有目的地／天數或未排日期的想去清單時，搜尋公開資料並產生逐日建議；來源必須支持推薦地點，使用者明確寫出的地點會保留為待確認草稿 |
 | `src/validate.ts` | 對照原文檢查草稿：日期超出旅程或不存在（如 2/30）、時間格式錯誤、原文片段空白或對不上、沒有（或空白）地點名稱 → 降級為待確認 |
 | `eval/cases.ts` | 評測集（24 份；除 1 份濃縮自真實 ChatGPT 行程外，**皆為合成資料**） |
 | `eval/score.ts`, `eval/run.ts` | 評分與執行 |
 
 ## 使用
+
+已寫明日期或 Day 標記的原行程照原文解析；短句與尚未排日子的想去清單按建立旅程表單的日期產生樣板。模型建議不填固定時刻、座標、營業時間或預約狀態，所有地點都需使用者確認才會進入正式行程。
 
 ```
 npm install

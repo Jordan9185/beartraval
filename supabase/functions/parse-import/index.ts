@@ -8,6 +8,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
 import { parseItinerary } from "../../../ai/itinerary-parse/src/parse.ts";
+import { suggestItinerary, templateRequest } from "../../../ai/itinerary-parse/src/suggest.ts";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -99,12 +100,22 @@ Deno.serve(async (req) => {
   };
 
   try {
-    const outcome = await parseItinerary(new Anthropic({ apiKey }), {
-      tripStart: claimed.start_date,
-      tripEnd: claimed.end_date,
-      timeZone: claimed.time_zone,
-      rawText: claimed.raw_text,
-    }, { model: Deno.env.get("ANTHROPIC_MODEL") || undefined, onProgress });
+    const client = new Anthropic({ apiKey });
+    const input = { tripStart: claimed.start_date, tripEnd: claimed.end_date,
+      timeZone: claimed.time_zone, rawText: claimed.raw_text };
+    const tripDays = Math.round((Date.parse(input.tripEnd) - Date.parse(input.tripStart)) / 86_400_000) + 1;
+    const wantsTemplate = templateRequest(input.rawText, tripDays);
+    if (wantsTemplate) onProgress({ stage: "reading", days: 0, stops: 0, last_place: null });
+    const suggested = wantsTemplate
+      ? await suggestItinerary(client, input, Deno.env.get("ANTHROPIC_MODEL") || undefined)
+      : null;
+    const outcome = wantsTemplate
+      ? suggested == null
+        ? { status: "failed" as const, reason: "invalid_output" as const }
+        : { status: "parsed" as const, result: suggested.result, issues: [],
+          model: suggested.model, usage: suggested.usage }
+      : await parseItinerary(client, input,
+        { model: Deno.env.get("ANTHROPIC_MODEL") || undefined, onProgress });
     await writing;
     if (outcome.status === "failed") {
       const recorded = await record("failed", null, outcome.reason, null);
@@ -112,7 +123,8 @@ Deno.serve(async (req) => {
       return json({ status: recorded ? "failed" : "superseded", reason: outcome.reason });
     }
     const recorded = await record("parsed", { draft: outcome.result, issues: outcome.issues }, null, outcome.model);
-    log({ status: recorded ? "parsed" : "superseded", model: outcome.model, ...outcome.usage, issues: outcome.issues.length });
+    log({ status: recorded ? "parsed" : "superseded", mode: wantsTemplate ? "suggested_template" : "pasted_itinerary",
+      model: outcome.model, ...outcome.usage, issues: outcome.issues.length });
     return json({ status: recorded ? "parsed" : "superseded" });
   } catch (e) {
     // Network or API errors: keep the raw text so the user can retry.

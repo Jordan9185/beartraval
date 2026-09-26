@@ -145,10 +145,25 @@ public enum PlaceDiscoveryError: Error {
 
     public var userMessage: String {
         switch self {
-        case .unavailable("rate_limited"): "今日 AI 查找次數已達上限，請稍後再試。"
+        case .unavailable("rate_limited"): "AI 查找次數暫時已達上限，請稍後再試。"
         case .unavailable("search_unavailable"): "即時網路查找尚未啟用；可先用店名搜尋地圖。"
-        default: "暫時無法查找近期餐廳資料，請稍後重試。"
+        default: "暫時無法查找店家資料，請稍後重試。"
         }
+    }
+}
+
+/// 同一件商品在辨識頁與購物詳情間切換時，沿用短時間內的店家結果，避免重複消耗 AI 額度。
+private actor StoreDiscoveryCache {
+    static let shared = StoreDiscoveryCache()
+    private var entries: [String: (Date, [DiscoveredPlace])] = [:]
+
+    func get(_ key: String) -> [DiscoveredPlace]? {
+        guard let (date, candidates) = entries[key], Date().timeIntervalSince(date) < 3600 else { return nil }
+        return candidates
+    }
+
+    func put(_ candidates: [DiscoveredPlace], for key: String) {
+        entries[key] = (Date(), candidates)
     }
 }
 
@@ -244,6 +259,25 @@ public struct InboxRepository: Sendable {
         } catch { throw BackendError.from(error) }
         guard result.status != "failed" else { throw PlaceDiscoveryError.unavailable(result.reason ?? "unknown") }
         return result.candidates ?? []
+    }
+
+    /// 商品與旅程地區找有來源的實體門市；只回候選，不表示有賣或有庫存。
+    public func discoverStores(product: String, storeHint: String?, region: String) async throws -> [DiscoveredPlace] {
+        struct Body: Encodable { let query: String, context: String, purpose: String }
+        struct Result: Decodable { let status: String, candidates: [DiscoveredPlace]?, reason: String? }
+        let context = ["旅程地區：\(region)", storeHint.map { "貼文店名線索：\($0)" }]
+            .compactMap { $0 }.joined(separator: "\n")
+        let cacheKey = "\(currentUserID?.uuidString ?? "")|\(product)|\(storeHint ?? "")|\(region)".lowercased()
+        if let cached = await StoreDiscoveryCache.shared.get(cacheKey) { return cached }
+        let result: Result
+        do {
+            result = try await client.functions.invoke("discover-places", options: FunctionInvokeOptions(
+                body: Body(query: String(product.prefix(200)), context: String(context.prefix(1000)), purpose: "product_store")))
+        } catch { throw BackendError.from(error) }
+        guard result.status != "failed" else { throw PlaceDiscoveryError.unavailable(result.reason ?? "unknown") }
+        let candidates = result.candidates ?? []
+        await StoreDiscoveryCache.shared.put(candidates, for: cacheKey)
+        return candidates
     }
 
     /// Capture 建立後才上傳縮圖；影片保存在裝置，尚未通過影片辨識驗證。

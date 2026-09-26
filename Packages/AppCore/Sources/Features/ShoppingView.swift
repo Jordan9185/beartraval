@@ -6,12 +6,16 @@ import SwiftUI
 /// Shopping 分頁（規格 §3.6）：想買的商品，與 Saved（地點）分開。
 struct ShoppingTab: View {
     let session: SessionModel
+    private struct ImportRequest: Identifiable {
+        let id = UUID()
+        let content: ShareContent
+    }
     @State private var trips: [Trip] = []
     @State private var tripID: UUID?
     @State private var myRole: TripRole?
     @State private var sync: TripSync?
     @State private var reloadToken = 0
-    @State private var importing = false
+    @State private var importRequest: ImportRequest?
     @State private var personalItems: [InboxItemRecord] = []
     @State private var candidateItems: [InboxItemRecord] = []
     @State private var personalError: String?
@@ -27,11 +31,19 @@ struct ShoppingTab: View {
                                      queue: session.offlineQueue, reloadToken: reloadToken,
                                      personalItems: personalItems, candidateItems: candidateItems,
                                      personalRepository: inbox, personalError: personalError,
+                                     tripRegionName: trips.first { $0.id == tripID }?.name,
+                                     tripCountryCode: trips.first { $0.id == tripID }.flatMap {
+                                         LocalMapCountry.guess(name: $0.name, timeZone: $0.timeZone)
+                                     },
                                      personalChanged: { Task { await reloadPersonal() } },
-                                     recognizeName: { [trips = session.trips] jpeg in
-                                         try await trips.extractProducts(tripID: tripID, text: "", url: nil, imageJPEG: jpeg).products.first?.listName
+                                     onPhotoSelected: { jpeg in
+                                         importRequest = ImportRequest(content: ShareContent(hasImage: true, imageJPEG: jpeg))
                                      }) { entry in
-                        MerchantSearchView(session: session, tripID: tripID, entry: entry) { reloadToken += 1 }
+                        MerchantSearchView(session: session, tripID: tripID, entry: entry,
+                                           regionName: trips.first { $0.id == tripID }?.name ?? "",
+                                           regionCountry: trips.first { $0.id == tripID }.flatMap {
+                                               LocalMapCountry.guess(name: $0.name, timeZone: $0.timeZone)
+                                           }) { reloadToken += 1 }
                     }
                 } else {
                     PersonalInboxItemsView(session: session, kind: "product")
@@ -51,20 +63,22 @@ struct ShoppingTab: View {
                 }
                 if myRole?.canEdit == true {
                     ToolbarItem(placement: .primaryAction) {
-                        Button("從貼文或截圖加入", systemImage: "sparkles") { importing = true }
+                        Button("從貼文或截圖加入", systemImage: "sparkles") {
+                            importRequest = ImportRequest(content: ShareContent())
+                        }
                             .accessibilityIdentifier("importProducts")
                     }
                 }
             }
-            .sheet(isPresented: $importing) {
+            .sheet(item: $importRequest) { request in
                 NavigationStack {
-                    ProductImportView(content: ShareContent(), repository: session.trips) { _ in
-                        importing = false
+                    ProductImportView(content: request.content, repository: session.trips, discoveryRepository: inbox) { _ in
+                        importRequest = nil
                         reloadToken += 1
                     }
                     .navigationTitle("從貼文加入")
                     .navigationBarTitleDisplayModeInline()
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { importing = false } } }
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { importRequest = nil } } }
                 }
             }
             .task {
@@ -129,10 +143,12 @@ public struct ShoppingListView: View {
     let candidateItems: [InboxItemRecord]
     let personalRepository: InboxRepository?
     let personalError: String?
+    let tripRegionName: String?
+    let tripCountryCode: String?
     let personalChanged: () -> Void
     let merchantScreen: (ShoppingEntry) -> AnyView
-    /// 從商品照片讀出名稱（AI）；nil 表示不辨識。
-    let recognizeName: (@Sendable (Data) async throws -> String?)?
+    /// 快速列選照片後交給完整商品辨識畫面，避免多件商品只取第一件。
+    let onPhotoSelected: ((Data) -> Void)?
 
     @State private var entries: [ShoppingEntry] = []
     @State private var itineraryMatches: [UUID: [ShoppingItineraryMatch]] = [:]
@@ -140,7 +156,6 @@ public struct ShoppingListView: View {
     @State private var newName = ""
     @State private var newPhoto: PhotosPickerItem?
     @State private var newImage: Data?
-    @State private var recognizing = false
     @State private var errorMessage: String?
     @State private var loaded = false
     @FocusState private var nameFocused: Bool
@@ -148,8 +163,9 @@ public struct ShoppingListView: View {
     public init<MerchantScreen: View>(service: any ShoppingService, tripID: UUID, canEdit: Bool, queue: OfflineQueue?, reloadToken: Int,
                                       personalItems: [InboxItemRecord] = [], candidateItems: [InboxItemRecord] = [],
                                       personalRepository: InboxRepository? = nil, personalError: String? = nil,
+                                      tripRegionName: String? = nil, tripCountryCode: String? = nil,
                                       personalChanged: @escaping () -> Void = {},
-                                      recognizeName: (@Sendable (Data) async throws -> String?)? = nil,
+                                      onPhotoSelected: ((Data) -> Void)? = nil,
                                       @ViewBuilder merchantScreen: @escaping (ShoppingEntry) -> MerchantScreen) {
         self.service = service
         self.tripID = tripID
@@ -160,8 +176,10 @@ public struct ShoppingListView: View {
         self.candidateItems = candidateItems
         self.personalRepository = personalRepository
         self.personalError = personalError
+        self.tripRegionName = tripRegionName
+        self.tripCountryCode = tripCountryCode
         self.personalChanged = personalChanged
-        self.recognizeName = recognizeName
+        self.onPhotoSelected = onPhotoSelected
         self.merchantScreen = { AnyView(merchantScreen($0)) }
     }
 
@@ -178,7 +196,8 @@ public struct ShoppingListView: View {
             if let personalRepository, !personalItems.isEmpty {
                 Section("我的想買") {
                     ForEach(personalItems) { item in
-                        PersonalInboxRow(item: item, kind: "product", repository: personalRepository) { _ in personalChanged() }
+                        PersonalInboxRow(item: item, kind: "product", repository: personalRepository,
+                                         tripRegionName: tripRegionName, tripCountryCode: tripCountryCode) { _ in personalChanged() }
                     }
                 }
             }
@@ -205,18 +224,17 @@ public struct ShoppingListView: View {
                         }
                         .buttonStyle(.borderless)
                         .accessibilityLabel(newImage == nil ? "附上照片" : "已附照片")
-                        TextField(recognizing ? "辨識照片中的商品…" : "新增想買的商品", text: $newName).onSubmit { Task { await add() } }
+                        TextField("新增想買的商品", text: $newName).onSubmit { Task { await add() } }
                             .focused($nameFocused)
                             .submitLabel(.done)
                             .accessibilityIdentifier("newItemField")
-                        if recognizing { ProgressView() }
                         Button("新增") { Task { await add() } }
                             .buttonStyle(.borderless)
                             .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
                             .accessibilityIdentifier("addItem")
                     }
                 } footer: {
-                    if recognizeName != nil { Text("先拍照或選照片，會自動帶入商品名稱，可以再修改。") }
+                    if onPhotoSelected != nil { Text("選照片會辨識所有商品與店家線索，再讓你確認要加入哪些。") }
                 }
             }
             if let errorMessage { ErrorText(errorMessage) }
@@ -242,8 +260,13 @@ public struct ShoppingListView: View {
         .onChange(of: newPhoto) {
             Task {
                 guard let data = try? await newPhoto?.loadTransferable(type: Data.self) else { return }
-                newImage = ImageDownscale.jpeg(from: data)
-                await recognizePhoto()
+                guard let jpeg = ImageDownscale.jpeg(from: data, maxPixel: 2048) else { return }
+                if let onPhotoSelected {
+                    newPhoto = nil
+                    onPhotoSelected(jpeg)
+                } else {
+                    newImage = jpeg
+                }
             }
         }
     }
@@ -266,28 +289,6 @@ public struct ShoppingListView: View {
             itineraryMatchesLoaded = false
         }
         loaded = true
-    }
-
-    /// 還沒輸入名稱時，用照片辨識出的商品名稱帶入（使用者仍可修改，按新增才加入）。
-    private func recognizePhoto() async {
-        guard let recognizeName, let newImage, newName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        nameFocused = false
-        recognizing = true
-        defer { recognizing = false }
-        do {
-            if let name = try await recognizeName(newImage), !name.isEmpty {
-                if newName.trimmingCharacters(in: .whitespaces).isEmpty { newName = name }
-                errorMessage = nil
-            } else {
-                errorMessage = "照片裡辨識不出商品名稱，請手動輸入。"
-            }
-        } catch let error as ProductExtractionError {
-            errorMessage = error.userMessage
-        } catch let error as BackendError {
-            errorMessage = "辨識失敗：\(error.userMessage)"
-        } catch {
-            errorMessage = "辨識失敗：\(userMessage(for: error))"
-        }
     }
 
     private func add() async {
@@ -437,6 +438,8 @@ struct MerchantSearchView: View {
     let session: SessionModel
     let tripID: UUID
     let entry: ShoppingEntry
+    let regionName: String
+    let regionCountry: String?
     let onScheduled: () -> Void
 
     struct Option: Identifiable {
@@ -452,10 +455,20 @@ struct MerchantSearchView: View {
     @State private var dayTitles: [UUID: String] = [:]
     @State private var scheduling: Option?
     @State private var errorMessage: String?
+    @State private var selectedResearch: DiscoveredPlace?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         Form {
+            Section("AI 查找的實體店候選") {
+                ProductStoreSuggestionsView(repository: InboxRepository(client: session.client),
+                                            productName: entry.item.name, storeHint: entry.item.storeHint,
+                                            region: regionName, countryCode: regionCountry) { candidate in
+                    selectedResearch = candidate
+                    query = candidate.koreanName ?? candidate.name
+                    Task { await search() }
+                }
+            }
             Section {
                 PlaceSearchField(text: $query, placeholder: "品牌或店名", isSearching: searching) { Task { await search() } }
                 TextField("官方店鋪查詢頁網址（選填）", text: $officialURL)
@@ -464,7 +477,7 @@ struct MerchantSearchView: View {
                     .keyboardType(.URL).textInputAutocapitalization(.never)
                     #endif
             } footer: {
-                Text("有官方店鋪頁時會作為證據附上；否則標為「地圖搜尋結果」。一律只表示可能販售，庫存未知。")
+                Text("AI 店家有網頁來源，但不代表這件商品有賣；地圖只供定位。安排前請核對店面，庫存一律未知。")
             }
             if let errorMessage { ErrorText(errorMessage) }
             if searching { ProgressView("搜尋並計算順路…") }
@@ -473,7 +486,8 @@ struct MerchantSearchView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(option.place.displayTitle)
                         if let address = option.place.address { Text(address).font(.caption).foregroundStyle(.secondary) }
-                        Text("可能販售（\(evidence.displayName)） · 庫存未知").font(.caption).foregroundStyle(.secondary)
+                        Text("店面線索 · 商品販售與庫存待詢問")
+                            .font(.caption).foregroundStyle(.secondary)
                         if let best = option.best, let ins = best.best {
                             Text("最適合 \(dayTitles[best.dayID] ?? "")：路程 +\(ins.addedTravelMinutes ?? 0) 分").font(.caption)
                         } else {
@@ -482,7 +496,7 @@ struct MerchantSearchView: View {
                     }
                     if option.best?.best != nil {
                         Button("安排在\(dayTitles[option.best!.dayID] ?? "這天")…") {
-                            // 先記下「可能販售」的證據，成功才進入確認；失敗要讓使用者知道（審查）。
+                            // 有官方來源才記錄販售候選；地圖與一般店面線索只供使用者安排詢問。
                             Task { if await recordEvidence(option) { scheduling = option } }
                         }
                     }
@@ -490,7 +504,7 @@ struct MerchantSearchView: View {
             }
         }
         .navigationTitle(entry.item.name)
-        .onAppear { if query.isEmpty { query = entry.item.name; Task { await search() } } }
+        .onAppear { if query.isEmpty { query = entry.item.storeHint ?? "" } }
         .sheet(item: $scheduling) { option in
             ProposalReviewView(session: session, tripID: tripID, dayID: option.best!.dayID, dayTitle: dayTitles[option.best!.dayID] ?? "",
                                mode: option.best!.mode, candidate: SearchResult(draft: option.place.draft), dwellMinutes: 30,
@@ -502,11 +516,10 @@ struct MerchantSearchView: View {
         }
     }
 
-    private var evidence: MerchantCandidate.EvidenceType {
-        officialURL.trimmingCharacters(in: .whitespaces).isEmpty ? .poiCategory : .officialLocator
-    }
-
     private func search() async {
+        if let selectedResearch, query != (selectedResearch.koreanName ?? selectedResearch.name) {
+            self.selectedResearch = nil
+        }
         searching = true
         defer { searching = false }
         let found = await session.placeSearch.search(query, in: await session.trips.searchAreas(of: tripID), limit: 5)
@@ -528,11 +541,12 @@ struct MerchantSearchView: View {
     }
 
     private func recordEvidence(_ option: Option) async -> Bool {
+        let url = officialURL.trimmingCharacters(in: .whitespaces)
+        guard !url.isEmpty else { return true }
         do {
             let place = try await session.trips.upsertPlace(option.place.draft)
-            let url = officialURL.trimmingCharacters(in: .whitespaces)
-            try await session.trips.addMerchant(itemID: entry.id, placeID: place.id, evidence: evidence,
-                                                url: url.isEmpty ? nil : url, note: "Apple 地圖搜尋「\(query)」")
+            try await session.trips.addMerchant(itemID: entry.id, placeID: place.id, evidence: .officialLocator,
+                                                url: url, note: "官方店鋪來源；商品是否販售及庫存待確認。")
             errorMessage = nil
             return true
         } catch {

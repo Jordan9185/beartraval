@@ -23,3 +23,14 @@ test("找得到店名但引用沒有地址時不顯示模型編造地址", () =>
 test("格式錯誤的網路建議不顯示", () => {
   assert.deepEqual(verifiedSuggestions({ candidates: [{ name: "只給名稱" }] }, []), []);
 });
+
+test("商品店家候選必須由引用文字支持具名店面", () => {
+  const sources = [{ url: "https://example.com/shop", title: "이솝 성수점", citedText: "서울 성동구 연무장길 57" }];
+  const input = { candidates: [
+    { name: "Aesop Seongsu", korean_name: "이솝 성수점", address_local: "서울 성동구 연무장길 57",
+      search_query: "이솝 성수점", reason: "品牌門市，商品是否販售待詢問", source_url: sources[0]!.url },
+    { name: "虛構分店", korean_name: null, address_local: null,
+      search_query: "虛構分店", reason: "品牌門市，商品是否販售待詢問", source_url: sources[0]!.url },
+  ] };
+  assert.deepEqual(verifiedSuggestions(input, sources, "product_store").map((item) => item.name), ["Aesop Seongsu"]);
+});

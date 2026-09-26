@@ -798,6 +798,8 @@ struct PersonalInboxRow: View {
     let kind: String
     let repository: InboxRepository
     var candidate = false
+    var tripRegionName: String? = nil
+    var tripCountryCode: String? = nil
     let onUpdated: (InboxItemRecord) -> Void
     @State private var resolves = false
     @State private var publishes = false
@@ -810,6 +812,19 @@ struct PersonalInboxRow: View {
             if kind == "place" {
                 ForEach(item.discoveryCandidates ?? []) { suggestion in
                     InboxDiscoveryCandidateRow(suggestion: suggestion)
+                }
+            }
+            if kind == "product" {
+                if let storeHint = item.storeHint {
+                    Text("貼文提到：\(storeHint) · 販售與庫存待確認")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if !candidate, let tripRegionName {
+                    DisclosureGroup("查旅程附近的實體店") {
+                        ProductStoreSuggestionsView(repository: repository, productName: item.displayName,
+                                                    storeHint: item.storeHint, region: tripRegionName,
+                                                    countryCode: tripCountryCode)
+                    }
                 }
             }
             if candidate {

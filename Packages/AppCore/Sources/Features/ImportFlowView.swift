@@ -6,6 +6,7 @@ import SwiftUI
 public struct ImportFlowView: View {
     let service: any ImportService
     let placeSearch: any PlaceSearching
+    let discoveryRepository: InboxRepository?
     let onCreated: (Trip) -> Void
 
     @State private var session: ImportSession
@@ -24,9 +25,11 @@ public struct ImportFlowView: View {
         case committing
     }
 
-    public init(session: ImportSession, service: any ImportService, placeSearch: any PlaceSearching, onCreated: @escaping (Trip) -> Void) {
+    public init(session: ImportSession, service: any ImportService, placeSearch: any PlaceSearching,
+                discoveryRepository: InboxRepository? = nil, onCreated: @escaping (Trip) -> Void) {
         self.service = service
         self.placeSearch = placeSearch
+        self.discoveryRepository = discoveryRepository
         self.onCreated = onCreated
         _session = State(initialValue: session)
         _editedText = State(initialValue: session.rawText)
@@ -36,7 +39,8 @@ public struct ImportFlowView: View {
         Group {
             switch phase {
             case .parsing:
-                ParsingProgressView(characters: session.rawText.count, progress: progress, started: parseStarted)
+                ParsingProgressView(characters: session.rawText.count, progress: progress, started: parseStarted,
+                                    suggestedTemplate: TripIdeaIntent.shouldSuggest(session.rawText, tripDays: session.tripDates.count))
             case .failed:
                 failedView
             case .editing:
@@ -44,8 +48,10 @@ public struct ImportFlowView: View {
             case .confirming, .committing:
                 if let confirm = Binding($confirm) {
                     ConfirmPlacesView(state: confirm, rawText: session.rawText, placeSearch: placeSearch,
+                                      discoveryRepository: discoveryRepository,
                                       city: session.parseResult?.draft.cityCandidates.first,
                                       warnings: session.parseResult?.draft.warnings ?? [],
+                                      suggestedTemplate: TripIdeaIntent.shouldSuggest(session.rawText, tripDays: session.tripDates.count),
                                       timeZone: session.timeZone,
                                       isCommitting: phase == .committing, errorMessage: errorMessage) {
                         Task { await commit() }
@@ -192,12 +198,17 @@ struct ConfirmPlacesView: View {
     @Binding var state: ConfirmPlacesState
     let rawText: String
     let placeSearch: any PlaceSearching
+    var discoveryRepository: InboxRepository? = nil
     let city: String?
     let warnings: [String]
+    var suggestedTemplate = false
     var timeZone: String? = nil
     let isCommitting: Bool
     let errorMessage: String?
     let onSubmit: () -> Void
+    @State private var webCandidates: [Int: [DiscoveredPlace]] = [:]
+    @State private var webSearching: Set<Int> = []
+    @State private var webMessages: [Int: String] = [:]
 
     var body: some View {
         Form {
@@ -216,6 +227,11 @@ struct ConfirmPlacesView: View {
                 }
                 // 搜尋跑完才給批次操作，否則本來能自動定位的地點也會被標成未定位。
                 if state.undecidedCount > 0 && searchDone == searchTotal {
+                    if suggestedTemplate && state.suggestedMatchCount > 0 {
+                        Button("一次確認 \(state.suggestedMatchCount) 個名稱明確相符的地點") {
+                            state.confirmSuggestedMatches()
+                        }
+                    }
                     Button("其餘 \(state.undecidedCount) 項先只保留名稱") { state.keepUndecidedAsText() }
                         .accessibilityIdentifier("keepUndecided")
                 }
@@ -242,7 +258,7 @@ struct ConfirmPlacesView: View {
             // 只把需要使用者決定的項目攤開；App 代為處理的收在下面，可點開檢查或修改。
             ForEach(attention, id: \.self) { index in
                 Section {
-                    ConfirmItemView(item: $state.items[index], tripDates: state.tripDates, timeZone: timeZone) { await research(index, $0) }
+                    confirmItem(at: index)
                 } header: {
                     Text(state.items[index].date ?? "日期未定")
                 }
@@ -251,12 +267,12 @@ struct ConfirmPlacesView: View {
                 Section {
                     DisclosureGroup("已自動處理 \(handled.count) 項") {
                         ForEach(handled, id: \.self) { index in
-                            ConfirmItemView(item: $state.items[index], tripDates: state.tripDates, timeZone: timeZone) { await research(index, $0) }
+                            confirmItem(at: index)
                         }
                     }
                     .accessibilityIdentifier("autoHandled")
                 } footer: {
-                    Text("名稱相符的地點已自動選定；Apple 地圖找不到的、航班等只保留名稱。點開可以修改。")
+                    Text("名稱相符的地點已自動選定；航班等只保留名稱。點開可以修改。")
                 }
             }
             Section {
@@ -279,11 +295,14 @@ struct ConfirmPlacesView: View {
     }
 
     private var summary: some View {
-        let needs = state.needsAttention.count
+        let needs = attention.count
         return VStack(alignment: .leading, spacing: 2) {
-            Text("解析出 \(state.items.count) 項").font(.subheadline.weight(.semibold))
+            Text(suggestedTemplate ? "AI 建議 \(state.items.count) 項，可逐一調整" : "解析出 \(state.items.count) 項")
+                .font(.subheadline.weight(.semibold))
             Text(searchDone < searchTotal ? "搜尋地點中，名稱相符的會自動選定"
-                 : needs == 0 ? "全部已自動處理，可以直接建立" : "\(needs) 項需要你確認，其餘已自動處理")
+                 : needs == 0 ? "全部已自動處理，可以直接建立"
+                 : state.canSubmit ? "可以建立；\(needs) 項地點可再核對"
+                 : "\(needs) 項需要你確認，其餘已自動處理")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .accessibilityIdentifier("importSummary")
@@ -291,16 +310,55 @@ struct ConfirmPlacesView: View {
 
     /// 需要使用者處理、且已經搜尋完（或不需搜尋）的項目。
     private var attention: [Int] {
-        state.needsAttention.filter { state.items[$0].searched || !state.items[$0].needsSearch }
+        state.items.indices.filter { index in
+            let item = state.items[index]
+            let missingKoreanPlace = item.needsSearch && item.searched && !item.searchFailed && item.candidates.isEmpty
+                && countryCode(for: item) == "KR"
+            return (state.needsAttention.contains(index) || missingKoreanPlace) && (item.searched || !item.needsSearch)
+        }
     }
 
     private var handled: [Int] {
-        let needs = Set(state.needsAttention)
+        let needs = Set(attention)
         return state.items.indices.filter { !needs.contains($0) }
     }
 
     private var searchTotal: Int { state.items.filter(\.needsSearch).count }
     private var searchDone: Int { state.items.filter { $0.needsSearch && $0.searched }.count }
+
+    private func countryCode(for item: ConfirmItem) -> String? {
+        item.stop.countryCode ?? LocalMapCountry.guess(name: [item.stop.city, city, item.label]
+            .compactMap { $0 }.joined(separator: " "), timeZone: timeZone)
+    }
+
+    private func confirmItem(at index: Int) -> some View {
+        ConfirmItemView(item: $state.items[index], tripDates: state.tripDates, timeZone: timeZone,
+                        webCandidates: webCandidates[index] ?? [], webSearching: webSearching.contains(index),
+                        webMessage: webMessages[index], discoverWeb: discoveryRepository == nil ? nil : {
+                            Task { await discoverWeb(at: index) }
+                        }, useWebCandidate: { candidate in
+                            Task { await research(index, candidate.searchQuery) }
+                        }) { await research(index, $0) }
+    }
+
+    private func discoverWeb(at index: Int) async {
+        guard let discoveryRepository, state.items.indices.contains(index), !webSearching.contains(index) else { return }
+        let item = state.items[index]
+        webSearching.insert(index)
+        webMessages[index] = nil
+        defer { webSearching.remove(index) }
+        do {
+            let context = [item.stop.city ?? city, item.stop.sourceExcerpt, item.stop.searchQuery]
+                .compactMap { $0 }.joined(separator: "\n")
+            let candidates = try await discoveryRepository.discoverPlaces(query: item.label, context: context)
+            webCandidates[index] = candidates
+            if candidates.isEmpty { webMessages[index] = "目前找不到可核對來源的店家，這項仍只保留名稱。" }
+        } catch let error as PlaceDiscoveryError {
+            webMessages[index] = error.userMessage
+        } catch {
+            webMessages[index] = "店家查找失敗：\(userMessage(for: error))"
+        }
+    }
 
     /// 依序查詢（MapKit 有節流）；只列候選，不自動選定。
     /// 每個地點在自己的城市一帶搜尋，跨國旅程才不會拿首爾去搜廣島的地點。
@@ -364,6 +422,11 @@ struct ConfirmItemView: View {
     @Binding var item: ConfirmItem
     let tripDates: [String]
     var timeZone: String? = nil
+    var webCandidates: [DiscoveredPlace] = []
+    var webSearching = false
+    var webMessage: String? = nil
+    var discoverWeb: (() -> Void)? = nil
+    var useWebCandidate: ((DiscoveredPlace) -> Void)? = nil
     /// 用使用者輸入的關鍵字重新搜尋這一項。
     var research: ((String) async -> Void)? = nil
     @State private var showsSearch = false
@@ -379,7 +442,14 @@ struct ConfirmItemView: View {
                 Text(item.label)
             }
             // 已自動處理的項目只留結論，原文片段留給需要判斷的項目（樣式指南）。
-            if !item.autoDecided {
+            if item.stop.sourceExcerpt.hasPrefix("AI 建議：") {
+                Text(item.stop.sourceExcerpt.components(separatedBy: "；來源：").first ?? item.stop.sourceExcerpt)
+                    .font(.caption).foregroundStyle(.secondary)
+                if let source = item.stop.sourceExcerpt.components(separatedBy: "；來源：").last,
+                   let url = URL(string: source), url.scheme == "https" {
+                    Link("查看建議來源", destination: url).font(.caption)
+                }
+            } else if !item.autoDecided {
                 Text("「\(item.stop.sourceExcerpt)」").font(.caption).foregroundStyle(.secondary)
             }
             if item.autoDecided, let note = autoNote {
@@ -422,6 +492,30 @@ struct ConfirmItemView: View {
             Text("地圖搜尋暫時無法使用，請稍後重新搜尋。").font(.caption).foregroundStyle(.orange)
         } else if item.searched && item.candidates.isEmpty && item.needsSearch {
             Text("Apple 地圖沒收錄這個地點。").font(.caption).foregroundStyle(.secondary)
+        }
+        if item.searched && item.candidates.isEmpty && item.needsSearch,
+           (item.stop.countryCode ?? LocalMapCountry.guess(name: item.label, timeZone: timeZone)) == "KR",
+           let discoverWeb {
+            Button("AI 查韓文店名與地址", systemImage: "sparkles", action: discoverWeb)
+                .disabled(webSearching)
+            if webSearching { ProgressView("正在查有來源的候選店家…") }
+            if let webMessage { Text(webMessage).font(.caption).foregroundStyle(.secondary) }
+        }
+        ForEach(webCandidates) { candidate in
+            VStack(alignment: .leading, spacing: 4) {
+                Text(candidate.koreanName ?? candidate.name).font(.subheadline.weight(.semibold))
+                if let address = candidate.addressLocal { Text(address).font(.caption).textSelection(.enabled) }
+                Text(candidate.reason).font(.caption).foregroundStyle(.secondary)
+                if let url = URL(string: candidate.sourceURL), url.scheme == "https" {
+                    Link("查看來源", destination: url).font(.caption)
+                }
+                if let useWebCandidate {
+                    Button("用此店名搜尋定位") { useWebCandidate(candidate) }
+                }
+                LocalMapSearchButtons(name: candidate.searchQuery, countryCode: "KR")
+                    .buttonStyle(.borderless)
+            }
+            .padding(.vertical, 4)
         }
         if item.searched && item.needsSearch && (item.candidates.isEmpty || item.decision == .pendingText) {
             LocalMapSearchButtons(name: item.label, countryCode: item.stop.countryCode
@@ -489,13 +583,14 @@ struct ParsingProgressView: View {
     let characters: Int
     let progress: ParseProgress?
     let started: Date
+    var suggestedTemplate = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            step(done: true, active: false, title: "已送出原文（\(characters.formatted()) 字）")
-            step(done: writing, active: !writing, title: "AI 閱讀行程",
-                 detail: writing ? nil : "先讀完整份行程，分辨哪些是地點、哪些只是備註")
-            step(done: false, active: writing, title: "整理成每日行程", detail: draftDetail)
+            step(done: true, active: false, title: "已送出需求（\(characters.formatted()) 字）")
+            step(done: writing, active: !writing, title: suggestedTemplate ? "AI 搜尋公開旅遊資料" : "AI 閱讀行程",
+                 detail: writing ? nil : suggestedTemplate ? "查具名景點，保留可回查的來源" : "分辨地點與備註")
+            step(done: false, active: writing, title: suggestedTemplate ? "安排建議樣板" : "整理成每日行程", detail: draftDetail)
             step(done: false, active: false, title: "搜尋地點，讓你逐一確認")
             TimelineView(.periodic(from: started, by: 1)) { context in
                 let seconds = max(0, Int(context.date.timeIntervalSince(started)))

@@ -116,7 +116,10 @@ struct CreateTripView: View {
     @State private var name = ""
     @State private var start = Date()
     @State private var end = Date()
+    @State private var endTouched = false
     @State private var timeZoneID = "Asia/Seoul"
+    @State private var timeZoneTouched = false
+    @State private var nameAutoFilled = false
     @State private var transportMode: TravelMode = TravelMode.suggested(forTimeZone: "Asia/Seoul")
     @State private var modeTouched = false
     @State private var rawText = ""
@@ -130,10 +133,11 @@ struct CreateTripView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("名稱（例如：首爾 5 天）", text: $name)
+                    TextField("旅程名稱或一句話（例如：東京五天旅遊）", text: Binding(get: { name }, set: { name = $0; nameAutoFilled = false }))
                     DatePicker("開始", selection: $start, displayedComponents: .date)
-                    DatePicker("結束", selection: $end, in: start..., displayedComponents: .date)
-                    Picker("第一天的時區", selection: $timeZoneID) {
+                    DatePicker("結束", selection: Binding(get: { end }, set: { end = $0; endTouched = true }),
+                               in: start..., displayedComponents: .date)
+                    Picker("第一天的時區", selection: Binding(get: { timeZoneID }, set: { timeZoneID = $0; timeZoneTouched = true })) {
                         ForEach(Self.timeZones, id: \.self) { Text(TripTimeZones.displayName($0)).tag($0) }
                     }
                     Picker("主要交通方式", selection: Binding(get: { transportMode }, set: { transportMode = $0; modeTouched = true })) {
@@ -148,20 +152,20 @@ struct CreateTripView: View {
                         .accessibilityLabel("行程文字")
                         .overlay(alignment: .topLeading) {
                             if rawText.isEmpty {
-                                Text("貼上 ChatGPT、LINE 或備忘錄的行程").foregroundStyle(.tertiary)
+                                Text("貼上行程，或寫「我要去日本東京五天旅遊」").foregroundStyle(.tertiary)
                                     .padding(.top, 8).padding(.leading, 5).allowsHitTesting(false)
                             }
                         }
                 } header: {
                     HStack {
-                        Text("匯入行程文字（可略過）")
+                        Text("匯入行程或描述想去的地方（可略過）")
                         Spacer()
                         if hasText {
                             Button("清除") { rawText = "" }.font(.caption).textCase(nil)
                         }
                     }
                 } footer: {
-                    Text("貼上 ChatGPT、LINE 或備忘錄的行程。解析後逐一確認地點，才會建立正式行程；原文會保留。")
+                    Text("已有行程會照原文整理；只有目的地與天數時，AI 會搜尋並提出可編輯的建議樣板。確認後才建立正式行程。")
                 }
                 if let errorMessage {
                     ErrorText(errorMessage)
@@ -169,9 +173,13 @@ struct CreateTripView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: timeZoneID) { if !modeTouched { transportMode = TravelMode.suggested(forTimeZone: timeZoneID) } }
+            .onChange(of: rawText) { applyIdeaDefaults() }
+            .onChange(of: name) { applyIdeaDefaults() }
+            .onChange(of: start) { if !endTouched { applyIdeaDates() } }
             .navigationTitle("建立旅程")
             .navigationDestination(item: $importSession) { importSession in
-                ImportFlowView(session: importSession, service: session.imports, placeSearch: session.placeSearch) { trip in
+                ImportFlowView(session: importSession, service: session.imports, placeSearch: session.placeSearch,
+                               discoveryRepository: InboxRepository(client: session.client)) { trip in
                     Task {
                         await applyMode(trip)
                         onCreated(trip)
@@ -183,7 +191,8 @@ struct CreateTripView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isSaving ? "處理中…" : hasText ? "下一步" : "建立") { Task { await save() } }
-                        .disabled(isSaving || name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(isSaving || (name.trimmingCharacters(in: .whitespaces).isEmpty
+                                               && TripIdeaIntent.suggestedName(for: rawText) == nil))
                 }
             }
         }
@@ -191,6 +200,37 @@ struct CreateTripView: View {
 
     private var hasText: Bool {
         !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || TripIdeaIntent.shouldSuggest(name, tripDays: tripDays)
+    }
+
+    private var tripDays: Int {
+        let calendar = Calendar.current
+        return max(1, (calendar.dateComponents([.day], from: calendar.startOfDay(for: start),
+                                                to: calendar.startOfDay(for: max(start, end))).day ?? 0) + 1)
+    }
+
+    private var ideaInput: String {
+        rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? name : rawText
+    }
+
+    private func applyIdeaDefaults() {
+        if !timeZoneTouched, let suggested = TripIdeaIntent.suggestedTimeZone(for: name + " " + rawText) {
+            timeZoneID = suggested
+        }
+        applyIdeaDates()
+        guard TripIdeaIntent.isRequest(ideaInput) else { return }
+        if !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let suggested = TripIdeaIntent.suggestedName(for: ideaInput),
+           name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nameAutoFilled {
+            name = suggested
+            nameAutoFilled = true
+        }
+    }
+
+    private func applyIdeaDates() {
+        guard !endTouched, let days = TripIdeaIntent.inferredDayCount(in: ideaInput),
+              let suggested = Calendar.current.date(byAdding: .day, value: days - 1, to: start) else { return }
+        end = suggested
     }
 
     /// 新旅程每天預設大眾運輸；選了別的就整趟改掉（失敗不擋建立，之後可在旅程裡改）。
@@ -204,13 +244,21 @@ struct CreateTripView: View {
         defer { isSaving = false }
         // 日期選擇器的日期以裝置時區解讀，再原樣當作旅行地的當地日期。
         let device = TimeZone.current
-        let tripName = name.trimmingCharacters(in: .whitespaces)
+        let importText = rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && TripIdeaIntent.shouldSuggest(name, tripDays: tripDays)
+            ? name : rawText
+        let tripName = TripIdeaIntent.isRequest(name) && rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? TripIdeaIntent.suggestedName(for: name) ?? name.trimmingCharacters(in: .whitespaces)
+            : name.trimmingCharacters(in: .whitespaces).isEmpty
+                ? TripIdeaIntent.suggestedName(for: rawText) ?? "" : name.trimmingCharacters(in: .whitespaces)
         let startDate = LocalDate.string(from: start, timeZone: device)
-        let endDate = LocalDate.string(from: max(start, end), timeZone: device)
+        let suggestedEnd = !endTouched && hasText
+            ? Calendar.current.date(byAdding: .day, value: (TripIdeaIntent.inferredDayCount(in: importText) ?? tripDays) - 1, to: start) : nil
+        let endDate = LocalDate.string(from: max(start, suggestedEnd ?? end), timeZone: device)
         do {
             if hasText {
                 importSession = try await session.imports.createImport(
-                    tripName: tripName, startDate: startDate, endDate: endDate, timeZone: timeZoneID, rawText: rawText)
+                    tripName: tripName, startDate: startDate, endDate: endDate, timeZone: timeZoneID, rawText: importText)
             } else {
                 let trip = try await session.trips.createTrip(name: tripName, startDate: startDate, endDate: endDate, timeZone: timeZoneID)
                 await applyMode(trip)
