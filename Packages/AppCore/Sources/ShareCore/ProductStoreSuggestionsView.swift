@@ -36,27 +36,39 @@ public struct ProductStoreSuggestionsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Button("重新查店家") { Task { await search() } }
             }
-            ForEach(candidates) { candidate in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(candidate.koreanName ?? candidate.name).font(.headline)
-                    if let address = candidate.addressLocal {
-                        Text(address).font(.subheadline).textSelection(.enabled)
-                    }
-                    Text(candidate.reason).font(.caption).foregroundStyle(.secondary)
-                    Text("是否販售及庫存皆待確認").font(.caption).foregroundStyle(.secondary)
-                    LocalMapSearchButtons(name: candidate.searchQuery, countryCode: countryCode)
-                        .buttonStyle(.borderless)
-                    if let url = URL(string: candidate.sourceURL), url.scheme == "https" {
-                        Link("查看店家來源", destination: url).font(.caption)
-                    }
-                    if let onSelect {
-                        Button("用這間店查行程定位") { onSelect(candidate) }
+            if let first = candidates.first {
+                candidateRow(first)
+                if candidates.count > 1 {
+                    DisclosureGroup("其他店家候選（\(candidates.count - 1)）") {
+                        ForEach(candidates.dropFirst()) { candidate in candidateRow(candidate) }
                     }
                 }
-                .padding(.vertical, 4)
             }
         }
         .task(id: "\(productName)|\(storeHint ?? "")|\(region)") { await search() }
+    }
+
+    private func candidateRow(_ candidate: DiscoveredPlace) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("可能購買地點：\(candidate.koreanName ?? candidate.name)")
+                .font(.subheadline.weight(.semibold))
+            if let address = candidate.addressLocal {
+                Text(address).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            Text("是否販售與庫存待確認").font(.caption).foregroundStyle(.secondary)
+            DisclosureGroup("來源與地圖") {
+                Text(candidate.reason).font(.caption).foregroundStyle(.secondary)
+                LocalMapSearchButtons(name: candidate.searchQuery, countryCode: countryCode)
+                    .buttonStyle(.borderless)
+                if let url = URL(string: candidate.sourceURL), url.scheme == "https" {
+                    Link("查看店家來源", destination: url).font(.caption)
+                }
+                if let onSelect {
+                    Button("用這間店查行程定位") { onSelect(candidate) }
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private func search() async {

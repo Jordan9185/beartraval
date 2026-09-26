@@ -122,12 +122,10 @@ public struct ProductImportView: View {
                     if let discoveryRepository, let lookupName = draft.lookupName,
                        draft.selected, let selectedTrip,
                        drafts.prefix(3).contains(where: { $0.id == draft.id }) {
-                        DisclosureGroup("查看可能購買地點") {
-                            ProductStoreSuggestionsView(repository: discoveryRepository, productName: lookupName,
-                                                        storeHint: draft.storeHint, region: selectedTrip.name,
-                                                        countryCode: LocalMapCountry.guess(name: selectedTrip.name,
-                                                                                           timeZone: selectedTrip.timeZone))
-                        }
+                        ProductStoreSuggestionsView(repository: discoveryRepository, productName: lookupName,
+                                                    storeHint: draft.storeHint, region: selectedTrip.name,
+                                                    countryCode: LocalMapCountry.guess(name: selectedTrip.name,
+                                                                                       timeZone: selectedTrip.timeZone))
                     }
                 } }
                 Button("手動新增一項", systemImage: "plus") {
