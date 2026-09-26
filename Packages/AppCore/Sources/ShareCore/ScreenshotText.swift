@@ -90,9 +90,30 @@ public enum ScreenshotText {
         if let address, let index = lines.firstIndex(of: address) {
             name = lines[..<index].reversed().first { candidates.contains($0) }
         }
-        name = name ?? candidates.first
-        return Guess(name: name, address: address, otherLines: Array(candidates.filter { $0 != name }.prefix(8)),
+        // 社群截圖頂端常是「聖水洞美食」搜尋欄；真正店名可能在內嵌圖片的招牌。
+        // 優先短的韓文招牌、品牌字樣，再退回第一個有意義的文字列。
+        let ranked = candidates.enumerated().sorted {
+            let left = venueScore($0.element), right = venueScore($1.element)
+            return left == right ? $0.offset < $1.offset : left > right
+        }.map(\.element)
+        name = name ?? ranked.first(where: { venueScore($0) > 0 }) ?? candidates.first
+        return Guess(name: name, address: address, otherLines: Array(ranked.filter { $0 != name }.prefix(8)),
                      category: category(from: lines), country: country(from: lines, address: address))
+    }
+
+    static func venueScore(_ line: String) -> Int {
+        let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.range(of: #"\d{2}/\d{1,2}/\d{1,2}|[>@]|\.com\b"#, options: .regularExpression) != nil { return -20 }
+        if text.range(of: #"^(?:韓國|首爾|聖水洞|聖水|明洞|弘大)?\s*(?:美食|必買|必吃|旅遊|購物|咖啡)$"#, options: .regularExpression) != nil { return -20 }
+        if text.hasPrefix("Q") || text.hasPrefix("搜尋") || text.hasPrefix("搜索") { return -20 }
+        if text.count > 25 || text.contains("！！") || text.contains("!!!") { return -10 }
+        let hangul = text.unicodeScalars.filter { (0xAC00...0xD7A3).contains($0.value) }.count
+        if hangul >= 2 && text.count <= 20 { return 100 + hangul }
+        let latinWords = text.range(of: #"[A-Za-z]{4,}"#, options: .regularExpression) != nil
+        if latinWords && text.range(of: #"[a-z][A-Z]"#, options: .regularExpression) != nil { return 80 }
+        if latinWords && text.count <= 20 { return 45 }
+        if text.count <= 18 { return 30 }
+        return 5
     }
 
     static func isAddress(_ line: String) -> Bool {
@@ -112,13 +133,14 @@ public enum ScreenshotText {
     static func isNoise(_ line: String) -> Bool {
         let text = line.trimmingCharacters(in: .whitespaces)
         if text.count < 2 || text.count > 40 { return true }
+        if text.range(of: #"^\d{1,2}:\d{2}(?:\s|$)"#, options: .regularExpression) != nil { return true }
         if text.hasPrefix("#") || text.hasPrefix("@") || text.lowercased().hasPrefix("http") || text.contains("www.") { return true }
         if text.range(of: #"^[\d\s:.,/%+\-()]+$"#, options: .regularExpression) != nil { return true }  // 時間、數字、電話
         if text.range(of: #"^(\+?\d[\d\s\-]{6,})$"#, options: .regularExpression) != nil { return true }
         // 營業時間（10:30–21:00）、「#•」這類標籤殘字。
         if text.range(of: #"\d{1,2}:\d{2}\s*[-–~〜]\s*\d{1,2}:\d{2}"#, options: .regularExpression) != nil { return true }
         if text.hasPrefix("#") || text.hasPrefix("＃") { return true }
-        let ui = ["Instagram", "Threads", "追蹤", "Follow", "讚", "留言", "分享", "查看翻譯", "Like", "Reply", "Share",
+        let ui = ["Instagram", "Threads", "Trip.com", "追蹤", "Follow", "讚", "留言", "分享", "查看翻譯", "Like", "Reply", "Share",
                   "營業中", "Open", "Closed", "路線", "Directions", "Call", "撥打", "網站", "Website", "儲存", "Save",
                   "評論", "Reviews", "相片", "Photos", "영업 중", "길찾기", "저장", "공유", "리뷰", "営業中", "ルート", "保存"]
         return ui.contains { text.caseInsensitiveCompare($0) == .orderedSame }

@@ -103,6 +103,15 @@ struct ScreenshotTextTests {
         #expect(ScreenshotText.guess(from: ["12:03", "Follow", "Cafe Layered 연남", "1.2k"]).name == "Cafe Layered 연남")
     }
 
+    @Test func socialScreenshotFindsShopSignBelowSearchBar() {
+        let dessert = ["5:19", "聖水洞 必買", "beryln_ 25/10/27", "一定要去買聖水洞的這個餅乾！！",
+                       "韓國聖水洞奶油餅乾", "Trip.com", "CREME BRULEE", "MilkySho", "BUTTER"]
+        #expect(ScreenshotText.guess(from: dessert).name == "MilkySho")
+        let restaurant = ["5:18 A", "聖水洞 美食", "comeswind > 聖水洞美食 26/5/15", "無垢屋人蔘雞", "무구옥"]
+        #expect(ScreenshotText.guess(from: restaurant).name == "무구옥")
+        #expect(ScreenshotText.isNoise("5:18 A"))
+    }
+
     @Test func guessesCountryFromAddressAndText() {
         #expect(ScreenshotText.guess(from: ["명동교자 본점", "서울특별시 중구 명동10길 29"]).country == "KR")
         // 中文寫的韓國地址：地址也要認得、國家要判斷成韓國。

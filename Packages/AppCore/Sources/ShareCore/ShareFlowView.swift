@@ -22,6 +22,7 @@ public struct ShareFlowView: View {
     /// 分享進來的截圖（有的話在裝置上辨識文字，找出店名與地址）。
     @State private var screenshot: Data?
     @State private var screenshotLines: [String] = []
+    @State private var recognizedLines: [String] = []
     /// 截圖裡的地址（可修改）；原文地址會存成地點的當地文字地址，給計程車卡片用。
     @State private var screenshotAddress = ""
     /// 截圖內容看起來是哪個國家（可修改）。
@@ -199,8 +200,8 @@ public struct ShareFlowView: View {
                             if let url = URL(string: suggestion.sourceURL), url.scheme == "https" {
                                 Link("查看網路來源", destination: url).font(.caption)
                             }
-                            Button("以這間店名查行程定位") {
-                                query = suggestion.searchQuery
+                            Button("帶入這間店的店名與地址") {
+                                query = suggestion.koreanName ?? suggestion.name
                                 if let address = suggestion.addressLocal { screenshotAddress = address }
                                 country = "KR"
                                 Task { await search() }
@@ -379,9 +380,11 @@ public struct ShareFlowView: View {
             return
         }
         // 有截圖、文字又看不出店名時，在裝置上辨識截圖文字。
+        var waitingForDiscovery = false
         if let screenshot, Self.wantsScreenshotText(screenshot, analysis, query: query) {
             readingScreenshot = true
             let lines = await ScreenshotText.recognize(jpeg: screenshot)
+            recognizedLines = lines
             let guess = ScreenshotText.guess(from: lines)
             if !categoryChosen, let kind = guess.category { category = kind }
             screenshotAddress = guess.address ?? ""
@@ -390,10 +393,15 @@ public struct ShareFlowView: View {
                 .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
             if let best = guess.name ?? guess.address { query = best }
             readingScreenshot = false
-            if country == "KR" || country == nil { Task { await discoverScreenshot() } }
+            if (country == "KR" || country == nil), discoveryRepository != nil {
+                waitingForDiscovery = true
+                Task { await discoverScreenshot() }
+            }
         } else {
             readingScreenshot = false
         }
+        // 韓國截圖先等有來源的店家候選，避免 Apple 地圖的模糊結果搶先佔滿畫面。
+        if waitingForDiscovery { return }
         if let coordinate = analysis.mapHint?.coordinate, query.isEmpty {
             candidates = await placeSearch.nearby(coordinate, limit: 5)
             searched = true
@@ -443,9 +451,19 @@ public struct ShareFlowView: View {
         defer { discovering = false }
         do {
             discovered = try await discoveryRepository.discoverPlaces(query: clue,
-                context: screenshotLines.joined(separator: "\n"))
+                context: recognizedLines.joined(separator: "\n"))
             if !discovered.isEmpty { country = "KR" }
-            discoveryMessage = discovered.isEmpty ? "目前沒有足夠來源可列出店家，原始截圖線索仍可搜尋。" : nil
+            if discovered.count == 1, let match = discovered.first, query == clue {
+                query = match.koreanName ?? match.name
+                if let address = match.addressLocal { screenshotAddress = address }
+                discoveryMessage = match.addressLocal == nil
+                    ? "已帶入查得的店名；地址尚無可核對的來源，請確認分店。"
+                    : "已帶入查得的店名與韓文地址；請確認分店。"
+                await search()
+            } else {
+                discoveryMessage = discovered.isEmpty ? "目前沒有足夠來源可列出店家，原始截圖線索仍可搜尋。" : nil
+                if discovered.isEmpty { await search() }
+            }
         } catch let error as PlaceDiscoveryError {
             discoveryMessage = error.userMessage
         } catch {
