@@ -46,4 +46,15 @@ struct InboxCaptureTests {
         try store.remove(first.id)
         #expect(store.all().isEmpty)
     }
+
+    @Test func imageOnlyShareStillEncodesOptionalRPCArguments() throws {
+        let capture = InboxCapture(assets: [])
+        let data = try JSONEncoder().encode(InboxSaveParams(capture))
+        let fields = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(fields.keys.count == 7)
+        #expect(fields["p_canonical_url"] is NSNull)
+        #expect(fields["p_source_url"] is NSNull)
+        #expect(fields["p_title"] is NSNull)
+        #expect(fields["p_fingerprint"] as? String == capture.fingerprint)
+    }
 }

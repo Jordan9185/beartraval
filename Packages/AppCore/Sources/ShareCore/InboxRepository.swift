@@ -135,6 +135,46 @@ public enum InboxSyncError: Error {
     }
 }
 
+/// PostgREST 依 JSON 欄位名稱挑選 RPC；圖片分享沒有標題或網址時也必須送出 null。
+struct InboxSaveParams: Encodable {
+    let p_client_capture_id: UUID
+    let p_fingerprint: String
+    let p_canonical_url: String?
+    let p_source_url: String?
+    let p_title: String?
+    let p_raw_text: String
+    let p_unavailable_count: Int
+
+    init(_ capture: InboxCapture) {
+        p_client_capture_id = capture.id
+        p_fingerprint = capture.fingerprint
+        p_canonical_url = capture.canonicalURL
+        p_source_url = capture.urls.first?.absoluteString
+        p_title = capture.title.map { String($0.prefix(500)) }
+        p_raw_text = String(capture.rawText.prefix(20000))
+        p_unavailable_count = capture.unavailableCount
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case p_client_capture_id, p_fingerprint, p_canonical_url, p_source_url
+        case p_title, p_raw_text, p_unavailable_count
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var fields = encoder.container(keyedBy: CodingKeys.self)
+        try fields.encode(p_client_capture_id, forKey: .p_client_capture_id)
+        try fields.encode(p_fingerprint, forKey: .p_fingerprint)
+        if let p_canonical_url { try fields.encode(p_canonical_url, forKey: .p_canonical_url) }
+        else { try fields.encodeNil(forKey: .p_canonical_url) }
+        if let p_source_url { try fields.encode(p_source_url, forKey: .p_source_url) }
+        else { try fields.encodeNil(forKey: .p_source_url) }
+        if let p_title { try fields.encode(p_title, forKey: .p_title) }
+        else { try fields.encodeNil(forKey: .p_title) }
+        try fields.encode(p_raw_text, forKey: .p_raw_text)
+        try fields.encode(p_unavailable_count, forKey: .p_unavailable_count)
+    }
+}
+
 public struct DiscoveredPlace: Decodable, Identifiable, Sendable {
     public var name: String
     public var koreanName: String?
@@ -317,25 +357,10 @@ public struct InboxRepository: Sendable {
         guard let hint = capture.ownerHint else { throw InboxSyncError.accountConfirmationRequired }
         guard hint == me else { throw InboxSyncError.wrongAccount }
         if let syncedRemoteID = capture.syncedRemoteID { return syncedRemoteID }
-        struct SaveParams: Encodable {
-            let p_client_capture_id: UUID
-            let p_fingerprint: String
-            let p_canonical_url: String?
-            let p_source_url: String?
-            let p_title: String?
-            let p_raw_text: String
-            let p_unavailable_count: Int
-        }
         struct Saved: Decodable { let id: UUID, created: Bool, same_client: Bool }
         let saved: Saved
         do {
-            saved = try await client.rpc("save_inbox_capture", params: SaveParams(
-                p_client_capture_id: capture.id, p_fingerprint: capture.fingerprint,
-                p_canonical_url: capture.canonicalURL, p_source_url: capture.urls.first?.absoluteString,
-                p_title: capture.title.map { String($0.prefix(500)) },
-                p_raw_text: String(capture.rawText.prefix(20000)),
-                p_unavailable_count: capture.unavailableCount
-            )).execute().value
+            saved = try await client.rpc("save_inbox_capture", params: InboxSaveParams(capture)).execute().value
         } catch { throw InboxSyncError.cloudSave(BackendError.from(error)) }
 
         if saved.created || saved.same_client {

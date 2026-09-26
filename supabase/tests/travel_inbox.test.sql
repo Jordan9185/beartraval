@@ -10,6 +10,11 @@ select (app.save_inbox_capture(
 select tests.ok((select count(*) = 1 from app.inbox_captures), '分享成功寫入個人收件');
 
 select tests.ok((app.save_inbox_capture(
+  '33333333-3333-3333-3333-333333333333', repeat('e', 64))) ->> 'created' = 'true',
+  '純圖片分享省略標題、網址和文字時仍能建立收件');
+select tests.ok((select count(*) = 2 from app.inbox_captures), '純圖片分享新增第二筆收件');
+
+select tests.ok((app.save_inbox_capture(
   '22222222-2222-2222-2222-222222222222',
   repeat('b', 64), 'https://threads.com/post/1', 'https://threads.com/post/1',
   '另一個標題', '另一段文字') ->> 'created') = 'false', '相同網址不新增收件');
