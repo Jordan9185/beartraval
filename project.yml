@@ -131,12 +131,11 @@ targets:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
           NSExtensionAttributes:
-            # 網址、文字、輪播圖片或可取得的影片檔都先保存；辨識在主 App／後端完成。
+            # 文字／圖片版只列於網址、文字與輪播圖片的分享清單；影片辨識通過真機驗證後再開啟純影片檔入口。
             NSExtensionActivationRule:
               NSExtensionActivationSupportsWebURLWithMaxCount: 1
               NSExtensionActivationSupportsText: true
               NSExtensionActivationSupportsImageWithMaxCount: 10
-              NSExtensionActivationSupportsMovieWithMaxCount: 1
   BearTravelUITests:
     type: bundle.ui-testing
     platform: iOS

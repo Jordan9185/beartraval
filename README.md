@@ -37,6 +37,7 @@ open BearTravel.xcodeproj
 
 - 後端：本機 `supabase start` 後，把 anon key 填進 `Config/Local.xcconfig.local` 的 `SUPABASE_ANON_KEY`（詳見 [supabase/README.md](supabase/README.md)）。
 - Release（TestFlight）：需要 `Config/Cloud.xcconfig.local`（雲端網址與 anon key，已 gitignore）；缺少時 `SUPABASE_URL` 會是本機位址，build 直接失敗。
+- 首批分享版本只在網址、文字及最多十張圖片的分享清單出現；影片連結只保存實際取得的來源，不宣稱已辨識影片畫面或語音。純影片檔入口待真機驗證後再開啟。
 - 真機簽章：建立 `Config/Local.xcconfig.local`（已 gitignore），填 `DEVELOPMENT_TEAM = <Team ID>`；bundle id 衝突時再加 `BUNDLE_ID_PREFIX = com.<你的名字>`。
 - 結構：`App/`（App target）、`ShareExtension/`、`UITests/`、`Packages/AppCore`（`AppCore` Domain／規則／後端呼叫、`Features` SwiftUI 頁、`ShareCore` 分享流程）、`supabase/`（migrations、SQL 測試、Edge Functions）、`ai/`（行程解析、AI 助手與評測）、`Tools/RouteSpike`（S1 實測工具）。
 - 測試：`swift test --package-path Packages/AppCore`，或在 Xcode 跑 BearTravel scheme 的 Test。

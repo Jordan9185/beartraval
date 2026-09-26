@@ -15,15 +15,19 @@
 
 - 本機 `CI=1 swift test --package-path Packages/AppCore`：147 項通過，OCR 裝置測試跳過。
 - 本機 `xcodegen generate` 與 iPhone 17 Pro 模擬器 Debug build：通過。
+- 文字／圖片首批版 `xcodegen generate` 與無簽章 iOS Release build：通過；產出的 Share Extension 啟用規則只有網址、文字、最多十張圖片，沒有純影片檔入口。收件詳情會自動輪詢整理結果，失敗時以可理解的訊息提供重試。
 - `ai/inbox-organize` TypeScript typecheck 與 4 項來源錨點／歧義／否定語境測試：通過；`organize-inbox`、`delete-account` Deno typecheck：通過。
 - Postgres 17 測試：既有 suite 全過，Travel Inbox 24 項斷言通過（owner 隔離、URL 去重、重送、更正與模板套用）。
 - CI：最終程式 commit `def0c5e` 的 [iOS run 36219655446](https://github.com/Jordan9185/beartraval/actions/runs/36219655446) 通過套件與模擬器測試；同一功能版本的 [AI run 36219263373](https://github.com/Jordan9185/beartraval/actions/runs/36219263373) 與 [DB run 36219263368](https://github.com/Jordan9185/beartraval/actions/runs/36219263368) 通過。`def0c5e` 只補了本機暫存資料夾過濾與對應測試。
-- 雲端：`20260926000019`、`20260926000020` 已套用；`organize-inbox` 與更新後的 `delete-account` 顯示 ACTIVE 且啟用 JWT 驗證。未登入呼叫 `organize-inbox` 回 401。雲端兩帳號資料隔離、實際 AI 輸出、社群分享 payload、真機使用流程與 App 發布：**尚未驗證**。
+- 雲端：`20260926000019`～`20260926000022` 已套用；`organize-inbox` 與更新後的 `delete-account` 已部署且啟用 JWT 驗證。`21` 補背景工作讀取圖片紀錄的權限，`22` 讓 AI 額度紀錄接受 `inbox` 類型；雲端測試實際發現並修復這兩個缺口。
+- 兩個臨時帳號的雲端測試通過：文字加圖片得到 4 個候選、1 份模板；純圖片行程得到 2 個候選、1 份模板，圖片候選保持待確認。另驗證 owner-only 原文／候選／模板、明確確認後套用新 Trip、未定位停靠點、相同操作重送不重複建立。兩輪臨時帳號與資料均已刪除。
+- 社群 App 實際分享 payload、真機操作與簽章封存／TestFlight：**尚未驗證／完成**。本機缺少專案的 `DEVELOPMENT_TEAM` 與相符的佈署描述檔；已連接的 iPhone 在本輪編譯時處於鎖定狀態。
 
 ## 尚需驗證與限制
 
 1. 影片：分享擴充功能可保存實際提供的影片檔與 URL；本輪未開啟抽影格、OCR、語音轉錄和時間碼分析。只有不可讀影片連結時會保存來源並標資訊不足。需先完成 Threads／IG／相簿真機 payload 矩陣與品質、記憶體和處理時間測試。
+   文字／圖片首批版已移除純影片檔的 Share Extension 入口；社群提供的影片連結仍可當來源收件，不會冒稱已讀取影片內容。
 2. 大型附件或超過三張圖片：需在主 App 開啟後同步；十張圖片可送 AI，取得失敗的附件會在收件詳情標明。影片原檔目前留在 App Group，尚無自動清理期限；刪除帳號會清理。
 3. 無 Trip 也可先保存並整理；正式 Trip 套用需使用者確認。未定位地點不能算 Route Match；模板整組最佳日優化與影片行程自動拆天待後續工作。
 4. 個人清單目前以來源項目顯示。跨不同貼文的同店推薦次數、商品型號級實體去重與雲端多裝置影片原檔尚未完成。
-5. 下階段需要以兩個測試帳號驗證雲端來源隔離、AI 整理、個人／共同清單與模板套用；再收集 Threads／IG／相簿真機 payload 與操作證據，確認影片可得性和記憶體、延遲。完成這些驗證及 App 發布後，才可宣稱正式使用者可用。
+5. 雲端收件隔離、AI 整理與新 Trip 模板套用已用臨時帳號驗證；個人／共同清單的真機流程仍待驗。首批版還需簽章、裝置解鎖、Threads／IG／相簿的文字及圖片分享 payload 與操作證據，才能交付 TestFlight。影片可得性、記憶體與延遲留到影片階段；完成 App 發布前不能宣稱正式使用者可用。

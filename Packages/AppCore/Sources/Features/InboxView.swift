@@ -110,7 +110,7 @@ struct InboxView: View {
 }
 
 private struct InboxDetailView: View {
-    let record: InboxRecord
+    @State private var record: InboxRecord
     let repository: InboxRepository
     @State private var items: [InboxItemRecord] = []
     @State private var templates: [InboxTemplateRecord] = []
@@ -118,6 +118,11 @@ private struct InboxDetailView: View {
     @State private var resolving: InboxItemRecord?
     @State private var publishing: InboxItemRecord?
     @State private var errorMessage: String?
+
+    init(record: InboxRecord, repository: InboxRepository) {
+        _record = State(initialValue: record)
+        self.repository = repository
+    }
 
     var body: some View {
         List {
@@ -154,11 +159,11 @@ private struct InboxDetailView: View {
                 }
             }
             if record.status == "insufficient" {
-                Section { Text("資訊不足，來源已保留。可以稍後分享截圖或影片檔補充。") }
+                Section { Text("資訊不足，來源已保留。可以稍後分享有文字的截圖或補充說明。") }
             }
             if record.status == "failed" {
                 Section {
-                    Text("整理失敗：\(record.errorCode ?? "服務暫時無法使用")")
+                    Text("整理失敗：\(failureDescription)")
                     Button("重新整理") { Task { await retry() } }
                 }
             }
@@ -182,16 +187,33 @@ private struct InboxDetailView: View {
         .sheet(item: $publishing) { item in
             InboxPublishView(item: item, repository: repository) { publishing = nil }
         }
-        .task { await reload() }
+        .task { await watchAnalysis() }
         .refreshable { await reload() }
+    }
+
+    private var failureDescription: String {
+        switch record.errorCode {
+        case "rate_limited": "今日整理次數已達上限，請稍後重試"
+        default: "服務暫時無法使用，請稍後重試"
+        }
     }
 
     private func reload() async {
         do {
+            record = try await repository.capture(id: record.id) ?? record
             items = try await repository.listItems(captureID: record.id)
             templates = try await repository.listTemplates(captureID: record.id)
             errorMessage = nil
         } catch { errorMessage = "讀取結果失敗：\(error.localizedDescription)" }
+    }
+
+    private func watchAnalysis() async {
+        await reload()
+        for _ in 0..<30 where record.status == "saved" || record.status == "processing" {
+            guard !Task.isCancelled else { return }
+            try? await Task.sleep(for: .seconds(3))
+            await reload()
+        }
     }
 
     private func toggle(_ item: InboxItemRecord) async {
@@ -204,7 +226,11 @@ private struct InboxDetailView: View {
     }
 
     private func retry() async {
-        do { try await repository.requestAnalysis(captureID: record.id); errorMessage = nil }
+        do {
+            try await repository.requestAnalysis(captureID: record.id)
+            errorMessage = nil
+            await watchAnalysis()
+        }
         catch { errorMessage = "重試失敗：\(error.localizedDescription)" }
     }
 }

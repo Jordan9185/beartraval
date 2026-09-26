@@ -1,6 +1,7 @@
 -- 個人收件：去重、背景結果、權限與更正的 revision。
 set role authenticated;
 select tests.login('00000000-0000-0000-0000-00000000000a');
+select tests.ok(app.consume_ai_quota('inbox'), '收件整理可寫入自己的 AI 額度紀錄');
 
 select (app.save_inbox_capture(
   '11111111-1111-1111-1111-111111111111',
@@ -23,6 +24,8 @@ select tests.throws(
   'PT422', '不可登記其他帳號的圖片路徑');
 
 set role service_role;
+select tests.ok(has_table_privilege('service_role', 'app.inbox_assets', 'SELECT'),
+  '背景整理工作可讀取圖片中繼資料');
 select app.begin_inbox_analysis(:'capture_id') as attempt \gset
 select app.begin_inbox_analysis(:'capture_id') is null as running \gset
 select app.finish_inbox_analysis(:'capture_id', :'attempt',

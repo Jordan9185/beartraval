@@ -35,6 +35,7 @@ Deno.serve(async (req) => {
   if (!attempt) return json({ status: "processing" });
 
   const work = async () => {
+    let stage = "assets";
     const record = async (result: unknown, failure: string | null, model: string | null) => {
       const { error: saveError } = await admin.rpc("finish_inbox_analysis", {
         p_capture_id: captureId, p_attempt: attempt, p_result: result,
@@ -50,6 +51,7 @@ Deno.serve(async (req) => {
       const images: string[] = [];
       for (const asset of assets ?? []) {
         if (!asset.storage_path) continue;
+        stage = "download";
         const { data: blob, error: downloadError } = await admin.storage.from("inbox-images").download(asset.storage_path);
         if (downloadError || !blob) throw new Error("asset_unavailable");
         const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -69,15 +71,24 @@ Deno.serve(async (req) => {
       }
       const key = Deno.env.get("ANTHROPIC_API_KEY");
       if (!key) { await record(null, "missing_api_key", null); return; }
-      const { data: allowed } = await asUser.rpc("consume_ai_quota", { p_kind: "inbox" });
+      stage = "quota";
+      const { data: allowed, error: quotaError } = await asUser.rpc("consume_ai_quota", { p_kind: "inbox" });
+      if (quotaError) throw quotaError;
       if (allowed !== true) { await record(null, "rate_limited", null); return; }
+      stage = "model";
       const outcome = await organizeCapture(new Anthropic({ apiKey: key }),
         { title, rawText, imageBase64: images }, Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5");
+      stage = "save";
       await record(outcome.result, null, outcome.model);
       console.log("organize-inbox", { capture_id: captureId, status: "ready", items: outcome.result.items.length });
     } catch (failure) {
-      console.error("organize-inbox", { capture_id: captureId, error: failure instanceof Error ? failure.name : "unknown" });
-      try { await record(null, "provider_error", null); } catch { /* 下次可重試 */ }
+      const status = failure instanceof Anthropic.APIError ? failure.status : null;
+      const databaseCode = typeof failure === "object" && failure !== null && "code" in failure &&
+        typeof failure.code === "string" && /^[A-Z0-9]{5,12}$/.test(failure.code) ? failure.code : null;
+      const code = status ? `${stage}_http_${status}` : databaseCode ? `${stage}_${databaseCode}` : `${stage}_error`;
+      console.error("organize-inbox", { capture_id: captureId, stage, status,
+        database_code: databaseCode, error: failure instanceof Error ? failure.name : "unknown" });
+      try { await record(null, code, null); } catch { /* 下次可重試 */ }
     }
   };
   EdgeRuntime.waitUntil(work());
