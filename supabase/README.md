@@ -12,7 +12,7 @@
 
 ## 權限模型
 
-- 所有資料表在 `app` schema。用戶端只能 `select`，RLS 限制為該 Trip 的有效成員。
+- 所有資料表在 `app` schema。用戶端只能 `select`；Trip 資料依有效成員、Travel Inbox 依來源擁有者限制讀取。
 - 所有寫入都經由 RPC（`security definer`），在函式內檢查角色；直接 insert/update/delete 一律被拒。
 - 行程寫入帶 `expected_route_revision`，不符回 `STALE_REVISION`，不寫入任何資料。
 - 當日 `route_revision` 一改變（任何 RPC），觸發器就把該日未確認的 proposal 標為 `stale`。
@@ -21,7 +21,7 @@
 
 ## RPC
 
-依 `migrations/` 目前的定義整理（2026-09-26，含 `20260925000018_place_local_address.sql`）。參數加 `?` 表示有預設值可省略。
+依 `migrations/` 目前的定義整理（2026-09-26，含 `20260926000020_apply_inbox_template.sql`）。參數加 `?` 表示有預設值可省略。
 
 **行程與地點**
 
@@ -44,7 +44,19 @@
 | `begin_parse(import_id)` | 僅 service_role | 取得解析權，回傳這次解析的 attempt id；已有解析進行中（8 分鐘內）回 null |
 | `record_parse_progress(import_id, attempt, progress jsonb)` | 僅 service_role | 解析進度（等待畫面用）；只接受目前的 attempt |
 | `record_parse_result(import_id, attempt, status, result, error, model)` | 僅 service_role | 寫入解析結果；attempt 已被取代（原文已改、解析被重新認領）或已建立 Trip 時不寫入並回傳 false |
-| `consume_ai_quota(kind)` | 已登入 | AI 呼叫次數限制（`parse`／`ask`／`extract` 每小時、每天上限）；超過回 false |
+| `consume_ai_quota(kind)` | 已登入 | AI 呼叫次數限制（`parse`／`ask`／`extract`／`inbox` 每小時、每天上限）；超過回 false |
+
+**分享收件匣（個人資料）**
+
+| 函式 | 權限 | 說明 |
+|---|---|---|
+| `save_inbox_capture(client_capture_id, fingerprint, canonical_url, source_url, title, raw_text, unavailable_count?)` | 已登入 | 保存實際取得的來源；同帳號、同連結或同內容重送不覆寫原文與更正 |
+| `register_inbox_asset(capture_id, ordinal, kind, mime_type, byte_count, sha256, storage_path?)` | 來源擁有者 | 登記附件；目前只有圖片縮圖上傳私有 bucket，影片原檔留在裝置 |
+| `update_inbox_item(item_id, expected_revision, display_name?, archived?)` | 來源擁有者 | 更正候選名稱或撤銷個人清單項目；版本過期拒絕 |
+| `confirm_inbox_place(item_id, expected_revision, place_id)` | 來源擁有者 | 確認 MapKit 地點；未確認項目不參與路線 |
+| `update_inbox_template(template_id, expected_revision, title, draft)` | 來源擁有者 | 編輯無日期行程模板；版本過期拒絕 |
+| `apply_inbox_template(template_id, expected_template_revision, client_op_id, trip_id?, start_date?, time_zone?, expected_day_revisions?)` | 來源擁有者，既有 Trip 須 Owner／Editor | 使用者確認後原子建立或追加旅程；保留既有 Fixed Stop，新增項目為待定位文字，檢查模板與每日版本，重送冪等 |
+| `begin_inbox_analysis(capture_id)`／`finish_inbox_analysis(capture_id, attempt, result, error?, model?)` | 僅 service_role | 背景分析認領與落庫；過期 attempt 不能覆寫更正 |
 
 **變更提案（Route Match → 正式行程）**
 
@@ -105,7 +117,7 @@ SQLSTATE `PTnnn` 會讓 PostgREST 回傳 HTTP `nnn`：
 | PT404 | `NOT_FOUND`、`INVITE_INVALID` | 404 |
 | PT409 | `STALE_REVISION`、`ALREADY_COMMITTED`、`PROPOSAL_CLOSED`、`ALREADY_SCHEDULED`、`DUPLICATE_SAVED`、`ALREADY_RESOLVED` | 409 |
 | PT410 | `INVITE_EXPIRED`、`INVITE_REVOKED` | 410 |
-| PT422 | `INVALID_STOPS`、`STOP_NOT_IN_DAY`、`PLACE_UNRESOLVED`、`PLACE_NOT_FOUND`、`INVALID_PLACE`、`INVALID_DATES`、`INVALID_TIME_ZONE`、`DATE_OUTSIDE_TRIP`、`EMPTY_TEXT`、`INVALID_SAVED`、`INVALID_ITEM`、`EVIDENCE_REQUIRED`、`INVALID_IMAGE`、`INVALID_ROLE`、`INVALID_NAME`、`INVALID_KIND` | 422 |
+| PT422 | `INVALID_STOPS`、`STOP_NOT_IN_DAY`、`PLACE_UNRESOLVED`、`PLACE_NOT_FOUND`、`INVALID_PLACE`、`INVALID_DATES`、`INVALID_TIME_ZONE`、`DATE_OUTSIDE_TRIP`、`EMPTY_TEXT`、`INVALID_SAVED`、`INVALID_ITEM`、`EVIDENCE_REQUIRED`、`INVALID_IMAGE`、`INVALID_ROLE`、`INVALID_NAME`、`INVALID_KIND`、`INVALID_CAPTURE`、`INVALID_ASSET_PATH`、`INVALID_TEMPLATE`、`INVALID_REQUEST`、`DAY_UNASSIGNED`、`TRIP_DATE_REQUIRED`、`TRIP_TOO_SHORT` | 422 |
 
 ## 測試
 
@@ -145,7 +157,11 @@ supabase status     # 取得 anon key
 
 ## Edge Function：`delete-account`
 
-刪除呼叫者的帳號（App Review 要求）：先 `prepare_account_deletion`（擁有的 Trip 轉給其他成員或刪除、協作紀錄的作者清為 null），再 `auth.admin.deleteUser`。
+刪除呼叫者的帳號（App Review 要求）：先 `prepare_account_deletion`（擁有的 Trip 轉給其他成員或刪除、協作紀錄的作者清為 null），清理個人收件匣私有圖片，再 `auth.admin.deleteUser`。
+
+## Edge Function：`organize-inbox`
+
+以使用者 JWT 及 owner-only RLS 確認來源，背景讀取實際分享的文字與最多十張私有圖片縮圖，用 `ai/inbox-organize` 整理個人候選與行程模板。純連結、無可讀內容的影片不猜測畫面。分析結果只寫個人收件匣；套用正式旅程需使用者在 App 明確確認。缺少 `ANTHROPIC_API_KEY` 時標示失敗，來源保留可重試。
 
 ## iOS 整合測試
 
@@ -159,7 +175,7 @@ swift test --package-path Packages/AppCore
 
 ## 雲端專案（首爾）
 
-- 專案：`BeaRTravel`（`dchzimksdgxzjvzswzrh`，ap-northeast-2）。已套用全部 migration、部署 4 個 Edge Functions、以 `supabase config push` 開放 `app` schema、關閉 Email 確認、密碼最短 8。
+- 專案：`BeaRTravel`（`dchzimksdgxzjvzswzrh`，ap-northeast-2）。原有 migration 與 Edge Functions 已部署；本次新增的 `20260926000019`／`20` 與 `organize-inbox` 是否部署，以部署紀錄和雲端驗證為準，不能僅憑本機檔案推定。既有設定已開放 `app` schema、關閉 Email 確認、密碼最短 8。
 - 更新：`supabase db push`、`supabase functions deploy`；`supabase config push` 會把本機 `config.toml` 的 auth 設定一併推上去，推之前先看差異。
 - App：Release build 連雲端，網址與 anon key 放在 `Config/Cloud.xcconfig.local`（gitignore）；Debug build 連本機。
 - AI：`supabase secrets set ANTHROPIC_API_KEY=...` 後，匯入解析與 AI 助手才會運作。

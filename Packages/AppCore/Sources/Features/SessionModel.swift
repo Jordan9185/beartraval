@@ -1,6 +1,7 @@
 import AppCore
 import Foundation
 import Observation
+import ShareCore
 import Supabase
 
 /// 登入狀態。App 與 Share Extension 透過共用 Keychain 讀到同一個 session。
@@ -26,6 +27,8 @@ public final class SessionModel {
     public let placeSearch: any PlaceSearching
 
     public let network = NetworkMonitor()
+    private var syncingInbox = false
+    private var resolvingInbox = false
 
     public init(client: SupabaseClient, routingProvider: any RoutingProvider = InstrumentedProvider(AppleMapKitProvider())) {
         self.client = client
@@ -80,6 +83,37 @@ public final class SessionModel {
 
     public func flushOfflineQueue() async {
         _ = await offlineQueue.flush(using: trips)
+    }
+
+    /// 登入與恢復連線時重送 App Group 收件；換帳號或未確認歸屬的內容不會上傳。
+    public func syncInboxCaptures() async {
+        guard !syncingInbox, network.isOnline, let me = trips.currentUserID,
+              let store = InboxCaptureStore.shared() else { return }
+        syncingInbox = true
+        defer { syncingInbox = false }
+        let repository = InboxRepository(client: client)
+        for capture in store.all() where capture.ownerHint == me && capture.syncedRemoteID == nil {
+            do { _ = try await repository.sync(capture, from: store) }
+            catch { /* 保留本機檔，收件匣提供重試與狀態。 */ }
+        }
+    }
+
+    /// 只有 MapKit 搜到唯一、名稱明確相符的分店才自動定位；其他候選留給使用者。
+    public func resolveInboxPlaces() async {
+        guard !resolvingInbox, network.isOnline else { return }
+        resolvingInbox = true
+        defer { resolvingInbox = false }
+        let inbox = InboxRepository(client: client)
+        guard let items = try? await inbox.pendingPlaces() else { return }
+        for item in items {
+            let lookup = await placeSearch.lookup(item.displayName, around: nil, limit: 5)
+            guard case .found(let candidates) = lookup else { continue }
+            let source = ParsedStop(sourceExcerpt: item.sourceSpan, placeName: item.displayName,
+                                    confidence: item.confidence)
+            guard let match = PlaceMatch.confident(for: source, in: candidates),
+                  let place = try? await trips.upsertPlace(match.draft) else { continue }
+            _ = try? await inbox.confirmPlace(item, placeID: place.id)
+        }
     }
 
     public func signOut() async {

@@ -36,7 +36,17 @@ public struct RootView: View {
                             tripsChanged(open: tripID, showToday: true)
                         }
                     }
-                    .task { await session.flushOfflineQueue() }
+                    .task {
+                        await session.flushOfflineQueue()
+                        await session.syncInboxCaptures()
+                        await session.resolveInboxPlaces()
+                        // 雲端工作在分享後才完成時，再查兩次；離開畫面就停止。
+                        for _ in 0..<2 {
+                            try? await Task.sleep(for: .seconds(12))
+                            if Task.isCancelled { break }
+                            await session.resolveInboxPlaces()
+                        }
+                    }
             }
         } else {
             ContentUnavailableView("後端設定缺漏", systemImage: "exclamationmark.triangle",
@@ -57,7 +67,12 @@ public struct RootView: View {
                 }
             }
             .onChange(of: session.network.isOnline) { _, online in
-                if online { Task { await session.flushOfflineQueue(); await store?.reload() } }
+                if online { Task {
+                    await session.flushOfflineQueue()
+                    await session.syncInboxCaptures()
+                    await session.resolveInboxPlaces()
+                    await store?.reload()
+                } }
             }
     }
 

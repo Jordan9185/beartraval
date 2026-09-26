@@ -433,3 +433,7 @@ verify_jwt = true
 # 從分享的貼文辨識商品（購物清單）；只回傳草稿，不寫入。
 [functions.extract-products]
 verify_jwt = true
+
+# 分享收件的個人 AI 整理；快速回覆後在 Edge Runtime 背景完成。
+[functions.organize-inbox]
+verify_jwt = true

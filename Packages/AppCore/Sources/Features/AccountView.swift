@@ -92,7 +92,9 @@ struct AccountView: View {
         deleting = true
         defer { deleting = false }
         do {
+            let deletedUserID = session.trips.currentUserID
             try await session.trips.deleteAccount()
+            if let deletedUserID { InboxCaptureStore.shared()?.removeAll(for: deletedUserID) }
             await session.signOut()
             dismiss()
         } catch let e as BackendError {

@@ -30,6 +30,11 @@ struct ShoppingTab: View {
             }
             .navigationTitle("購物清單")
             .toolbar {
+                ToolbarItem(placement: .secondaryAction) {
+                    NavigationLink {
+                        PersonalInboxItemsView(session: session, kind: "product")
+                    } label: { Label("個人想買", systemImage: "person.crop.circle") }
+                }
                 if trips.count > 1 {
                     ToolbarItem(placement: .automatic) {
                         Picker("旅程", selection: $tripID) { ForEach(trips) { Text($0.name).tag(Optional($0.id)) } }

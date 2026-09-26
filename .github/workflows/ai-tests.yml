@@ -63,6 +63,22 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+  inbox-organize:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ai/inbox-organize
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ai/inbox-organize/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
   # The Edge Functions import the ai/ packages by relative path; type-check them
   # together with Deno, each with its own import map (deno.json).
   edge-functions:

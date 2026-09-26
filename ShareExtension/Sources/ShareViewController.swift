@@ -3,7 +3,7 @@ import ShareCore
 import SwiftUI
 import UIKit
 
-/// 分享到 BearTravel：最小閉環（WP6）。DEBUG build 可另開 Payload Inspector（S2）。
+/// 分享到 BeaRTravel：先完整收件，之後在主 App 自動整理。
 final class ShareViewController: UIViewController {
     private let model = ShareModel()
 
@@ -25,62 +25,77 @@ final class ShareViewController: UIViewController {
 @Observable
 final class ShareModel {
     var record: PayloadRecord?
-    let repository = BackendConfig.fromBundle().map { TripRepository(client: Backend.makeClient($0)) }
-    let matcher = RouteMatcher(provider: AppleMapKitProvider())
+    var capture: InboxCapture?
+    var cloudSynced = false
+    var errorMessage: String?
+    let repository = BackendConfig.fromBundle().map { InboxRepository(client: Backend.makeClient($0)) }
+    private var inputItems: [NSExtensionItem] = []
 
     func start(_ items: [NSExtensionItem]) {
-        // 分享面板要快：每個型別最多等 5 秒（同時載入）。
-        Task { record = await PayloadInspector.inspect(items, timeout: 5) }
+        inputItems = items
+        Task {
+            errorMessage = nil
+            cloudSynced = false
+            do {
+                guard let store = InboxCaptureStore.shared() else { throw InboxCaptureError.appGroupUnavailable }
+                var owner = repository?.currentUserID
+                if owner == nil, let repository, let session = try? await repository.client.auth.session {
+                    owner = session.user.id
+                }
+                let saved = try await store.capture(items, ownerHint: owner)
+                // 純文字／連結可直接送入雲端背景工作。多媒體先保留本機，避免分享面板等待大檔上傳。
+                if let repository, saved.ownerHint != nil,
+                   !saved.assets.contains(where: \.isVideo), saved.assets.count <= 3 {
+                    let upload = Task { try await repository.sync(saved, from: store) }
+                    let deadline = Task {
+                        try? await Task.sleep(for: .seconds(6))
+                        upload.cancel()
+                    }
+                    cloudSynced = (try? await upload.value) != nil
+                    deadline.cancel()
+                }
+                capture = saved
+            } catch {
+                errorMessage = "無法保存這次分享：\(error.localizedDescription)"
+            }
+        }
     }
+
+    func inspect() {
+        Task { record = await PayloadInspector.inspect(inputItems, timeout: 5) }
+    }
+
+    func retry() { start(inputItems) }
 }
 
 struct ShareRootView: View {
     let model: ShareModel
     let finish: () -> Void
-    @State private var done: String?
     @State private var showsInspector = false
-    @State private var mode: Mode = .place
-
-    /// 分享進來的是地點（收藏／加入行程）還是想買的商品（購物清單）；兩個清單分開（規格規則 5）。
-    enum Mode: String, CaseIterable {
-        case place = "地點"
-        case product = "商品"
-    }
 
     var body: some View {
         NavigationStack {
             Group {
-                if let done {
-                    ContentUnavailableView(done, systemImage: "checkmark.circle")
-                        .task { try? await Task.sleep(for: .seconds(1.2)); finish() }
-                } else if let record = model.record {
-                    let content = ShareContent(record: record)
-                    VStack(spacing: 0) {
-                        Picker("類型", selection: $mode) {
-                            ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                        .padding(.horizontal)
-                        .padding(.vertical, 8)
-                        switch mode {
-                        case .place:
-                            ShareFlowView(content: content, repository: model.repository, matcher: model.matcher,
-                                          placeSearch: MapKitPlaceSearch(),
-                                          saveDraft: { try ShareDraftStore.shared()?.save(ShareDraft(content: content)) }) { outcome in
-                                done = switch outcome {
-                                case .added: "已加入行程"
-                                case .saved(let duplicate): duplicate ? "已在收藏清單，已標記想去" : "已加入收藏"
-                                case .draftSaved: "已存成草稿，開啟 App 後繼續"
-                                }
-                            }
-                        case .product:
-                            ProductImportView(content: content, repository: model.repository) { count in
-                                done = "已加入購物清單（\(count) 項）"
-                            }
-                        }
+                if let capture = model.capture {
+                    ContentUnavailableView {
+                        Label(model.cloudSynced ? "已同步，正在整理" : "已保存在此裝置", systemImage: "checkmark.circle")
+                    } description: {
+                        Text(capture.ownerHint == nil
+                             ? "下次登入 App 時確認歸屬，即可自動整理。"
+                             : model.cloudSynced ? "已同步，正在自動整理。" : "開啟 BeaRTravel 後會同步並整理，不需要先選旅程或類別。")
+                    }
+                    .task { try? await Task.sleep(for: .seconds(1.2)); finish() }
+                } else if let errorMessage = model.errorMessage {
+                    ContentUnavailableView {
+                        Label("分享未保存", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(errorMessage)
+                    } actions: {
+                        Button("重試") { model.retry() }
+                            .buttonStyle(.borderedProminent)
                     }
                 } else {
-                    ProgressView("讀取分享內容…")
+                    ProgressView("保存分享內容…")
                 }
             }
             .navigationTitle("BeaRTravel")
@@ -90,12 +105,13 @@ struct ShareRootView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("取消", action: finish) }
                 #if DEBUG
                 ToolbarItem(placement: .primaryAction) {
-                    Button("分享紀錄", systemImage: "ladybug") { showsInspector = true }.disabled(model.record == nil)
+                    Button("分享紀錄", systemImage: "ladybug") { model.inspect(); showsInspector = true }
                 }
                 #endif
             }
             .sheet(isPresented: $showsInspector) {
                 if let record = model.record { InspectorSheet(record: record) }
+                else { ProgressView("讀取分享紀錄…") }
             }
         }
     }

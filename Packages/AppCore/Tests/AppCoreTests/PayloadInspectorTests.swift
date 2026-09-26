@@ -128,6 +128,8 @@ struct ScreenshotTextTests {
 #if canImport(AppKit)
 import AppKit
 
+// CI 的無畫面 macOS runner 可能讓 Vision 的三輪辨識無限等待；裝置／本機仍執行這組整合測試。
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["CI"] == nil, "Vision OCR 需在有畫面的裝置驗證"))
 struct ScreenshotOCRTests {
     func render(_ lines: [String]) throws -> Data {
         let size = NSSize(width: 1000, height: 120 * lines.count + 80)

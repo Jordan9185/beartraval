@@ -76,6 +76,11 @@ struct SavedView: View {
             .navigationTitle("收藏")
             // 換旅程與今天、購物一樣放在工具列。
             .toolbar {
+                ToolbarItem(placement: .secondaryAction) {
+                    NavigationLink {
+                        PersonalInboxItemsView(session: session, kind: "place")
+                    } label: { Label("個人收藏", systemImage: "person.crop.circle") }
+                }
                 if trips.count > 1 {
                     ToolbarItem(placement: .automatic) {
                         Picker("旅程", selection: $tripID) {

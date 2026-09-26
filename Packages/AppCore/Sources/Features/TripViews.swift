@@ -13,6 +13,7 @@ struct TripListView: View {
     @State private var showsCreate = false
     @State private var showsJoin = false
     @State private var showsAccount = false
+    @State private var showsInbox = false
 
     var body: some View {
         NavigationStack {
@@ -55,11 +56,16 @@ struct TripListView: View {
             .toolbar {
                 Button("建立旅程", systemImage: "plus") { showsCreate = true }
                 Menu("更多", systemImage: "ellipsis.circle") {
+                    Button("分享收件匣", systemImage: "tray") { showsInbox = true }
                     Button("加入好友的旅程", systemImage: "person.badge.plus") { showsJoin = true }
                     Button("帳號設定", systemImage: "person.crop.circle") { showsAccount = true }
                 }
             }
             .sheet(isPresented: $showsAccount) { AccountView(session: session) }
+            .sheet(isPresented: $showsInbox) { InboxView(session: session) }
+            .onChange(of: showsInbox) { _, open in
+                if !open { Task { await reload(); onTripsChanged(nil, false) } }
+            }
             .sheet(isPresented: $showsJoin) {
                 JoinTripView(session: session, initialToken: nil) { tripID in
                     Task { await reload() }
