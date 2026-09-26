@@ -21,7 +21,7 @@
 
 ## RPC
 
-依 `migrations/` 目前的定義整理（2026-09-25，含 `20260925000016_review_low_fixes.sql`）。參數加 `?` 表示有預設值可省略。
+依 `migrations/` 目前的定義整理（2026-09-26，含 `20260925000018_place_local_address.sql`）。參數加 `?` 表示有預設值可省略。
 
 **行程與地點**
 
@@ -31,7 +31,7 @@
 | `commit_itinerary(day_id, expected_route_revision, stops jsonb)` | Owner／Editor | 以有序清單取代當日行程；revision 與 stops 皆必填；回傳新 route_revision |
 | `update_day(day_id, time_zone?, transport_mode?)` | Owner／Editor | 每日時區與交通方式；有變更時 route_revision +1（該日未確認的 proposal 變 stale） |
 | `get_trip_changes(trip_id, since_revision)` | 成員 | 重連後補拉錯過的變更 |
-| `upsert_place(provider, provider_place_id, name, latitude, longitude, name_local?, address?, country_code?, name_zh?)` | 已登入 | 註冊已確認的 POI（provider 限 `apple_mapkit`／`apple_maps_server`）。同一 id 已存在時回傳既有資料；只在沒有其他 Trip 使用時補上缺少的當地名／中文名；座標與既有資料相差超過 1 km 時另建一筆 |
+| `upsert_place(provider, provider_place_id, name, latitude, longitude, name_local?, address?, country_code?, name_zh?, address_local?)` | 已登入 | 註冊已確認的 POI（provider 限 `apple_mapkit`／`apple_maps_server`）。同一 id 已存在時回傳既有資料；只在沒有其他 Trip 使用時補上缺少的當地名／中文名／當地文字地址（`address_local`，給計程車卡片與 Naver／Kakao 用；Apple 回傳的 `address` 會隨手機語言變成中文）；座標與既有資料相差超過 1 km 時另建一筆 |
 | `delete_trip(trip_id)` | Owner | 刪除 Trip（含匯入原文、AI 紀錄） |
 
 **文字匯入（AI 草稿）**
