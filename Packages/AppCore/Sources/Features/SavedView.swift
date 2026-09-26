@@ -8,6 +8,7 @@ struct SavedView: View {
     let session: SessionModel
     var preferredTripID: UUID? = nil
     var onOpenDay: (UUID, UUID) -> Void = { _, _ in }
+    var onOpenShopping: () -> Void = {}
     var onTripSelected: (UUID?) -> Void = { _ in }
     @State private var trips: [Trip] = []
     @State private var tripID: UUID?
@@ -27,6 +28,7 @@ struct SavedView: View {
     @State private var personalItems: [InboxItemRecord] = []
     @State private var candidateItems: [InboxItemRecord] = []
     @State private var recentCaptures: [InboxRecord] = []
+    @State private var recentProducts: [InboxItemRecord] = []
     @State private var localCaptures = 0
     @State private var inboxError: String?
     @State private var discoveringPlaces = false
@@ -44,14 +46,24 @@ struct SavedView: View {
                             Button("\(localCaptures) 份分享保存在此裝置 · 查看同步狀態") { showsInbox = true }
                         }
                         ForEach(recentCaptures.prefix(3)) { capture in
-                            Button {
-                                showsInbox = true
-                            } label: {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(capture.title ?? capture.publicText.map { String($0.prefix(40)) }
-                                         ?? capture.sourceURL.flatMap { URL(string: $0)?.host } ?? "分享內容")
-                                        .lineLimit(1)
-                                    Text(inboxStatus(capture.status)).font(.caption).foregroundStyle(.secondary)
+                            if let product = recentProducts.first(where: { $0.captureID == capture.id }) {
+                                Button(action: onOpenShopping) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(product.displayName).lineLimit(2)
+                                        Label("已放入購物清單 · 點此查看", systemImage: "bag")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            } else {
+                                Button {
+                                    showsInbox = true
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(capture.title ?? capture.publicText.map { String($0.prefix(40)) }
+                                             ?? capture.sourceURL.flatMap { URL(string: $0)?.host } ?? "分享內容")
+                                            .lineLimit(1)
+                                        Text(inboxStatus(capture.status)).font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }
@@ -291,6 +303,7 @@ struct SavedView: View {
             async let candidates = inbox.listPersonalCandidates(kind: "place")
             async let captures = inbox.listCaptures()
             (personalItems, candidateItems, recentCaptures) = try await (personal, candidates, captures)
+            recentProducts = (try? await inbox.listPersonalItems(kind: "product")) ?? []
             inboxError = nil
         } catch {
             inboxError = "分享內容暫時無法讀取：\(userMessage(for: error))"

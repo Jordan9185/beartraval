@@ -7,6 +7,7 @@ import SwiftUI
 struct ShoppingTab: View {
     let session: SessionModel
     var preferredTripID: UUID? = nil
+    var isSelected = false
     var onOpenDay: (UUID, UUID) -> Void = { _, _ in }
     var onTripSelected: (UUID?) -> Void = { _ in }
     private struct ImportRequest: Identifiable {
@@ -93,6 +94,9 @@ struct ShoppingTab: View {
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { Task { await refreshPersonalUntilSettled() } }
+            }
+            .onChange(of: isSelected) { _, selected in
+                if selected { Task { await refreshPersonalUntilSettled() } }
             }
             .onChange(of: preferredTripID) { _, selected in
                 if let selected, selected != tripID, trips.contains(where: { $0.id == selected }) { tripID = selected }

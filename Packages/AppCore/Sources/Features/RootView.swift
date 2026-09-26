@@ -101,12 +101,14 @@ public struct RootView: View {
                           store?.selectedTripID = tripID
                           store?.requestedDayID = dayID
                           tab = .today
+                      }, onOpenShopping: {
+                          tab = .shopping
                       }) { selected in
                 store?.selectedTripID = selected
             }
                 .tabItem { Label("收藏", systemImage: "bookmark") }
                 .tag(Tab.saved)
-            ShoppingTab(session: session, preferredTripID: store?.selectedTripID,
+            ShoppingTab(session: session, preferredTripID: store?.selectedTripID, isSelected: tab == .shopping,
                         onOpenDay: { tripID, dayID in
                             store?.selectedTripID = tripID
                             store?.requestedDayID = dayID
