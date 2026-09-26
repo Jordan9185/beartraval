@@ -198,7 +198,12 @@ struct SavedView: View {
                 }
             }
             .sheet(item: $detail) { entry in
-                SavedDetailView(entry: entry, me: session.trips.currentUserID)
+                SavedDetailView(entry: entry, me: session.trips.currentUserID, canEdit: myRole?.canEdit == true,
+                                tripCountry: trips.first(where: { $0.id == tripID }).flatMap {
+                                    LocalMapCountry.guess(name: $0.name, timeZone: $0.timeZone)
+                                }, repository: session.trips, discoveryRepository: inbox) {
+                    Task { await reload() }
+                }
                     .presentationDetents([.medium, .large])
             }
             .sheet(item: $resolving) { entry in
@@ -402,6 +407,17 @@ struct SavedRow: View {
 struct SavedDetailView: View {
     let entry: SavedEntry
     let me: UUID?
+    let canEdit: Bool
+    let tripCountry: String?
+    let repository: TripRepository
+    let discoveryRepository: InboxRepository
+    let onChanged: () -> Void
+    @State private var addressHint: String?
+    @State private var addressSourceURL: String?
+    @State private var candidates: [DiscoveredPlace] = []
+    @State private var searchingAddress = false
+    @State private var addressMessage: String?
+    @State private var didSearchAddress = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -409,16 +425,39 @@ struct SavedDetailView: View {
             Form {
                 Section {
                     Text(entry.title).font(.title3.weight(.semibold))
-                    if let address = entry.addressLabel { Text(address).font(.subheadline).textSelection(.enabled) }
+                    if let address = addressHint ?? entry.addressLabel {
+                        Text(entry.isConfirmed ? address : "地址線索：\(address)")
+                            .font(.subheadline).textSelection(.enabled)
+                    }
                     Text(SavedRow.status(entry, me: me)).font(.caption).foregroundStyle(.secondary)
                     if !entry.isConfirmed {
                         Label("未定位，不計入路線", systemImage: "mappin.slash").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if searchingAddress { ProgressView("正在補查韓文地址…") }
+                    if let addressMessage { Text(addressMessage).font(.caption).foregroundStyle(.secondary) }
+                }
+                if !candidates.isEmpty {
+                    Section("可能的店家地址") {
+                        ForEach(candidates) { candidate in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(candidate.koreanName ?? candidate.name).font(.subheadline.weight(.semibold))
+                                if let address = candidate.addressLocal {
+                                    Text(address).font(.caption).textSelection(.enabled)
+                                    Button("帶入這個地址") { Task { await accept(candidate) } }
+                                        .buttonStyle(.bordered)
+                                }
+                                LocalMapSearchButtons(name: candidate.searchQuery, countryCode: "KR")
+                                if let url = URL(string: candidate.sourceURL), url.scheme == "https" {
+                                    Link("查看網頁來源", destination: url).font(.caption)
+                                }
+                            }
+                        }
                     }
                 }
                 if let source = entry.source, let url = source.url.flatMap(URL.init(string:)) {
                     Section("來源") { Link(url.host ?? url.absoluteString, destination: url) }
                 }
-                if let source = entry.saved.addressSourceURL.flatMap(URL.init(string:)), source.scheme == "https" {
+                if let source = (addressSourceURL ?? entry.saved.addressSourceURL).flatMap(URL.init(string:)), source.scheme == "https" {
                     Section("地址查找依據") { Link(source.host ?? "查看網頁來源", destination: source) }
                 }
                 Section {
@@ -426,9 +465,9 @@ struct SavedDetailView: View {
                         NavigateButton(destination: place.mapPoint, mode: .walking)
                         TaxiCardButton(place: place, fallbackChineseLabel: entry.saved.rawLabel)
                     } else {
-                        let country = LocalMapCountry.guess(name: entry.saved.rawLabel, timeZone: nil)
+                        let country = tripCountry ?? LocalMapCountry.guess(name: entry.saved.rawLabel, timeZone: nil)
                         TaxiCardButton(unlocatedName: entry.saved.rawLabel, countryCode: country)
-                        LocalMapSearchButtons(name: [entry.saved.rawLabel, entry.saved.addressHint].compactMap { $0 }.joined(separator: " "), countryCode: country)
+                        LocalMapSearchButtons(name: [entry.saved.rawLabel, addressHint ?? entry.saved.addressHint].compactMap { $0 }.joined(separator: " "), countryCode: country)
                     }
                 }
                 if let place = entry.place, place.isInKorea {
@@ -440,6 +479,47 @@ struct SavedDetailView: View {
             .navigationTitle("收藏")
             .navigationBarTitleDisplayModeInline()
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            .task { await discoverMissingAddress() }
+        }
+    }
+
+    private func discoverMissingAddress() async {
+        guard !didSearchAddress, canEdit, !entry.isConfirmed, entry.addressLabel == nil,
+              (tripCountry ?? LocalMapCountry.guess(name: entry.saved.rawLabel, timeZone: nil)) == "KR" else { return }
+        didSearchAddress = true
+        searchingAddress = true
+        defer { searchingAddress = false }
+        do {
+            let found = try await discoveryRepository.discoverPlaces(query: entry.saved.rawLabel,
+                context: "韓國旅程。\(entry.source?.summary ?? "")")
+            let addressed = found.filter { $0.addressLocal != nil }
+            if addressed.count == 1, let only = addressed.first {
+                await accept(only)
+            } else if addressed.isEmpty {
+                addressMessage = "目前沒有可核對的地址線索，可稍後再補定位。"
+            } else {
+                candidates = Array(addressed.prefix(3))
+                addressMessage = "有多間可能的店，請核對後選擇地址。"
+            }
+        } catch let error as PlaceDiscoveryError {
+            addressMessage = error.userMessage
+        } catch {
+            addressMessage = "地址暫時無法查找：\(userMessage(for: error))"
+        }
+    }
+
+    private func accept(_ candidate: DiscoveredPlace) async {
+        guard let address = candidate.addressLocal else { return }
+        do {
+            let source = URL(string: candidate.sourceURL)?.scheme == "https" ? candidate.sourceURL : nil
+            try await repository.setSavedAddressHint(savedID: entry.id, address: address, sourceURL: source)
+            addressHint = address
+            addressSourceURL = source
+            candidates = []
+            addressMessage = "已保存地址線索；地圖定位仍待確認。"
+            onChanged()
+        } catch {
+            addressMessage = "地址暫時無法保存：\(userMessage(for: error))"
         }
     }
 }
