@@ -152,7 +152,7 @@ public struct ProductImportView: View {
                 Text("只加入你勾選的項目；是否有賣、有沒有庫存要另外確認。")
             }
 
-            if trips.count > 1 {
+            if trips.count > 1 && !trips.contains(where: { $0.id == preferredTripID }) {
                 Picker("旅程", selection: $tripID) {
                     ForEach(trips) { Text($0.name).tag(Optional($0.id)) }
                 }

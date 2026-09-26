@@ -316,7 +316,7 @@ public struct ShareFlowView: View {
 
     private var tripSection: some View {
         Group {
-            if trips.count > 1 {
+            if trips.count > 1 && !trips.contains(where: { $0.id == preferredTripID }) {
                 Section("加入哪個旅程") {
                 Picker("旅程", selection: $tripID) {
                     ForEach(trips) { Text($0.name).tag(Optional($0.id)) }

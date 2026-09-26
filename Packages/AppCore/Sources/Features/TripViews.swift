@@ -52,6 +52,7 @@ struct TripListView: View {
                     trips.removeAll { $0.id == trip.id }
                     onTripsChanged(nil, false)
                 }
+                .onAppear { onTripsChanged(trip.id, false) }
             }
             .toolbar {
                 Button("建立旅程", systemImage: "plus") { showsCreate = true }
