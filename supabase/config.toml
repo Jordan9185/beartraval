@@ -437,3 +437,6 @@ verify_jwt = true
 # 分享收件的個人 AI 整理；快速回覆後在 Edge Runtime 背景完成。
 [functions.organize-inbox]
 verify_jwt = true
+
+[functions.discover-places]
+verify_jwt = true

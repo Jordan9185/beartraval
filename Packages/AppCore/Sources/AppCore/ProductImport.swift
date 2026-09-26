@@ -11,16 +11,22 @@ public struct ExtractedProduct: Decodable, Hashable, Sendable, Identifiable {
     public var brand: String?
     public var variant: String?
     public var searchQuery: String?
+    /// 分享內容提到的店名線索，並非販售或庫存證據。
+    public var storeHint: String?
+    public var storeEvidence: String?
     /// 引用的貼文文字，或 "image"。
     public var evidence: String
     public var confidence: String
 
     public init(name: String, brand: String? = nil, variant: String? = nil, searchQuery: String? = nil,
+                storeHint: String? = nil, storeEvidence: String? = nil,
                 evidence: String = "image", confidence: String = "high") {
         self.name = name
         self.brand = brand
         self.variant = variant
         self.searchQuery = searchQuery
+        self.storeHint = storeHint
+        self.storeEvidence = storeEvidence
         self.evidence = evidence
         self.confidence = confidence
     }
@@ -28,6 +34,8 @@ public struct ExtractedProduct: Decodable, Hashable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case name, brand, variant, evidence, confidence
         case searchQuery = "search_query"
+        case storeHint = "store_hint"
+        case storeEvidence = "store_evidence"
     }
 
     /// 購物清單上的名稱：品牌沒寫在名稱裡時補在前面，規格（色號、尺寸）放後面。

@@ -15,6 +15,7 @@ public struct ShareFlowView: View {
     let matcher: RouteMatcher
     let placeSearch: any PlaceSearching
     let saveDraft: (() throws -> Void)?
+    let discoveryRepository: InboxRepository?
     let onFinish: (Outcome) -> Void
 
     @State private var analysis: ShareAnalysis
@@ -26,6 +27,9 @@ public struct ShareFlowView: View {
     /// 截圖內容看起來是哪個國家（可修改）。
     @State private var country: String?
     @State private var readingScreenshot = false
+    @State private var discovered: [DiscoveredPlace] = []
+    @State private var discovering = false
+    @State private var discoveryMessage: String?
     @State private var query: String
     @State private var category: SavedCategory = .place
     /// 使用者自己選過類別後，不再用截圖文字或店家類型覆蓋。
@@ -46,11 +50,13 @@ public struct ShareFlowView: View {
     @State private var busy = false
 
     public init(content: ShareContent, repository: TripRepository?, matcher: RouteMatcher, placeSearch: any PlaceSearching,
-                saveDraft: (() throws -> Void)?, onFinish: @escaping (Outcome) -> Void) {
+                saveDraft: (() throws -> Void)?, discoveryRepository: InboxRepository? = nil,
+                onFinish: @escaping (Outcome) -> Void) {
         self.repository = repository
         self.matcher = matcher
         self.placeSearch = placeSearch
         self.saveDraft = saveDraft
+        self.discoveryRepository = discoveryRepository
         self.onFinish = onFinish
         let analysis = ShareAnalysis(content)
         _analysis = State(initialValue: analysis)
@@ -78,6 +84,7 @@ public struct ShareFlowView: View {
                     }
                 }
             } else {
+                discoverySection
                 placeSection
                 screenshotSuggestions
                 tripSection
@@ -175,6 +182,45 @@ public struct ShareFlowView: View {
     static let countries: [(code: String, name: String)] = [("KR", "韓國"), ("JP", "日本"), ("TW", "台灣"), ("HK", "香港")]
 
     @ViewBuilder
+    private var discoverySection: some View {
+        if screenshot != nil {
+            if discovering { ProgressView("AI 正在查韓文店名與地址…") }
+            if let discoveryMessage { Text(discoveryMessage).font(.caption).foregroundStyle(.secondary) }
+            if !discovered.isEmpty {
+                Section {
+                    ForEach(discovered) { suggestion in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(suggestion.koreanName ?? suggestion.name).font(.headline)
+                            if let address = suggestion.addressLocal {
+                                Text("韓文地址線索：\(address)").textSelection(.enabled)
+                            }
+                            Text(suggestion.reason).font(.caption).foregroundStyle(.secondary)
+                            LocalMapSearchButtons(name: suggestion.searchQuery, countryCode: "KR")
+                            if let url = URL(string: suggestion.sourceURL), url.scheme == "https" {
+                                Link("查看網路來源", destination: url).font(.caption)
+                            }
+                            Button("以這間店名查行程定位") {
+                                query = suggestion.searchQuery
+                                if let address = suggestion.addressLocal { screenshotAddress = address }
+                                country = "KR"
+                                Task { await search() }
+                            }
+                        }
+                    }
+                    Button("重新查韓文店名與地址") { Task { await discoverScreenshot() } }
+                } header: {
+                    Text("AI 找到的韓國店家候選")
+                } footer: {
+                    Text("地址只顯示網頁來源明示的原文；請在 Naver／Kakao 核對分店。行程定位仍須選定地圖點。")
+                }
+            }
+            if !discovering && discovered.isEmpty && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button("用目前文字查韓文店名與地址") { Task { await discoverScreenshot() } }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var placeSection: some View {
         Section {
             if screenshot != nil {
@@ -187,6 +233,9 @@ public struct ShareFlowView: View {
                 Picker("國家／地區", selection: $country) {
                     Text("看不出來").tag(String?.none)
                     ForEach(Self.countries, id: \.code) { Text($0.name).tag(Optional($0.code)) }
+                }
+                if country == "KR" && discovered.isEmpty && !query.isEmpty {
+                    LocalMapSearchButtons(name: query, countryCode: "KR")
                 }
             } else {
                 PlaceSearchField(text: $query) { Task { await search() } }
@@ -207,7 +256,8 @@ public struct ShareFlowView: View {
                 }
             }
             if searched && candidates.isEmpty {
-                Text("Apple 地圖找不到；仍可先收藏名稱，之後再定位。").font(.caption).foregroundStyle(.secondary)
+                Text("地圖暫時找不到可確認的定位點；上方仍可查看韓文店名、地址和在地地圖。")
+                    .font(.caption).foregroundStyle(.secondary)
                 if !query.isEmpty {
                     LocalMapSearchButtons(name: query, countryCode: country ?? LocalMapCountry.guess(name: query + screenshotAddress, timeZone: nil))
                 }
@@ -216,7 +266,7 @@ public struct ShareFlowView: View {
                 Button("取消選取「\(selected.displayTitle)」", role: .cancel) { toggle(selected) }
             }
         } header: {
-            if searched { Text("Apple 地圖候選") }
+            if searched { Text("供行程定位的地圖候選") }
         } footer: {
             if selected == nil && !candidates.isEmpty { Text("請選擇正確的店家或分店；再點一次可以取消。") }
         }
@@ -340,6 +390,7 @@ public struct ShareFlowView: View {
                 .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
             if let best = guess.name ?? guess.address { query = best }
             readingScreenshot = false
+            if country == "KR" || country == nil { Task { await discoverScreenshot() } }
         } else {
             readingScreenshot = false
         }
@@ -382,6 +433,24 @@ public struct ShareFlowView: View {
         let areas: SearchAreas = if let repository, let tripID { await repository.searchAreas(of: tripID) } else { .none }
         candidates = await placeSearch.search(text, in: areas, limit: 6)
         searched = true
+    }
+
+    private func discoverScreenshot() async {
+        guard let discoveryRepository, !discovering else { return }
+        let clue = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clue.count >= 2 else { return }
+        discovering = true
+        defer { discovering = false }
+        do {
+            discovered = try await discoveryRepository.discoverPlaces(query: clue,
+                context: screenshotLines.joined(separator: "\n"))
+            if !discovered.isEmpty { country = "KR" }
+            discoveryMessage = discovered.isEmpty ? "目前沒有足夠來源可列出店家，原始截圖線索仍可搜尋。" : nil
+        } catch let error as PlaceDiscoveryError {
+            discoveryMessage = error.userMessage
+        } catch {
+            discoveryMessage = "韓文店名暫時無法查找：\(userMessage(for: error))"
+        }
     }
 
     private func routePoint(_ option: PlaceOption) -> RoutePoint {

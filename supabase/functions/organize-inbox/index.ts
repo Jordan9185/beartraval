@@ -2,6 +2,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
 import { organizeCapture } from "../../../ai/inbox-organize/src/organize.ts";
+import { publicThreadsPost } from "../../../ai/inbox-organize/src/public-post.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 
@@ -24,10 +25,10 @@ Deno.serve(async (req) => {
     global: { headers: { Authorization: authorization } }, db: { schema: "app" },
   });
   const { data: capture, error } = await asUser.from("inbox_captures")
-    .select("id,owner_id,title,raw_text,status").eq("id", captureId).maybeSingle();
+    .select("id,owner_id,title,raw_text,source_url,public_text,status").eq("id", captureId).maybeSingle();
   if (error) return json({ error: "UNAUTHENTICATED" }, 401);
   if (!capture) return json({ error: "NOT_FOUND" }, 404);
-  if (capture.status === "ready" || capture.status === "insufficient") return json({ status: capture.status });
+  if (capture.status === "ready") return json({ status: capture.status });
 
   const admin = createClient(endpoint, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { db: { schema: "app" } });
   const { data: attempt, error: claimError } = await admin.rpc("begin_inbox_analysis", { p_capture_id: captureId });
@@ -37,11 +38,12 @@ Deno.serve(async (req) => {
   const work = async () => {
     let stage = "assets";
     const record = async (result: unknown, failure: string | null, model: string | null) => {
-      const { error: saveError } = await admin.rpc("finish_inbox_analysis", {
+      const { data: saved, error: saveError } = await admin.rpc("finish_inbox_analysis", {
         p_capture_id: captureId, p_attempt: attempt, p_result: result,
         p_error: failure, p_model: model,
       });
       if (saveError) throw saveError;
+      return saved === true;
     };
     try {
       const { data: assets, error: assetError } = await admin.from("inbox_assets")
@@ -62,10 +64,24 @@ Deno.serve(async (req) => {
       }
       const rawText: string = capture.raw_text ?? "";
       const title: string | null = capture.title ?? null;
+      // 原始分享文字與公開頁面的摘要分開存，不能拿爬到的內容冒充 App 提供的 payload。
+      let publicText: string | null = capture.public_text ?? null;
+      if (!publicText && capture.source_url) {
+        stage = "public_metadata";
+        try {
+          const post = await publicThreadsPost(capture.source_url);
+          if (post) {
+            publicText = post.text;
+            const { error: updateError } = await admin.from("inbox_captures")
+              .update({ public_text: post.text, resolved_source_url: post.resolvedURL }).eq("id", captureId);
+            if (updateError) throw updateError;
+          }
+        } catch { /* 公開頁面不可讀時只依實際分享內容整理。 */ }
+      }
       // 只有 URL、一般平台標題或影片檔但無可讀內容時，保留來源而不猜地點。
       const meaningful = rawText.replace(/https?:\/\/\S+/gi, "").trim() ||
         (title && !/^(Instagram|Threads|TikTok|YouTube)$/i.test(title.trim()) ? title.trim() : "");
-      if (!meaningful && images.length === 0) {
+      if (!meaningful && !publicText && images.length === 0) {
         await record({ content_kind: "unknown", items: [], template_days: [] }, null, null);
         return;
       }
@@ -77,9 +93,18 @@ Deno.serve(async (req) => {
       if (allowed !== true) { await record(null, "rate_limited", null); return; }
       stage = "model";
       const outcome = await organizeCapture(new Anthropic({ apiKey: key }),
-        { title, rawText, imageBase64: images }, Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5");
+        { title, rawText, publicText, imageBase64: images }, Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5");
       stage = "save";
-      await record(outcome.result, null, outcome.model);
+      const saved = await record(outcome.result, null, outcome.model);
+      if (saved) {
+        for (const [ordinal, item] of outcome.result.items.entries()) {
+          if (item.kind !== "product" || !item.store_hint) continue;
+          const { error: hintError } = await admin.from("inbox_items")
+            .update({ store_hint: item.store_hint, store_evidence: item.store_evidence })
+            .eq("capture_id", captureId).eq("ordinal", ordinal).eq("user_corrected", false);
+          if (hintError) console.warn("organize-inbox store hint not saved", { capture_id: captureId, ordinal });
+        }
+      }
       console.log("organize-inbox", { capture_id: captureId, status: "ready", items: outcome.result.items.length });
     } catch (failure) {
       const status = failure instanceof Anthropic.APIError ? failure.status : null;

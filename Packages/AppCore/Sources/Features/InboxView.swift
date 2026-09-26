@@ -137,7 +137,12 @@ private struct InboxDetailView: View {
                 }
                 if let title = record.title { Text(title) }
                 if !record.rawText.isEmpty { Text(record.rawText).textSelection(.enabled) }
-                if record.rawText.isEmpty, record.sourceURL != nil {
+                if let publicText = record.publicText, !publicText.isEmpty {
+                    LabeledContent("公開貼文摘要") { Text(publicText).textSelection(.enabled) }
+                    Text("從公開網頁讀取，可能與來源 App 當時顯示的內容不同。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if record.rawText.isEmpty, record.publicText == nil, record.sourceURL != nil {
                     Text("只有連結時無法讀到影片畫面或貼文內文，地點不會憑網址猜測。")
                         .foregroundStyle(.secondary)
                 }
@@ -159,7 +164,10 @@ private struct InboxDetailView: View {
                 }
             }
             if record.status == "insufficient" {
-                Section { Text("資訊不足，來源已保留。可以稍後分享有文字的截圖或補充說明。") }
+                Section {
+                    Text("資訊不足，來源已保留。可重新讀取公開貼文摘要，或分享有文字的截圖。")
+                    Button("重新整理") { Task { await retry() } }
+                }
             }
             if record.status == "failed" {
                 Section {
@@ -251,6 +259,11 @@ private struct InboxItemRow: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Text("來源：\(item.sourceSpan)").font(.caption).foregroundStyle(.secondary).lineLimit(3)
+            if item.kind == "place" {
+                ForEach(item.discoveryCandidates ?? []) { suggestion in
+                    InboxDiscoveryCandidateRow(suggestion: suggestion)
+                }
+            }
             if item.kind == "place" && item.resolutionStatus != "verified" {
                 Text("地點未定位，暫不計算路線").font(.caption).foregroundStyle(.secondary)
             }
@@ -328,8 +341,11 @@ private struct InboxPublishView: View {
         defer { publishing = false }
         do {
             if item.kind == "product" {
-                _ = try await tripRepository.addShoppingItem(tripID: selectedTripID, name: item.displayName,
+                let shopping = try await tripRepository.addShoppingItem(tripID: selectedTripID, name: item.displayName,
                     note: "來自分享：\(item.sourceSpan)", url: sourceURL, clientOpID: operationID)
+                if let hint = item.storeHint {
+                    try await tripRepository.setShoppingStoreHint(itemID: shopping.id, name: hint, evidence: item.storeEvidence)
+                }
             } else {
                 // 同一篇可能有多間店；來源保留 URL，但不以單一 canonical URL 把不同店誤合併。
                 let source = SavedSource(type: "share", url: sourceURL, canonicalUrl: nil, summary: item.sourceSpan)
@@ -348,7 +364,10 @@ private struct InboxPlaceResolveView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query: String
     @State private var candidates: [PlaceOption] = []
+    @State private var discovered: [DiscoveredPlace] = []
+    @State private var mappedDiscoveries: [String: [PlaceOption]] = [:]
     @State private var searching = false
+    @State private var discovering = false
     @State private var saving = false
     @State private var errorMessage: String?
 
@@ -356,7 +375,8 @@ private struct InboxPlaceResolveView: View {
         self.item = item
         self.repository = repository
         self.onConfirmed = onConfirmed
-        _query = State(initialValue: item.displayName)
+        _query = State(initialValue: item.discoveryCandidates?.first?.searchQuery ?? item.displayName)
+        _discovered = State(initialValue: item.discoveryCandidates ?? [])
     }
 
     var body: some View {
@@ -368,28 +388,71 @@ private struct InboxPlaceResolveView: View {
                     Button("搜尋") { Task { await search() } }.disabled(query.isEmpty || searching)
                     if searching { ProgressView("搜尋中…") }
                 }
-                Section("地圖候選") {
+                if discovering { ProgressView("查找韓文店名與地址…") }
+                if !discovered.isEmpty {
+                    Section {
+                        ForEach(discovered) { suggestion in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(suggestion.koreanName ?? suggestion.name).font(.headline)
+                                if suggestion.koreanName != nil && suggestion.koreanName != suggestion.name {
+                                    Text(suggestion.name).font(.caption).foregroundStyle(.secondary)
+                                }
+                                if let address = suggestion.addressLocal {
+                                    Text("地址線索：\(address)").font(.subheadline)
+                                } else {
+                                    Text("目前沒有可核對的韓文地址").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Text(suggestion.reason).font(.caption).foregroundStyle(.secondary)
+                                LocalMapSearchButtons(name: suggestion.searchQuery, countryCode: "KR")
+                                    .buttonStyle(.borderless)
+                                if let url = URL(string: suggestion.sourceURL), url.scheme == "https" {
+                                    Link("查看網路來源", destination: url).font(.caption)
+                                }
+                                ForEach(mappedDiscoveries[suggestion.id] ?? []) { option in
+                                    Button { Task { await confirm(option) } } label: {
+                                        PlaceOptionRow(title: option.name, address: option.address)
+                                    }
+                                    .disabled(saving)
+                                }
+                                if mappedDiscoveries[suggestion.id]?.isEmpty == true {
+                                    Text("地圖尚未找到這間店；可用韓文店名再查，暫不建立定位點。")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    Button("用韓文店名重查地圖") {
+                                        query = suggestion.searchQuery
+                                        Task { await search(discoverFallback: false) }
+                                    }
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("近期網路線索 · 請核對分店")
+                    } footer: {
+                        Text("店名與地址來自有引用的網路線索；請在 Naver／Kakao 核對分店。行程定位仍須確認地圖候選。")
+                    }
+                }
+                if !discovering {
+                    Button("重新查韓文店名與地址") { Task { await discover(force: true) } }
+                }
+                Section("供行程定位的地圖候選") {
                     ForEach(candidates) { option in
-                        Button {
-                            Task { await confirm(option) }
-                        } label: {
+                        Button { Task { await confirm(option) } } label: {
                             PlaceOptionRow(title: option.name, address: option.address)
                         }
                         .disabled(saving)
                     }
                     if !searching && candidates.isEmpty {
-                        Text("沒有可確認的地點；可保留在個人收藏，稍後再搜尋。")
+                        Text("尚未找到可確認的定位點；上方仍可查看韓文店名、地址與在地地圖。")
                             .foregroundStyle(.secondary)
                     }
                 }
             }
             .navigationTitle("確認地點")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("關閉") { dismiss() } } }
-            .task { await search() }
+            .task { await search(discoverFallback: true) }
         }
     }
 
-    private func search() async {
+    private func search(discoverFallback: Bool = true) async {
         searching = true
         defer { searching = false }
         switch await MapKitPlaceSearch().lookup(query, around: nil, limit: 8) {
@@ -397,6 +460,39 @@ private struct InboxPlaceResolveView: View {
         case .notFound: candidates = []; errorMessage = nil
         case .unavailable: candidates = []; errorMessage = "地圖暫時無法搜尋，請稍後再試。"
         }
+        if !discovered.isEmpty { await mapDiscovered() }
+        if discoverFallback && item.discoveryCheckedAt == nil { await discover() }
+    }
+
+    private func discover(force: Bool = false) async {
+        guard !discovering else { return }
+        discovering = true
+        defer { discovering = false }
+        do {
+            let suggestions = try await repository.discoverPlaces(for: item.id, force: force)
+            discovered = suggestions
+            await mapDiscovered()
+            if suggestions.isEmpty && candidates.isEmpty {
+                errorMessage = "目前找不到有來源可核對的餐廳；已保留原始線索，可稍後重查。"
+            }
+        } catch let error as PlaceDiscoveryError {
+            errorMessage = error.userMessage
+        } catch {
+            errorMessage = "查找餐廳失敗：\(userMessage(for: error))"
+        }
+    }
+
+    private func mapDiscovered() async {
+        var located: [String: [PlaceOption]] = [:]
+        for suggestion in discovered {
+            var lookup = await MapKitPlaceSearch().lookup(suggestion.searchQuery, around: nil, limit: 3)
+            if lookup.options.isEmpty, let address = suggestion.addressLocal,
+               let roman = ScreenshotText.romanizedKoreanAddress(address) {
+                lookup = await MapKitPlaceSearch().lookup(roman, around: nil, limit: 3)
+            }
+            located[suggestion.id] = lookup.options
+        }
+        mappedDiscoveries = located
     }
 
     private func confirm(_ option: PlaceOption) async {
@@ -644,6 +740,7 @@ struct PersonalInboxItemsView: View {
     let session: SessionModel
     let kind: String
     @State private var items: [InboxItemRecord] = []
+    @State private var candidates: [InboxItemRecord] = []
     @State private var errorMessage: String?
 
     private var repository: InboxRepository { InboxRepository(client: session.client) }
@@ -651,17 +748,26 @@ struct PersonalInboxItemsView: View {
     var body: some View {
         List {
             if let errorMessage { ErrorText(errorMessage) }
-            ForEach(items) { item in
-                PersonalInboxRow(item: item, kind: kind, repository: repository) { updated in
-                    if let index = items.firstIndex(where: { $0.id == updated.id }) { items[index] = updated }
+            if !items.isEmpty {
+                Section("我的清單") {
+                    ForEach(items) { item in
+                        PersonalInboxRow(item: item, kind: kind, repository: repository) { _ in Task { await reload() } }
+                            .swipeActions {
+                                Button("撤銷", role: .destructive) { Task { await undo(item) } }
+                            }
+                    }
                 }
-                .swipeActions {
-                    Button("撤銷", role: .destructive) { Task { await undo(item) } }
+            }
+            if !candidates.isEmpty {
+                Section("待確認") {
+                    ForEach(candidates) { item in
+                        PersonalInboxRow(item: item, kind: kind, repository: repository, candidate: true) { _ in Task { await reload() } }
+                    }
                 }
             }
         }
         .overlay {
-            if items.isEmpty && errorMessage == nil {
+            if items.isEmpty && candidates.isEmpty && errorMessage == nil {
                 ContentUnavailableView(kind == "product" ? "還沒有個人想買" : "還沒有個人收藏",
                                        systemImage: kind == "product" ? "bag" : "bookmark")
             }
@@ -672,7 +778,12 @@ struct PersonalInboxItemsView: View {
     }
 
     private func reload() async {
-        do { items = try await repository.listPersonalItems(kind: kind); errorMessage = nil }
+        do {
+            async let personal = repository.listPersonalItems(kind: kind)
+            async let pending = repository.listPersonalCandidates(kind: kind)
+            (items, candidates) = try await (personal, pending)
+            errorMessage = nil
+        }
         catch { errorMessage = "讀取失敗：\(error.localizedDescription)" }
     }
 
@@ -682,22 +793,35 @@ struct PersonalInboxItemsView: View {
     }
 }
 
-private struct PersonalInboxRow: View {
+struct PersonalInboxRow: View {
     let item: InboxItemRecord
     let kind: String
     let repository: InboxRepository
+    var candidate = false
     let onUpdated: (InboxItemRecord) -> Void
     @State private var resolves = false
     @State private var publishes = false
+    @State private var errorMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(item.displayName)
             Text("來源：\(item.sourceSpan)").font(.caption).foregroundStyle(.secondary)
+            if kind == "place" {
+                ForEach(item.discoveryCandidates ?? []) { suggestion in
+                    InboxDiscoveryCandidateRow(suggestion: suggestion)
+                }
+            }
+            if candidate {
+                Text(kind == "product" ? "AI 辨識候選，請核對商品名稱" : "AI 辨識候選，尚未確認是哪間店")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button(kind == "product" ? "加入個人想買" : "加入個人收藏") { Task { await archive() } }.font(.caption)
+            }
             if kind == "place", item.resolutionStatus != "verified" {
                 Button("確認地點") { resolves = true }.font(.caption)
             }
-            Button("加入旅伴清單") { publishes = true }.font(.caption)
+            if !candidate { Button("加入旅伴清單") { publishes = true }.font(.caption) }
+            if let errorMessage { ErrorText(errorMessage) }
         }
         .sheet(isPresented: $resolves) {
             InboxPlaceResolveView(item: item, repository: repository) { updated in
@@ -708,5 +832,31 @@ private struct PersonalInboxRow: View {
         .sheet(isPresented: $publishes) {
             InboxPublishView(item: item, repository: repository) { publishes = false }
         }
+    }
+
+    private func archive() async {
+        do { onUpdated(try await repository.updateItem(item, archived: true)) }
+        catch { errorMessage = "加入收藏失敗：\(error.localizedDescription)" }
+    }
+}
+
+/// 有網頁來源的韓國候選直接顯示在清單；不要求先進入 Apple 地圖搜尋畫面。
+private struct InboxDiscoveryCandidateRow: View {
+    let suggestion: DiscoveredPlace
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("可能是：\(suggestion.koreanName ?? suggestion.name)").font(.subheadline)
+            if let address = suggestion.addressLocal {
+                Text("韓文地址線索：\(address)").font(.caption).textSelection(.enabled)
+            }
+            LocalMapSearchButtons(name: suggestion.searchQuery, countryCode: "KR")
+                .font(.caption)
+                .buttonStyle(.borderless)
+            if let url = URL(string: suggestion.sourceURL), url.scheme == "https" {
+                Link("查看來源", destination: url).font(.caption)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }

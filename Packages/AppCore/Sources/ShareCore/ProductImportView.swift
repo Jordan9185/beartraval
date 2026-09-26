@@ -35,6 +35,8 @@ public struct ProductImportView: View {
         var note: String?
         var selected: Bool
         var confidence: String
+        var storeHint: String?
+        var storeEvidence: String?
         /// 使用者自己加的項目；重新辨識時保留。
         var manual = false
     }
@@ -89,11 +91,15 @@ public struct ProductImportView: View {
                             if draft.confidence == "low" {
                                 Text("AI 不太確定，請核對名稱").font(.caption).foregroundStyle(.orange)
                             }
+                            if let storeHint = draft.storeHint {
+                                Text("貼文提到：\(storeHint) · 販售與庫存待確認")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
                 Button("手動新增一項", systemImage: "plus") {
-                    let draft = Draft(name: "", note: nil, selected: true, confidence: "high", manual: true)
+                    let draft = Draft(name: "", note: nil, selected: true, confidence: "high", storeHint: nil, storeEvidence: nil, manual: true)
                     drafts.append(draft)
                     focus = .draft(draft.id)
                 }
@@ -156,7 +162,8 @@ public struct ProductImportView: View {
             let result = try await repository.extractProducts(tripID: tripID, text: text, url: sourceURL?.absoluteString, imageJPEG: imageJPEG)
             // 重新辨識時換掉上次 AI 的結果，保留自己加的項目。
             drafts = result.products.map {
-                Draft(name: $0.listName, note: $0.searchQuery, selected: $0.confidence != "low", confidence: $0.confidence)
+                Draft(name: $0.listName, note: $0.searchQuery, selected: $0.confidence != "low",
+                      confidence: $0.confidence, storeHint: $0.storeHint, storeEvidence: $0.storeEvidence)
             } + drafts.filter { $0.manual && !$0.name.isEmpty }
             warnings = result.warnings
             extracted = true
@@ -181,6 +188,9 @@ public struct ProductImportView: View {
                 guard !name.isEmpty else { continue }
                 let item = try await repository.addShoppingItem(tripID: tripID, name: String(name.prefix(200)), note: nil,
                                                                 url: sourceURL?.absoluteString, clientOpID: UUID())
+                if let storeHint = draft.storeHint {
+                    try await repository.setShoppingStoreHint(itemID: item.id, name: storeHint, evidence: draft.storeEvidence)
+                }
                 if let imageJPEG { try await repository.setShoppingImage(tripID: tripID, itemID: item.id, jpeg: imageJPEG) }
                 added += 1
             }

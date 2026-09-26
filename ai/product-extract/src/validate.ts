@@ -24,6 +24,8 @@ export function validateProducts(input: ExtractInput, draft: ExtractResult): { r
       brand: p.brand?.trim().slice(0, MAX_FIELD) || null,
       variant: p.variant?.trim().slice(0, MAX_FIELD) || null,
       search_query: p.search_query?.trim().slice(0, MAX_FIELD) || null,
+      store_hint: p.store_hint?.trim().slice(0, MAX_FIELD) || null,
+      store_evidence: p.store_evidence?.trim().slice(0, MAX_FIELD) || null,
     }))
     .filter((p, i) => {
       if (p.name.length === 0) issues.push({ path: `products[${i}]`, issue: "empty name dropped" });
@@ -40,6 +42,18 @@ export function validateProducts(input: ExtractInput, draft: ExtractResult): { r
     if (p.evidence === "image" && !input.imageBase64) {
       issues.push({ path: `products[${i}].evidence`, issue: "image evidence but no image" });
       p.confidence = "low";
+    }
+    if (p.store_hint) {
+      const source = p.store_evidence;
+      const anchored = source === "image" ? Boolean(input.imageBase64) :
+        Boolean(source && caption.includes(squash(source)) && squash(source).includes(squash(p.store_hint)));
+      if (!anchored) {
+        issues.push({ path: `products[${i}].store_hint`, issue: "store hint has no anchored evidence" });
+        p.store_hint = null;
+        p.store_evidence = null;
+      }
+    } else {
+      p.store_evidence = null;
     }
   });
 

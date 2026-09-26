@@ -12,6 +12,12 @@ struct ShoppingTab: View {
     @State private var sync: TripSync?
     @State private var reloadToken = 0
     @State private var importing = false
+    @State private var personalItems: [InboxItemRecord] = []
+    @State private var candidateItems: [InboxItemRecord] = []
+    @State private var personalError: String?
+    @Environment(\.scenePhase) private var scenePhase
+
+    private var inbox: InboxRepository { InboxRepository(client: session.client) }
 
     var body: some View {
         NavigationStack {
@@ -19,13 +25,16 @@ struct ShoppingTab: View {
                 if let tripID {
                     ShoppingListView(service: session.trips, tripID: tripID, canEdit: myRole?.canEdit == true,
                                      queue: session.offlineQueue, reloadToken: reloadToken,
+                                     personalItems: personalItems, candidateItems: candidateItems,
+                                     personalRepository: inbox, personalError: personalError,
+                                     personalChanged: { Task { await reloadPersonal() } },
                                      recognizeName: { [trips = session.trips] jpeg in
                                          try await trips.extractProducts(tripID: tripID, text: "", url: nil, imageJPEG: jpeg).products.first?.listName
                                      }) { entry in
                         MerchantSearchView(session: session, tripID: tripID, entry: entry) { reloadToken += 1 }
                     }
                 } else {
-                    ContentUnavailableView("還沒有旅程", systemImage: "bag", description: Text("先到「旅程」建立或加入旅程。"))
+                    PersonalInboxItemsView(session: session, kind: "product")
                 }
             }
             .navigationTitle("購物清單")
@@ -61,8 +70,33 @@ struct ShoppingTab: View {
             .task {
                 trips = (try? await session.trips.myTrips()) ?? []
                 if tripID == nil { tripID = ShareFlowView.defaultTrip(trips)?.id }
+                await refreshPersonalUntilSettled()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await refreshPersonalUntilSettled() } }
             }
             .onChange(of: tripID, initial: true) { Task { await subscribe() } }
+        }
+    }
+
+    private func reloadPersonal() async {
+        do {
+            async let personal = inbox.listPersonalItems(kind: "product")
+            async let candidates = inbox.listPersonalCandidates(kind: "product")
+            (personalItems, candidateItems) = try await (personal, candidates)
+            personalError = nil
+        } catch { personalError = "分享商品暫時無法讀取：\(userMessage(for: error))" }
+    }
+
+    private func refreshPersonalUntilSettled() async {
+        await session.syncInboxCaptures()
+        for _ in 0..<8 {
+            if Task.isCancelled { return }
+            await reloadPersonal()
+            let captures = (try? await inbox.listCaptures()) ?? []
+            let waiting = captures.contains { $0.status == "saved" || $0.status == "processing" }
+            if !waiting { return }
+            try? await Task.sleep(for: .seconds(3))
         }
     }
 
@@ -91,11 +125,18 @@ public struct ShoppingListView: View {
     let canEdit: Bool
     let queue: OfflineQueue?
     let reloadToken: Int
+    let personalItems: [InboxItemRecord]
+    let candidateItems: [InboxItemRecord]
+    let personalRepository: InboxRepository?
+    let personalError: String?
+    let personalChanged: () -> Void
     let merchantScreen: (ShoppingEntry) -> AnyView
     /// 從商品照片讀出名稱（AI）；nil 表示不辨識。
     let recognizeName: (@Sendable (Data) async throws -> String?)?
 
     @State private var entries: [ShoppingEntry] = []
+    @State private var itineraryMatches: [UUID: [ShoppingItineraryMatch]] = [:]
+    @State private var itineraryMatchesLoaded = false
     @State private var newName = ""
     @State private var newPhoto: PhotosPickerItem?
     @State private var newImage: Data?
@@ -105,6 +146,9 @@ public struct ShoppingListView: View {
     @FocusState private var nameFocused: Bool
 
     public init<MerchantScreen: View>(service: any ShoppingService, tripID: UUID, canEdit: Bool, queue: OfflineQueue?, reloadToken: Int,
+                                      personalItems: [InboxItemRecord] = [], candidateItems: [InboxItemRecord] = [],
+                                      personalRepository: InboxRepository? = nil, personalError: String? = nil,
+                                      personalChanged: @escaping () -> Void = {},
                                       recognizeName: (@Sendable (Data) async throws -> String?)? = nil,
                                       @ViewBuilder merchantScreen: @escaping (ShoppingEntry) -> MerchantScreen) {
         self.service = service
@@ -112,18 +156,39 @@ public struct ShoppingListView: View {
         self.canEdit = canEdit
         self.queue = queue
         self.reloadToken = reloadToken
+        self.personalItems = personalItems
+        self.candidateItems = candidateItems
+        self.personalRepository = personalRepository
+        self.personalError = personalError
+        self.personalChanged = personalChanged
         self.recognizeName = recognizeName
         self.merchantScreen = { AnyView(merchantScreen($0)) }
     }
 
     private var rowContext: ShoppingRowContext {
         ShoppingRowContext(service: service, tripID: tripID, canEdit: canEdit, merchantScreen: merchantScreen,
+                           itineraryMatches: itineraryMatches, itineraryMatchesLoaded: itineraryMatchesLoaded,
                            toggle: { entry in Task { await togglePurchased(entry) } },
                            changed: { Task { await reload() } })
     }
 
     public var body: some View {
         List {
+            if let personalError { ErrorText(personalError) }
+            if let personalRepository, !personalItems.isEmpty {
+                Section("我的想買") {
+                    ForEach(personalItems) { item in
+                        PersonalInboxRow(item: item, kind: "product", repository: personalRepository) { _ in personalChanged() }
+                    }
+                }
+            }
+            if let personalRepository, !candidateItems.isEmpty {
+                Section("待確認的商品") {
+                    ForEach(candidateItems) { item in
+                        PersonalInboxRow(item: item, kind: "product", repository: personalRepository, candidate: true) { _ in personalChanged() }
+                    }
+                }
+            }
             let progress = ShoppingProgress(entries)
             if progress.total > 0 {
                 Section {
@@ -161,7 +226,7 @@ public struct ShoppingListView: View {
             ShoppingGroupSection(group: .purchased, entries: entries, context: rowContext)
         }
         .overlay {
-            if loaded && entries.isEmpty {
+            if loaded && entries.isEmpty && personalItems.isEmpty && candidateItems.isEmpty {
                 ContentUnavailableView("還沒有想買的東西", systemImage: "bag", description: canEdit ? Text("在上方輸入，或從貼文、截圖加入。") : nil)
             }
         }
@@ -188,8 +253,17 @@ public struct ShoppingListView: View {
         do {
             entries = try await service.shoppingEntries(of: tripID)
             errorMessage = nil
+            do {
+                itineraryMatches = try await service.itineraryMatches(tripID: tripID, items: entries.map(\.item))
+                itineraryMatchesLoaded = true
+            } catch {
+                itineraryMatches = [:]
+                itineraryMatchesLoaded = false
+                errorMessage = "行程內販售地點暫時無法讀取：\(userMessage(for: error))"
+            }
         } catch {
             errorMessage = "讀取失敗：\(userMessage(for: error))"
+            itineraryMatchesLoaded = false
         }
         loaded = true
     }
@@ -258,6 +332,8 @@ struct ShoppingRowContext {
     let tripID: UUID
     let canEdit: Bool
     let merchantScreen: (ShoppingEntry) -> AnyView
+    let itineraryMatches: [UUID: [ShoppingItineraryMatch]]
+    let itineraryMatchesLoaded: Bool
     let toggle: (ShoppingEntry) -> Void
     let changed: () -> Void
 }
@@ -288,9 +364,13 @@ struct ShoppingEntryLink: View {
         NavigationLink {
             ShoppingItemDetailView(service: context.service, tripID: context.tripID, entry: entry, canEdit: context.canEdit,
                                    merchantScreen: context.canEdit && entry.status == .unscheduled ? context.merchantScreen(entry) : nil,
+                                   itineraryMatches: context.itineraryMatches[entry.id] ?? [],
+                                   itineraryMatchesLoaded: context.itineraryMatchesLoaded,
                                    onChanged: context.changed)
         } label: {
             ShoppingRow(entry: entry, me: context.service.currentUserID, canEdit: context.canEdit, service: context.service,
+                        itineraryMatches: context.itineraryMatches[entry.id] ?? [],
+                        itineraryMatchesLoaded: context.itineraryMatchesLoaded,
                         toggle: { context.toggle(entry) })
         }
     }
@@ -301,6 +381,8 @@ struct ShoppingRow: View {
     let me: UUID?
     let canEdit: Bool
     let service: any ShoppingService
+    let itineraryMatches: [ShoppingItineraryMatch]
+    let itineraryMatchesLoaded: Bool
     let toggle: () -> Void
 
     var body: some View {
@@ -336,6 +418,14 @@ struct ShoppingRow: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+                if let first = itineraryMatches.first {
+                    Text("行程第 \(first.dayNumber) 天 · \(first.placeName)\(itineraryMatches.count > 1 ? " 等 \(itineraryMatches.count) 處" : "") · \(first.evidenceType == nil ? "可詢問" : "可能販售")")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        .accessibilityIdentifier("tripMerchant-\(entry.item.name)")
+                } else if itineraryMatchesLoaded && entry.status == .unscheduled {
+                    Text("行程內尚無販售線索").font(.caption).foregroundStyle(.secondary)
+                }
 
             }
         }
@@ -476,6 +566,8 @@ struct ShoppingItemDetailView: View {
     let entry: ShoppingEntry
     let canEdit: Bool
     var merchantScreen: AnyView? = nil
+    var itineraryMatches: [ShoppingItineraryMatch] = []
+    var itineraryMatchesLoaded = false
     let onChanged: () -> Void
     @State private var photo: PhotosPickerItem?
     @State private var uploading = false
@@ -508,6 +600,34 @@ struct ShoppingItemDetailView: View {
                 Section {
                     NavigationLink("找可能販售的店…") { merchantScreen }
                         .accessibilityIdentifier("findMerchants")
+                }
+            }
+            if itineraryMatchesLoaded && !entry.isPurchased {
+                Section {
+                    if itineraryMatches.isEmpty {
+                        Text("目前沒有與行程地點相符、且尚未過期的販售線索。")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(itineraryMatches) { match in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("第 \(match.dayNumber) 天 · \(match.placeName)")
+                            Text(match.evidenceType.map { "可能販售（\($0.displayName)） · 庫存未知" }
+                                 ?? (match.evidenceNote == nil ? "店名與商品名稱相符，尚未查證是否販售 · 庫存未知"
+                                     : "分享提到的店名與行程相符，尚未查證是否販售 · 庫存未知"))
+                                .font(.caption).foregroundStyle(.secondary)
+                            if let note = match.evidenceNote, !note.isEmpty {
+                                Text(note).font(.caption).foregroundStyle(.secondary)
+                            }
+                            if let source = match.evidenceURL.flatMap(URL.init(string:)),
+                               ["https", "http"].contains(source.scheme?.lowercased() ?? "") {
+                                Link("查看販售線索", destination: source).font(.caption)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("行程中可確認的地點")
+                } footer: {
+                    Text("只比對已確認的行程地點；店名相符是待確認建議，販售線索也可能變動。出發前請向店家確認是否販售與庫存。")
                 }
             }
             Section {

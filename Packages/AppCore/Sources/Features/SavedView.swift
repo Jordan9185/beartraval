@@ -22,10 +22,62 @@ struct SavedView: View {
     @State private var queued = 0
     @State private var adding = false
     @State private var detail: SavedEntry?
+    @State private var personalItems: [InboxItemRecord] = []
+    @State private var candidateItems: [InboxItemRecord] = []
+    @State private var recentCaptures: [InboxRecord] = []
+    @State private var localCaptures = 0
+    @State private var inboxError: String?
+    @State private var discoveringPlaces = false
+    @State private var showsInbox = false
+    @Environment(\.scenePhase) private var scenePhase
+
+    private var inbox: InboxRepository { InboxRepository(client: session.client) }
 
     var body: some View {
         NavigationStack {
             List {
+                if localCaptures > 0 || !recentCaptures.isEmpty {
+                    Section("最近分享") {
+                        if localCaptures > 0 {
+                            Button("\(localCaptures) 份分享保存在此裝置 · 查看同步狀態") { showsInbox = true }
+                        }
+                        ForEach(recentCaptures.prefix(3)) { capture in
+                            Button {
+                                showsInbox = true
+                            } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(capture.title ?? capture.publicText.map { String($0.prefix(40)) }
+                                         ?? capture.sourceURL.flatMap { URL(string: $0)?.host } ?? "分享內容")
+                                        .lineLimit(1)
+                                    Text(inboxStatus(capture.status)).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                if let inboxError { ErrorText(inboxError) }
+                if discoveringPlaces { ProgressView("正在查韓文店名與地址…") }
+                if !personalItems.isEmpty {
+                    Section("我的收藏") {
+                        ForEach(personalItems) { item in
+                            PersonalInboxRow(item: item, kind: "place", repository: inbox) { _ in
+                                Task { await loadInbox() }
+                            }
+                            .swipeActions {
+                                Button("撤銷", role: .destructive) { Task { await undoPersonal(item) } }
+                            }
+                        }
+                    }
+                }
+                if !candidateItems.isEmpty {
+                    Section("待確認的地點") {
+                        ForEach(candidateItems) { item in
+                            PersonalInboxRow(item: item, kind: "place", repository: inbox, candidate: true) { _ in
+                                Task { await loadInbox() }
+                            }
+                        }
+                    }
+                }
                 if !drafts.isEmpty {
                     Section("待處理的分享") {
                         ForEach(drafts) { draft in
@@ -52,23 +104,28 @@ struct SavedView: View {
                     Label("\(queued) 項變更等待連線後送出", systemImage: "icloud.slash").font(.caption).foregroundStyle(.secondary)
                 }
 
-                ForEach(filter.apply(entries, includeAdded: includeAdded)) { entry in
-                    SavedRow(entry: entry, me: session.trips.currentUserID, canEdit: myRole?.canEdit == true,
-                             toggleInterest: { Task { await toggleInterest(entry) } },
-                             showRoute: { routeFor = entry },
-                             resolve: { resolving = entry },
-                             open: { detail = entry })
-                    .swipeActions {
-                        if myRole?.canEdit == true {
-                            Button("移除", role: .destructive) { Task { await dismiss(entry) } }
+                if !entries.isEmpty {
+                    Section("旅伴共同收藏") {
+                        ForEach(filter.apply(entries, includeAdded: includeAdded)) { entry in
+                            SavedRow(entry: entry, me: session.trips.currentUserID, canEdit: myRole?.canEdit == true,
+                                     toggleInterest: { Task { await toggleInterest(entry) } },
+                                     showRoute: { routeFor = entry },
+                                     resolve: { resolving = entry },
+                                     open: { detail = entry })
+                            .swipeActions {
+                                if myRole?.canEdit == true {
+                                    Button("移除", role: .destructive) { Task { await dismiss(entry) } }
+                                }
+                            }
                         }
                     }
                 }
             }
             .overlay {
-                if loaded && trips.isEmpty {
+                if loaded && trips.isEmpty && personalItems.isEmpty && candidateItems.isEmpty && recentCaptures.isEmpty && localCaptures == 0 {
                     ContentUnavailableView("還沒有旅程", systemImage: "bookmark", description: Text("先到「旅程」建立或加入旅程。"))
-                } else if loaded && filter.apply(entries, includeAdded: includeAdded).isEmpty && drafts.isEmpty {
+                } else if loaded && filter.apply(entries, includeAdded: includeAdded).isEmpty && drafts.isEmpty &&
+                            personalItems.isEmpty && candidateItems.isEmpty && recentCaptures.isEmpty && localCaptures == 0 {
                     ContentUnavailableView("還沒有收藏", systemImage: "bookmark",
                                            description: Text("按右上角 ＋ 新增，或從 Threads、IG、地圖 App 分享到 BeaRTravel。"))
                 }
@@ -76,6 +133,9 @@ struct SavedView: View {
             .navigationTitle("收藏")
             // 換旅程與今天、購物一樣放在工具列。
             .toolbar {
+                ToolbarItem(placement: .secondaryAction) {
+                    Button("分享收件匣", systemImage: "tray") { showsInbox = true }
+                }
                 ToolbarItem(placement: .secondaryAction) {
                     NavigationLink {
                         PersonalInboxItemsView(session: session, kind: "place")
@@ -104,7 +164,10 @@ struct SavedView: View {
                 }
             }
             .refreshable { await reload() }
-            .task { await loadTrips() }
+            .task { await loadTrips(); await refreshInboxUntilSettled() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await reload(); await refreshInboxUntilSettled() } }
+            }
             .onChange(of: tripID) { Task { await switchTrip() } }
             .sheet(item: $openDraft) { draft in
                 NavigationStack {
@@ -135,6 +198,7 @@ struct SavedView: View {
                     Task { await reload() }
                 }
             }
+            .sheet(isPresented: $showsInbox) { InboxView(session: session) }
         }
     }
 
@@ -168,6 +232,7 @@ struct SavedView: View {
 
     private func reload() async {
         drafts = ShareDraftStore.shared()?.all() ?? []
+        await loadInbox()
         await session.flushOfflineQueue()
         queued = await session.offlineQueue.items.count
         guard let tripID else { return }
@@ -177,6 +242,71 @@ struct SavedView: View {
         } catch {
             errorMessage = "讀取失敗：\(userMessage(for: error))"
         }
+    }
+
+    private func loadInbox() async {
+        let me = session.trips.currentUserID
+        localCaptures = (InboxCaptureStore.shared()?.all() ?? [])
+            .filter { ($0.ownerHint == nil || $0.ownerHint == me) && $0.syncedRemoteID == nil }.count
+        do {
+            async let personal = inbox.listPersonalItems(kind: "place")
+            async let candidates = inbox.listPersonalCandidates(kind: "place")
+            async let captures = inbox.listCaptures()
+            (personalItems, candidateItems, recentCaptures) = try await (personal, candidates, captures)
+            inboxError = nil
+        } catch {
+            inboxError = "分享內容暫時無法讀取：\(userMessage(for: error))"
+        }
+    }
+
+    private func refreshInboxUntilSettled() async {
+        await session.syncInboxCaptures()
+        for _ in 0..<30 {
+            if Task.isCancelled { return }
+            await loadInbox()
+            await discoverRecentPlaces()
+            if localCaptures == 0 && !recentCaptures.contains(where: { $0.status == "saved" || $0.status == "processing" }) { return }
+            try? await Task.sleep(for: .seconds(3))
+        }
+    }
+
+    /// 分享整理完成後自動補韓文店名與地址線索，使用者不用先進確認頁點搜尋。
+    private func discoverRecentPlaces() async {
+        let recentIDs = Set(recentCaptures.prefix(10).map(\.id))
+        let unresolved = (personalItems + candidateItems).filter {
+            recentIDs.contains($0.captureID) && $0.resolutionStatus != "verified" && $0.discoveryCheckedAt == nil
+        }
+        guard !unresolved.isEmpty else { return }
+        discoveringPlaces = true
+        defer { discoveringPlaces = false }
+        for item in unresolved.prefix(3) {
+            guard !Task.isCancelled else { return }
+            do {
+                _ = try await inbox.discoverPlaces(for: item.id)
+                await loadInbox()
+            } catch let error as PlaceDiscoveryError {
+                inboxError = error.userMessage
+                return
+            } catch {
+                inboxError = "韓文店名暫時無法查找：\(userMessage(for: error))"
+                return
+            }
+        }
+    }
+
+    private func inboxStatus(_ status: String) -> String {
+        switch status {
+        case "saved", "processing": "正在整理，完成後會出現在下方"
+        case "ready": "已整理，可查看來源與候選"
+        case "insufficient": "來源已保存，內容不足以辨識地點"
+        case "failed": "整理失敗，點此查看並重試"
+        default: "已保存"
+        }
+    }
+
+    private func undoPersonal(_ item: InboxItemRecord) async {
+        do { _ = try await inbox.updateItem(item, archived: false); await loadInbox() }
+        catch { inboxError = "撤銷失敗：\(userMessage(for: error))" }
     }
 
     /// 想去可離線（決策 D6）：連不上時先更新畫面並排入佇列。
@@ -428,7 +558,8 @@ struct AddSavedPlaceView: View {
                     Section {
                         NavigationLink {
                             ShareFlowView(content: ShareContent(urls: [url], texts: [trimmed]), repository: session.trips,
-                                          matcher: session.routes, placeSearch: session.placeSearch, saveDraft: nil) { _ in onDone() }
+                                          matcher: session.routes, placeSearch: session.placeSearch, saveDraft: nil,
+                                          discoveryRepository: InboxRepository(client: session.client)) { _ in onDone() }
                                 .navigationTitle("解析連結")
                         } label: {
                             Label("解析這個連結", systemImage: "link")
@@ -465,7 +596,8 @@ struct AddSavedPlaceView: View {
             }
             .navigationDestination(item: $screenshot) { shot in
                 ShareFlowView(content: ShareContent(hasImage: true, imageJPEG: shot.jpeg), repository: session.trips,
-                              matcher: session.routes, placeSearch: session.placeSearch, saveDraft: nil) { _ in onDone() }
+                              matcher: session.routes, placeSearch: session.placeSearch, saveDraft: nil,
+                              discoveryRepository: InboxRepository(client: session.client)) { _ in onDone() }
                     .navigationTitle("辨識截圖")
             }
             .onChange(of: photo) {

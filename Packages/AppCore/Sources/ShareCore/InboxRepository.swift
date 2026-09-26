@@ -8,6 +8,8 @@ public struct InboxRecord: Decodable, Identifiable, Sendable {
     public var sourceURL: String?
     public var title: String?
     public var rawText: String
+    public var publicText: String?
+    public var resolvedSourceURL: String?
     public var unavailableCount: Int
     public var status: String
     public var contentKind: String?
@@ -18,6 +20,8 @@ public struct InboxRecord: Decodable, Identifiable, Sendable {
         case id, title, status
         case sourceURL = "source_url"
         case rawText = "raw_text"
+        case publicText = "public_text"
+        case resolvedSourceURL = "resolved_source_url"
         case unavailableCount = "unavailable_count"
         case contentKind = "content_kind"
         case errorCode = "error_code"
@@ -36,6 +40,11 @@ public struct InboxItemRecord: Decodable, Identifiable, Sendable {
     public var dayIndex: Int?
     public var resolutionStatus: String
     public var placeID: UUID?
+    public var storeHint: String?
+    public var storeEvidence: String?
+    /// 網路來源支持的候選；不等於已確認地圖座標。
+    public var discoveryCandidates: [DiscoveredPlace]?
+    public var discoveryCheckedAt: String?
     public var archived: Bool
     public var revision: Int
 
@@ -48,6 +57,10 @@ public struct InboxItemRecord: Decodable, Identifiable, Sendable {
         case dayIndex = "day_index"
         case resolutionStatus = "resolution_status"
         case placeID = "place_id"
+        case storeHint = "store_hint"
+        case storeEvidence = "store_evidence"
+        case discoveryCandidates = "discovery_candidates"
+        case discoveryCheckedAt = "discovery_checked_at"
     }
 }
 
@@ -108,6 +121,37 @@ public enum InboxSyncError: Error {
     case uploadUnavailable
 }
 
+public struct DiscoveredPlace: Decodable, Identifiable, Sendable {
+    public var name: String
+    public var koreanName: String?
+    public var addressLocal: String?
+    public var searchQuery: String
+    public var reason: String
+    public var sourceURL: String
+
+    public var id: String { name + "|" + sourceURL }
+
+    enum CodingKeys: String, CodingKey {
+        case name, reason
+        case koreanName = "korean_name"
+        case addressLocal = "address_local"
+        case searchQuery = "search_query"
+        case sourceURL = "source_url"
+    }
+}
+
+public enum PlaceDiscoveryError: Error {
+    case unavailable(String)
+
+    public var userMessage: String {
+        switch self {
+        case .unavailable("rate_limited"): "今日 AI 查找次數已達上限，請稍後再試。"
+        case .unavailable("search_unavailable"): "即時網路查找尚未啟用；可先用店名搜尋地圖。"
+        default: "暫時無法查找近期餐廳資料，請稍後重試。"
+        }
+    }
+}
+
 /// 所有 API 由 JWT + owner-only RLS／RPC 驗證。Extension 與主 App 可共用同一同步實作。
 public struct InboxRepository: Sendable {
     public let client: SupabaseClient
@@ -145,6 +189,15 @@ public struct InboxRepository: Sendable {
         } catch { throw BackendError.from(error) }
     }
 
+    /// AI 找到但尚未自動歸檔的候選；使用者已撤銷的項目不再重新提示。
+    public func listPersonalCandidates(kind: String) async throws -> [InboxItemRecord] {
+        do {
+            return try await client.from("inbox_items").select().eq("kind", value: kind)
+                .eq("archived", value: false).eq("user_corrected", value: false)
+                .order("created_at", ascending: false).limit(100).execute().value
+        } catch { throw BackendError.from(error) }
+    }
+
     public func pendingPlaces() async throws -> [InboxItemRecord] {
         do {
             return try await client.from("inbox_items").select().eq("kind", value: "place")
@@ -166,6 +219,31 @@ public struct InboxRepository: Sendable {
             let _: [String: String] = try await client.functions.invoke("organize-inbox", options: FunctionInvokeOptions(
                 body: Params(capture_id: captureID)))
         } catch { throw BackendError.from(error) }
+    }
+
+    /// 網路結果只有店名與可回查的來源；座標仍須由地點服務搜尋並由使用者確認。
+    public func discoverPlaces(for itemID: UUID, force: Bool = false) async throws -> [DiscoveredPlace] {
+        struct Body: Encodable { let item_id: UUID, force: Bool }
+        struct Result: Decodable { let status: String, candidates: [DiscoveredPlace]?, reason: String? }
+        let result: Result
+        do {
+            result = try await client.functions.invoke("discover-places", options: FunctionInvokeOptions(body: Body(item_id: itemID, force: force)))
+        } catch { throw BackendError.from(error) }
+        guard result.status != "failed" else { throw PlaceDiscoveryError.unavailable(result.reason ?? "unknown") }
+        return result.candidates ?? []
+    }
+
+    /// 收藏頁直接選截圖時，先以裝置 OCR 的線索查韓國店名；尚未建立收件項目。
+    public func discoverPlaces(query: String, context: String) async throws -> [DiscoveredPlace] {
+        struct Body: Encodable { let query: String, context: String }
+        struct Result: Decodable { let status: String, candidates: [DiscoveredPlace]?, reason: String? }
+        let result: Result
+        do {
+            result = try await client.functions.invoke("discover-places", options: FunctionInvokeOptions(
+                body: Body(query: String(query.prefix(200)), context: String(context.prefix(1000)))))
+        } catch { throw BackendError.from(error) }
+        guard result.status != "failed" else { throw PlaceDiscoveryError.unavailable(result.reason ?? "unknown") }
+        return result.candidates ?? []
     }
 
     /// Capture 建立後才上傳縮圖；影片保存在裝置，尚未通過影片辨識驗證。

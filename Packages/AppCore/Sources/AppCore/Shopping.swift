@@ -12,9 +12,12 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
     public var plannedStopId: UUID?
     /// 私有 bucket `shopping-images` 內的路徑（`<trip_id>/<檔名>`）；顯示時換成簽名網址。
     public var imagePath: String?
+    /// 分享內容提到的店名；只是搜尋線索，不能當販售或庫存事實。
+    public var storeHint: String?
+    public var storeEvidence: String?
 
     public init(id: UUID, tripId: UUID, name: String, note: String? = nil, url: String? = nil, addedBy: UUID?, plannedStopId: UUID? = nil,
-                imagePath: String? = nil) {
+                imagePath: String? = nil, storeHint: String? = nil, storeEvidence: String? = nil) {
         self.id = id
         self.tripId = tripId
         self.name = name
@@ -23,6 +26,8 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
         self.addedBy = addedBy
         self.plannedStopId = plannedStopId
         self.imagePath = imagePath
+        self.storeHint = storeHint
+        self.storeEvidence = storeEvidence
     }
 
     enum CodingKeys: String, CodingKey {
@@ -31,6 +36,8 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
         case addedBy = "added_by"
         case plannedStopId = "planned_stop_id"
         case imagePath = "image_path"
+        case storeHint = "store_hint"
+        case storeEvidence = "store_evidence"
     }
 }
 
@@ -70,6 +77,80 @@ public struct MerchantCandidate: Codable, Identifiable, Hashable, Sendable {
         case evidenceNote = "evidence_note"
         case expiresAt = "expires_at"
         case inventoryStatus = "inventory_status"
+    }
+}
+
+/// 已排進行程、且同一地點有尚未過期販售線索的停靠點。只表示可能販售，不代表有庫存。
+public struct ShoppingItineraryMatch: Identifiable, Hashable, Sendable {
+    public var itemID: UUID
+    public var stopID: UUID
+    public var dayNumber: Int
+    public var placeName: String
+    /// nil 代表商品品牌與店名相符的待確認建議，不是販售證據。
+    public var evidenceType: MerchantCandidate.EvidenceType?
+    public var evidenceURL: String?
+    public var evidenceNote: String?
+
+    public var id: UUID { stopID }
+
+    public init(itemID: UUID, stopID: UUID, dayNumber: Int, placeName: String,
+                evidenceType: MerchantCandidate.EvidenceType?, evidenceURL: String?, evidenceNote: String?) {
+        self.itemID = itemID
+        self.stopID = stopID
+        self.dayNumber = dayNumber
+        self.placeName = placeName
+        self.evidenceType = evidenceType
+        self.evidenceURL = evidenceURL
+        self.evidenceNote = evidenceNote
+    }
+
+    /// 未定位或線索過期的地點不會被當作可購買地點；同一間店可列在不同天。
+    public static func find(items: [ShoppingItem], stops: [Stop], days: [TripDay], places: [Place], candidates: [MerchantCandidate],
+                            now: Date = Date()) -> [UUID: [ShoppingItineraryMatch]] {
+        let daysByID = Dictionary(uniqueKeysWithValues: days.map { ($0.id, $0) })
+        let placesByID = Dictionary(uniqueKeysWithValues: places.map { ($0.id, $0) })
+        let candidatesByPlace = Dictionary(grouping: candidates.filter { !$0.isExpired(now: now) }, by: \.placeId)
+        var matches: [UUID: [ShoppingItineraryMatch]] = [:]
+        for stop in stops where stop.isRoutable {
+            guard let placeID = stop.placeId, let place = placesByID[placeID], let day = daysByID[stop.dayId] else { continue }
+            for candidate in candidatesByPlace[placeID] ?? [] {
+                matches[candidate.itemId, default: []].append(ShoppingItineraryMatch(
+                    itemID: candidate.itemId, stopID: stop.id, dayNumber: day.displayOrder + 1,
+                    placeName: place.displayTitle(fallbackChinese: stop.rawLabel),
+                    evidenceType: candidate.evidenceType, evidenceURL: candidate.evidenceUrl,
+                    evidenceNote: candidate.evidenceNote))
+            }
+            // 沒有販售證據時，只用足夠明確的品牌／店名文字提出「可詢問」建議。
+            // 不把商品類別或附近商場推成實際販售點。
+            for item in items where !(candidatesByPlace[placeID] ?? []).contains(where: { $0.itemId == item.id }) {
+                guard Self.storeMatches(item, place: place) else { continue }
+                matches[item.id, default: []].append(ShoppingItineraryMatch(
+                    itemID: item.id, stopID: stop.id, dayNumber: day.displayOrder + 1,
+                    placeName: place.displayTitle(fallbackChinese: stop.rawLabel),
+                    evidenceType: nil, evidenceURL: nil,
+                    evidenceNote: item.storeHint.map { "分享內容提到的店名：\($0)" }))
+            }
+        }
+        return matches.mapValues { $0.sorted { ($0.dayNumber, $0.placeName) < ($1.dayNumber, $1.placeName) } }
+    }
+
+    private static func storeMatches(_ item: ShoppingItem, place: Place) -> Bool {
+        let first = item.name.split(whereSeparator: { $0.isWhitespace || $0 == "-" || $0 == "・" }).first.map(String.init)
+        let terms: [(text: String, explicit: Bool)] = [item.storeHint.map { ($0, true) }, first.map { ($0, false) }].compactMap { $0 }
+        let storeNames = [place.name, place.nameLocal, place.nameZh].compactMap { $0 }
+        return terms.contains { term in
+            let normalizedTerm = term.text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            let distinctiveShortBrand = term.text.count >= 3 && term.text.allSatisfy { $0.isASCII && $0.isUppercase }
+            guard normalizedTerm.rangeOfCharacter(from: .letters) != nil,
+                  normalizedTerm.count >= 4 || (term.explicit && normalizedTerm.count >= 2) || distinctiveShortBrand else { return false }
+            return storeNames.contains { name in
+                let normalizedName = name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                if normalizedTerm.count < 4 {
+                    return normalizedName.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).contains { $0 == normalizedTerm }
+                }
+                return normalizedName.contains(normalizedTerm)
+            }
+        }
     }
 }
 
@@ -160,6 +241,7 @@ public protocol ShoppingService: Sendable {
     func recordPurchase(itemID: UUID, purchased: Bool, clientOpID: UUID?) async throws
     func setShoppingInterest(itemID: UUID, interested: Bool) async throws
     func merchants(of itemID: UUID) async throws -> [MerchantCandidate]
+    func itineraryMatches(tripID: UUID, items: [ShoppingItem]) async throws -> [UUID: [ShoppingItineraryMatch]]
     func addMerchant(itemID: UUID, placeID: UUID, evidence: MerchantCandidate.EvidenceType, url: String?, note: String?) async throws
     var currentUserID: UUID? { get }
     /// 上傳商品照片（JPEG）並設到商品上。
@@ -169,11 +251,35 @@ public protocol ShoppingService: Sendable {
 }
 
 extension ShoppingService {
+    public func itineraryMatches(tripID: UUID, items: [ShoppingItem]) async throws -> [UUID: [ShoppingItineraryMatch]] { [:] }
     public func setShoppingImage(tripID: UUID, itemID: UUID, jpeg: Data) async throws {}
     public func shoppingImageURL(path: String) async -> URL? { nil }
 }
 
 extension TripRepository: ShoppingService {
+    public func setShoppingStoreHint(itemID: UUID, name: String, evidence: String?) async throws {
+        struct Params: Encodable { let p_item_id: UUID, p_store_hint: String, p_store_evidence: String? }
+        do {
+            try await client.rpc("set_shopping_store_hint", params: Params(
+                p_item_id: itemID, p_store_hint: name, p_store_evidence: evidence)).execute()
+        } catch { throw BackendError.from(error) }
+    }
+
+    public func itineraryMatches(tripID: UUID, items: [ShoppingItem]) async throws -> [UUID: [ShoppingItineraryMatch]] {
+        guard !items.isEmpty else { return [:] }
+        do {
+            async let daysRequest = days(of: tripID)
+            async let stopsRequest = stops(of: tripID)
+            let candidates: [MerchantCandidate] = try await client.from("merchant_candidates").select()
+                .in("item_id", values: items.map { $0.id.uuidString }).execute().value
+            let (days, stops) = try await (daysRequest, stopsRequest)
+            let places = try await places(ids: Array(Set(stops.compactMap(\.placeId))))
+            return ShoppingItineraryMatch.find(items: items, stops: stops, days: days, places: places, candidates: candidates)
+        } catch {
+            throw BackendError.from(error)
+        }
+    }
+
     public func shoppingEntries(of tripID: UUID) async throws -> [ShoppingEntry] {
         struct Interest: Decodable { let item_id: UUID, user_id: UUID }
         do {

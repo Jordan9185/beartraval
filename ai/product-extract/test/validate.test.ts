@@ -8,8 +8,18 @@ const input: ExtractInput = { text: "新買的 ReFa FINE BUBBLE S 蓮蓬頭 超�
 
 function product(overrides: Partial<ExtractedProduct> = {}): ExtractedProduct {
   return { name: "ReFa FINE BUBBLE S", brand: "ReFa", variant: null, search_query: "ReFa FINE BUBBLE S",
-           evidence: "ReFa FINE BUBBLE S", confidence: "high", ...overrides };
+           evidence: "ReFa FINE BUBBLE S", store_hint: null, store_evidence: null, confidence: "high", ...overrides };
 }
+
+test("只有原文提到的店家才保留商品店名線索", () => {
+  const post = { ...input, text: "在 IVYNYU LAB 看到這副墨鏡" };
+  const item = product({ name: "墨鏡", evidence: "墨鏡", store_hint: "IVYNYU LAB", store_evidence: "IVYNYU LAB" });
+  const found = validateProducts(post, { products: [item], warnings: [] });
+  assert.equal(found.result.products[0]?.store_hint, "IVYNYU LAB");
+  const invented = validateProducts(post, { products: [product({ ...item, store_hint: "虛構店", store_evidence: "虛構店" })], warnings: [] });
+  assert.equal(invented.result.products[0]?.store_hint, null);
+  assert.ok(invented.issues.some((issue) => issue.path.endsWith("store_hint")));
+});
 
 test("product quoted from the caption stays high confidence", () => {
   const { result, issues } = validateProducts(input, { products: [product()], warnings: [] });

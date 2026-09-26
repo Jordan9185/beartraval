@@ -1,7 +1,7 @@
 // Output contract for product extraction from a shared post (spec §3.6).
 //
 // Only a draft: the user picks which products go on the shopping list and can
-// edit every field. Where to buy and stock never come from the model (rule 6).
+// edit every field. A quoted store is a clue, never confirmed availability.
 
 import * as z from "zod/v4";
 
@@ -15,6 +15,9 @@ export const ExtractedProduct = z.object({
   search_query: z.string().nullable(),
   // Where in the post it came from: quoted caption text, or "image".
   evidence: z.string(),
+  // A named shop or counter explicitly shown in the post; never inventory proof.
+  store_hint: z.string().nullable(),
+  store_evidence: z.string().nullable(),
   confidence: z.enum(["high", "medium", "low"]),
 });
 

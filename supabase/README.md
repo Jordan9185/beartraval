@@ -161,7 +161,11 @@ supabase status     # 取得 anon key
 
 ## Edge Function：`organize-inbox`
 
-以使用者 JWT 及 owner-only RLS 確認來源，背景讀取實際分享的文字與最多十張私有圖片縮圖，用 `ai/inbox-organize` 整理個人候選與行程模板。純連結、無可讀內容的影片不猜測畫面。分析結果只寫個人收件匣；套用正式旅程需使用者在 App 明確確認。缺少 `ANTHROPIC_API_KEY` 時標示失敗，來源保留可重試。
+以使用者 JWT 及 owner-only RLS 確認來源，背景讀取實際分享的文字與最多十張私有圖片縮圖，用 `ai/inbox-organize` 整理個人候選與行程模板。Threads 公開分享短連結可在限定網域與轉址範圍內讀取 Open Graph 摘要，另存 `public_text`，不覆寫原始分享內容；讀不到時保留來源並標示資訊不足。純連結、無可讀內容的影片不猜測畫面。圖片裡明確可讀的名稱可進個人清單，模糊料理與區域只作候選。商品店名線索另存 `store_hint`，不代表可購買或有庫存。分析結果只寫個人收件匣；套用正式旅程需使用者在 App 明確確認。缺少 `ANTHROPIC_API_KEY` 時標示失敗，來源保留可重試。
+
+## Edge Function：`discover-places`
+
+以使用者 JWT 查詢自己未定位的收藏線索，或接收收藏頁直接從截圖 OCR 得到的查詢字串，使用即時網頁搜尋取得最多三間有來源網址的具名餐廳候選。候選包含韓文店名與來源引用中逐字可核對的韓文地址；沒有地址證據就回 `null`。收件項目的候選與查詢時間保存在本人項目，避免重複搜尋；直接截圖查詢尚未有收件項目，不落庫。App 直接顯示 Naver／Kakao 入口，另用 MapKit 查行程定位點並由使用者確認。搜尋結果與 MapKit 地點都不代表目前熱門程度、營業狀態或可訂位。
 
 ## iOS 整合測試
 
@@ -175,7 +179,7 @@ swift test --package-path Packages/AppCore
 
 ## 雲端專案（首爾）
 
-- 專案：`BeaRTravel`（`dchzimksdgxzjvzswzrh`，ap-northeast-2）。截至 2026-09-26，已套用至 `20260926000020`，`organize-inbox` 與更新後的 `delete-account` 已部署並顯示 ACTIVE、JWT 驗證開啟；未登入的整理請求回 401。這是部署與基本權限入口驗證，兩帳號與真機流程尚待驗收。既有設定已開放 `app` schema、關閉 Email 確認、密碼最短 8。
+- 專案：`BeaRTravel`（`dchzimksdgxzjvzswzrh`，ap-northeast-2）。截至 2026-09-26，migration 已套用至 `20260926000026`；`organize-inbox`、`discover-places`、`extract-products` 已重新部署。Jordan 的 iPhone 已安裝簽章 Release 版供人工測試；這代表裝置交付，尚未代表分享、辨識與地點品質已驗收。既有設定已開放 `app` schema、關閉 Email 確認、密碼最短 8。
 - 更新：`supabase db push`、`supabase functions deploy`；`supabase config push` 會把本機 `config.toml` 的 auth 設定一併推上去，推之前先看差異。
 - App：Release build 連雲端，網址與 anon key 放在 `Config/Cloud.xcconfig.local`（gitignore）；Debug build 連本機。
 - AI：`supabase secrets set ANTHROPIC_API_KEY=...` 後，匯入解析與 AI 助手才會運作。

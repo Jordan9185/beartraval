@@ -106,6 +106,8 @@ public final class SessionModel {
         let inbox = InboxRepository(client: client)
         guard let items = try? await inbox.pendingPlaces() else { return }
         for item in items {
+            // 截圖文字沒有分店地址時，Apple 地圖的單一同名結果仍可能是錯店；先留給網路線索補查。
+            if item.sourceSpan.hasPrefix("image:") { continue }
             let lookup = await placeSearch.lookup(item.displayName, around: nil, limit: 5)
             guard case .found(let candidates) = lookup else { continue }
             let source = ParsedStop(sourceExcerpt: item.sourceSpan, placeName: item.displayName,
