@@ -14,8 +14,13 @@ select app.commit_itinerary(:'first_day', 0,
   '[{"raw_label":"已訂餐廳","start_time":"18:00","fixed":true}]');
 select id as fixed_stop from app.stops where day_id = :'first_day' and fixed \gset
 
-select (app.schedule_shopping_store(:'item_id', 0, 'https://example.com/loe', :'first_day', 1,
-  '20000000-0000-0000-0000-000000000001')) as scheduled \gset
+select tests.throws(format($$select app.schedule_shopping_store(%L, 0, 'https://example.com/loe',
+  '另一間分店', %L, 1, %L, '서울특별시 성동구 연무장길 12')$$,
+  :'item_id', :'first_day', '20000000-0000-0000-0000-000000000010'),
+  'PT409', '同一網頁的不同分店不能被替換');
+select (app.schedule_shopping_store(:'item_id', 0, 'https://example.com/loe', '로에 성수',
+  :'first_day', 1, '20000000-0000-0000-0000-000000000001',
+  '서울특별시 성동구 연무장길 12')) as scheduled \gset
 select tests.ok((:'scheduled'::jsonb ->> 'status') = 'scheduled', '商品候選排到選定日期');
 select tests.ok((select kind = 'purchase' and resolution_status = 'pending_text' and place_id is null
                    from app.stops where id = (:'scheduled'::jsonb ->> 'stop_id')::uuid),
@@ -49,6 +54,9 @@ select tests.throws(format($$select app.schedule_shopping_store(%L, 0, 'https://
   'PT409', '當天版本過期時不得排入');
 select tests.ok((select planned_stop_id is null from app.shopping_items where id = :'item2'),
   '失敗的安排不更改商品');
+select tests.ok((app.schedule_shopping_store(:'item2', 0, 'https://example.com/milk',
+  'Milk Shop', :'second_day', 0, '20000000-0000-0000-0000-000000000006') ->> 'status') = 'scheduled',
+  '沒有地址的具名店家也可先排成待定位購買站');
 
 select app.commit_itinerary(:'first_day', 2,
   format('[{"id":%s,"raw_label":"已訂餐廳","start_time":"18:00","fixed":true}]',

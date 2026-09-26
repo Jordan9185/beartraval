@@ -104,10 +104,11 @@ struct ShoppingScheduleView: View {
         submitting = true
         defer { submitting = false }
         do {
-            _ = try await repository.scheduleShoppingStore(
+            let result = try await repository.scheduleShoppingStore(
                 itemID: entry.id, suggestionIndex: suggestionIndex, sourceURL: candidate.sourceURL,
+                expectedStoreName: candidate.displayName, expectedAddressLocal: candidate.addressLocal,
                 dayID: day.id, expectedRouteRevision: day.routeRevision, clientOpID: operationID)
-            onScheduled(day.id)
+            onScheduled(result.dayID)
             dismiss()
         } catch BackendError.staleRevision {
             await load()

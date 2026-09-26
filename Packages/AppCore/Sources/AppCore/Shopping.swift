@@ -241,7 +241,7 @@ public struct ShoppingEntry: Identifiable, Codable, Hashable, Sendable {
     /// 已安排在旅程的第幾天（1 起算），畫面用「第 N 天」而不是日期字串。
     public var plannedDayNumber: Int?
     public var plannedDayID: UUID?
-    public var plannedStoreLocated = false
+    public var plannedStoreLocated: Bool?
 
     public var id: UUID { item.id }
 
@@ -328,12 +328,15 @@ extension TripRepository: ShoppingService {
 
     /// 把已儲存的店家候選排到指定日期；候選與地址由後端核對，不由裝置自行填入。
     public func scheduleShoppingStore(itemID: UUID, suggestionIndex: Int, sourceURL: String,
+                                      expectedStoreName: String, expectedAddressLocal: String?,
                                       dayID: UUID, expectedRouteRevision: Int,
                                       clientOpID: UUID) async throws -> SavedScheduleResult {
         struct Params: Encodable {
             let p_item_id: UUID
             let p_suggestion_index: Int
             let p_source_url: String
+            let p_expected_store_name: String
+            let p_expected_address_local: String?
             let p_day_id: UUID
             let p_expected_route_revision: Int
             let p_client_op_id: UUID
@@ -341,6 +344,8 @@ extension TripRepository: ShoppingService {
         do {
             return try await client.rpc("schedule_shopping_store", params: Params(
                 p_item_id: itemID, p_suggestion_index: suggestionIndex, p_source_url: sourceURL,
+                p_expected_store_name: expectedStoreName,
+                p_expected_address_local: expectedAddressLocal,
                 p_day_id: dayID, p_expected_route_revision: expectedRouteRevision,
                 p_client_op_id: clientOpID)).execute().value
         } catch { throw BackendError.from(error) }

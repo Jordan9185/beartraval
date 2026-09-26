@@ -654,7 +654,7 @@ struct ShoppingItemDetailView: View {
                     if let address = entry.item.scheduledStoreAddressLocal {
                         Text(address).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                     }
-                    Text(entry.plannedStoreLocated
+                    Text(entry.plannedStoreLocated == true
                          ? "已定位 · 是否販售與庫存未知。"
                          : "可詢問 · 是否販售與庫存未知；店家尚待定位。")
                         .font(.caption).foregroundStyle(.secondary)
