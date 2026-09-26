@@ -7,16 +7,16 @@ import SwiftUI
 struct SavedView: View {
     let session: SessionModel
     var preferredTripID: UUID? = nil
+    var onOpenDay: (UUID, UUID) -> Void = { _, _ in }
     var onTripSelected: (UUID?) -> Void = { _ in }
     @State private var trips: [Trip] = []
     @State private var tripID: UUID?
     @State private var entries: [SavedEntry] = []
     @State private var filter: SavedFilter = .all
-    @State private var includeAdded = false
     @State private var drafts: [ShareDraft] = []
     @State private var openDraft: ShareDraft?
-    @State private var routeFor: SavedEntry?
-    @State private var resolving: SavedEntry?
+    @State private var scheduling: SavedEntry?
+    @State private var scheduledDays: [UUID: TripDay] = [:]
     @State private var errorMessage: String?
     @State private var loaded = false
     @State private var myRole: TripRole?
@@ -99,7 +99,6 @@ struct SavedView: View {
                 }
                 .pickerStyle(.segmented)
                 .listRowBackground(Color.clear)
-                Toggle("顯示已加入行程", isOn: $includeAdded)
 
                 if let errorMessage { ErrorText(errorMessage) }
                 if queued > 0 {
@@ -108,11 +107,12 @@ struct SavedView: View {
 
                 if !entries.isEmpty {
                     Section("旅伴共同收藏") {
-                        ForEach(filter.apply(entries, includeAdded: includeAdded)) { entry in
+                        ForEach(filter.apply(entries, includeAdded: true)) { entry in
                             SavedRow(entry: entry, me: session.trips.currentUserID, canEdit: myRole?.canEdit == true,
+                                     scheduledDay: scheduledDays[entry.id],
                                      toggleInterest: { Task { await toggleInterest(entry) } },
-                                     showRoute: { routeFor = entry },
-                                     resolve: { resolving = entry },
+                                     schedule: { scheduling = entry },
+                                     showDay: { if let day = scheduledDays[entry.id] { onOpenDay(entry.saved.tripId, day.id) } },
                                      open: { detail = entry })
                             .swipeActions {
                                 if myRole?.canEdit == true {
@@ -126,7 +126,7 @@ struct SavedView: View {
             .overlay {
                 if loaded && trips.isEmpty && personalItems.isEmpty && candidateItems.isEmpty && recentCaptures.isEmpty && localCaptures == 0 {
                     ContentUnavailableView("還沒有旅程", systemImage: "bookmark", description: Text("先到「旅程」建立或加入旅程。"))
-                } else if loaded && filter.apply(entries, includeAdded: includeAdded).isEmpty && drafts.isEmpty &&
+                } else if loaded && filter.apply(entries, includeAdded: true).isEmpty && drafts.isEmpty &&
                             personalItems.isEmpty && candidateItems.isEmpty && recentCaptures.isEmpty && localCaptures == 0 {
                     ContentUnavailableView("還沒有收藏", systemImage: "bookmark",
                                            description: Text("按右上角 ＋ 新增，或從 Threads、IG、地圖 App 分享到 BeaRTravel。"))
@@ -190,27 +190,27 @@ struct SavedView: View {
                     .toolbar { ToolbarItem(placement: .cancellationAction) { Button("關閉") { openDraft = nil } } }
                 }
             }
-            .sheet(item: $routeFor) { entry in
-                if let tripID, let place = entry.place {
-                    SavedRouteSheet(session: session, tripID: tripID, place: place, category: entry.saved.category, canEdit: myRole?.canEdit == true) {
+            .sheet(item: $scheduling) { entry in
+                NavigationStack {
+                    SavedScheduleView(session: session, entry: entry) { dayID in
+                        scheduling = nil
                         Task { await reload() }
+                        onOpenDay(entry.saved.tripId, dayID)
                     }
+                    .toolbar { ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { scheduling = nil }
+                    } }
                 }
             }
             .sheet(item: $detail) { entry in
-                SavedDetailView(entry: entry, me: session.trips.currentUserID, canEdit: myRole?.canEdit == true,
+                SavedDetailView(session: session, entry: entry, me: session.trips.currentUserID,
+                                canEdit: myRole?.canEdit == true, scheduledDay: scheduledDays[entry.id],
                                 tripCountry: trips.first(where: { $0.id == tripID }).flatMap {
                                     LocalMapCountry.guess(name: $0.name, timeZone: $0.timeZone)
                                 }, repository: session.trips, discoveryRepository: inbox) {
                     Task { await reload() }
-                }
-                    .presentationDetents([.medium, .large])
-            }
-            .sheet(item: $resolving) { entry in
-                ResolvePlaceSheet(session: session, entry: entry) {
-                    resolving = nil
-                    Task { await reload() }
-                }
+                } onOpenDay: { dayID in onOpenDay(entry.saved.tripId, dayID) }
+                    .presentationDetents([.large])
             }
             .sheet(isPresented: $showsInbox) { InboxView(session: session) }
         }
@@ -251,7 +251,19 @@ struct SavedView: View {
         queued = await session.offlineQueue.items.count
         guard let tripID else { return }
         do {
-            entries = try await session.trips.savedEntries(of: tripID)
+            async let saved = session.trips.savedEntries(of: tripID)
+            async let days = session.trips.days(of: tripID)
+            async let stops = session.trips.stops(of: tripID)
+            let (loadedEntries, loadedDays, loadedStops) = try await (saved, days, stops)
+            entries = loadedEntries
+            let dayByID = Dictionary(uniqueKeysWithValues: loadedDays.map { ($0.id, $0) })
+            scheduledDays = Dictionary(uniqueKeysWithValues: loadedEntries.compactMap { entry in
+                let stop = loadedStops.first {
+                    $0.id == entry.saved.plannedStopId ||
+                        (entry.saved.plannedStopId == nil && entry.saved.placeId != nil && $0.placeId == entry.saved.placeId)
+                }
+                return stop.flatMap { dayByID[$0.dayId] }.map { (entry.id, $0) }
+            })
             errorMessage = nil
         } catch {
             errorMessage = "讀取失敗：\(userMessage(for: error))"
@@ -356,9 +368,10 @@ struct SavedRow: View {
     let entry: SavedEntry
     let me: UUID?
     let canEdit: Bool
+    let scheduledDay: TripDay?
     let toggleInterest: () -> Void
-    let showRoute: () -> Void
-    let resolve: () -> Void
+    let schedule: () -> Void
+    let showDay: () -> Void
     let open: () -> Void
 
     var body: some View {
@@ -367,7 +380,7 @@ struct SavedRow: View {
             if let address = entry.addressLabel {
                 Text(address).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
             }
-            Text(SavedRow.status(entry, me: me)).font(.caption).foregroundStyle(.secondary)
+            Text(SavedRow.status(entry, me: me, scheduledDay: scheduledDay)).font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 16) {
                 Button {
                     toggleInterest()
@@ -378,10 +391,10 @@ struct SavedRow: View {
                 }
                 .disabled(!canEdit)
                 Spacer()
-                if entry.isConfirmed {
-                    if entry.saved.status == .saved { Button("試算順路", action: showRoute) }
-                } else if canEdit {
-                    Button("補填地點", action: resolve)
+                if entry.saved.status == .saved && canEdit {
+                    Button("排進旅程", action: schedule)
+                } else if entry.saved.status == .addedToItinerary, scheduledDay != nil {
+                    Button("查看第 \((scheduledDay?.displayOrder ?? 0) + 1) 天", action: showDay)
                 }
             }
             .font(.caption)
@@ -391,10 +404,13 @@ struct SavedRow: View {
         .onTapGesture(perform: open)
     }
 
-    static func status(_ entry: SavedEntry, me: UUID?) -> String {
+    static func status(_ entry: SavedEntry, me: UUID?, scheduledDay: TripDay? = nil) -> String {
         var parts = [entry.saved.category.displayName]
         if !entry.isConfirmed {
             parts.append("未定位")
+        }
+        if let scheduledDay {
+            parts.append("已排第 \(scheduledDay.displayOrder + 1) 天")
         } else if entry.saved.status == .addedToItinerary {
             parts.append("已加入行程")
         }
@@ -405,13 +421,16 @@ struct SavedRow: View {
 
 /// 收藏詳情：來源、司機卡、當地地圖。
 struct SavedDetailView: View {
+    let session: SessionModel
     let entry: SavedEntry
     let me: UUID?
     let canEdit: Bool
+    let scheduledDay: TripDay?
     let tripCountry: String?
     let repository: TripRepository
     let discoveryRepository: InboxRepository
     let onChanged: () -> Void
+    let onOpenDay: (UUID) -> Void
     @State private var addressHint: String?
     @State private var addressSourceURL: String?
     @State private var candidates: [DiscoveredPlace] = []
@@ -429,12 +448,43 @@ struct SavedDetailView: View {
                         Text(entry.isConfirmed ? address : "地址線索：\(address)")
                             .font(.subheadline).textSelection(.enabled)
                     }
-                    Text(SavedRow.status(entry, me: me)).font(.caption).foregroundStyle(.secondary)
+                    Text(SavedRow.status(entry, me: me, scheduledDay: scheduledDay))
+                        .font(.caption).foregroundStyle(.secondary)
                     if !entry.isConfirmed {
                         Label("未定位，不計入路線", systemImage: "mappin.slash").font(.caption).foregroundStyle(.secondary)
                     }
                     if searchingAddress { ProgressView("正在補查韓文地址…") }
                     if let addressMessage { Text(addressMessage).font(.caption).foregroundStyle(.secondary) }
+                }
+                if canEdit && entry.saved.status == .saved {
+                    Section {
+                        NavigationLink {
+                            SavedScheduleView(session: session, entry: entry) { dayID in
+                                onChanged()
+                                onOpenDay(dayID)
+                                dismiss()
+                            }
+                        } label: {
+                            Label("排進旅程", systemImage: "calendar.badge.plus")
+                        }
+                        if !entry.isConfirmed {
+                            NavigationLink {
+                                ResolvePlaceSheet(session: session, entry: entry, embedded: true) {
+                                    onChanged()
+                                    dismiss()
+                                }
+                            } label: {
+                                Label("確認地點", systemImage: "mappin.and.ellipse")
+                            }
+                        }
+                    }
+                } else if let scheduledDay {
+                    Section {
+                        Button("查看第 \(scheduledDay.displayOrder + 1) 天") {
+                            onOpenDay(scheduledDay.id)
+                            dismiss()
+                        }
+                    }
                 }
                 if !candidates.isEmpty {
                     Section("可能的店家地址") {
@@ -526,40 +576,11 @@ struct SavedDetailView: View {
     }
 }
 
-/// 從 Saved 試算並加入行程：載入時間軸後沿用試算順路畫面。
-struct SavedRouteSheet: View {
-    let session: SessionModel
-    let tripID: UUID
-    let place: Place
-    let category: SavedCategory
-    let canEdit: Bool
-    let onAdded: () -> Void
-    @State private var timeline: [DayTimeline]?
-    @State private var places: [UUID: Place] = [:]
-
-    var body: some View {
-        Group {
-            if let timeline {
-                RouteMatchView(session: session, tripID: tripID, timeline: timeline, places: places, onAdded: onAdded,
-                               preset: SearchResult(draft: place.asDraft),
-                               canEdit: canEdit)
-            } else {
-                ProgressView()
-            }
-        }
-        .task {
-            guard let days = try? await session.trips.days(of: tripID), let stops = try? await session.trips.stops(of: tripID),
-                  let list = try? await session.trips.places(ids: Array(Set(stops.compactMap(\.placeId)))) else { return }
-            places = Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) })
-            timeline = DayTimeline.build(days: days, stops: stops)
-        }
-    }
-}
-
 /// 手動補填未確認的地點（AC-04）：搜尋後由使用者選定。
 struct ResolvePlaceSheet: View {
     let session: SessionModel
     let entry: SavedEntry
+    var embedded = false
     let onDone: () -> Void
     @State private var query = ""
     @State private var results: [PlaceOption] = []
@@ -567,7 +588,16 @@ struct ResolvePlaceSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        if embedded {
+            content
+        } else {
         NavigationStack {
+            content
+        }
+        }
+    }
+
+    private var content: some View {
             Form {
                 Section("「\(entry.saved.rawLabel)」") {
                     PlaceSearchField(text: $query) { Task { await search() } }
@@ -584,7 +614,6 @@ struct ResolvePlaceSheet: View {
             .navigationTitle("補填地點")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
             .onAppear { query = entry.saved.rawLabel }
-        }
     }
 
     private func search() async {

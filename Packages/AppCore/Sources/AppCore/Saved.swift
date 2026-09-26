@@ -44,9 +44,11 @@ public struct SavedPlace: Codable, Identifiable, Hashable, Sendable {
     /// 截圖或有來源的網頁查得的地址線索；不代表已確認座標。
     public var addressHint: String?
     public var addressSourceURL: String?
+    /// 使用者選日期後的行程點；沒有定位時仍可指向 pending_text Stop。
+    public var plannedStopId: UUID?
 
     public init(id: UUID, tripId: UUID, placeId: UUID?, rawLabel: String, category: SavedCategory, sourceId: UUID?, addedBy: UUID?, status: Status,
-                addressHint: String? = nil, addressSourceURL: String? = nil) {
+                addressHint: String? = nil, addressSourceURL: String? = nil, plannedStopId: UUID? = nil) {
         self.id = id
         self.tripId = tripId
         self.placeId = placeId
@@ -57,6 +59,7 @@ public struct SavedPlace: Codable, Identifiable, Hashable, Sendable {
         self.status = status
         self.addressHint = addressHint
         self.addressSourceURL = addressSourceURL
+        self.plannedStopId = plannedStopId
     }
 
     enum CodingKeys: String, CodingKey {
@@ -68,6 +71,7 @@ public struct SavedPlace: Codable, Identifiable, Hashable, Sendable {
         case addedBy = "added_by"
         case addressHint = "address_hint"
         case addressSourceURL = "address_source_url"
+        case plannedStopId = "planned_stop_id"
     }
 }
 
@@ -153,6 +157,35 @@ public enum SavedFilter: Hashable, Sendable {
 }
 
 extension TripRepository {
+    public struct SavedScheduleResult: Decodable, Sendable {
+        public let status: String
+        public let stopID: UUID
+        public let dayID: UUID
+        public let routeRevision: Int
+
+        enum CodingKeys: String, CodingKey {
+            case status
+            case stopID = "stop_id"
+            case dayID = "day_id"
+            case routeRevision = "route_revision"
+        }
+    }
+
+    /// 將一筆共同收藏排到某天；服務端只新增單一 Stop，檢查權限、版本與重複操作。
+    public func scheduleSaved(savedID: UUID, dayID: UUID, expectedRouteRevision: Int,
+                              clientOpID: UUID, beforeStopID: UUID? = nil, afterStopID: UUID? = nil) async throws -> SavedScheduleResult {
+        struct Params: Encodable {
+            let p_saved_id: UUID, p_day_id: UUID, p_expected_route_revision: Int, p_client_op_id: UUID
+            let p_before_stop_id: UUID?, p_after_stop_id: UUID?
+        }
+        do {
+            return try await client.rpc("schedule_saved", params: Params(
+                p_saved_id: savedID, p_day_id: dayID, p_expected_route_revision: expectedRouteRevision,
+                p_client_op_id: clientOpID, p_before_stop_id: beforeStopID, p_after_stop_id: afterStopID
+            )).execute().value
+        } catch { throw BackendError.from(error) }
+    }
+
     /// 未移除的 Saved，含地點、來源與想去成員。
     public func savedEntries(of tripID: UUID) async throws -> [SavedEntry] {
         struct Interest: Decodable { let saved_id: UUID, user_id: UUID }

@@ -11,6 +11,8 @@ public final class TripStore {
     public var selectedTripID: UUID? {
         didSet { if oldValue != selectedTripID { Task { await reload(resubscribe: true) } } }
     }
+    /// 從收藏安排完後，今天分頁要打開的日期。
+    public var requestedDayID: UUID?
     public private(set) var snapshot: TripSnapshot?
     public private(set) var myRole: TripRole?
     public private(set) var errorMessage: String?

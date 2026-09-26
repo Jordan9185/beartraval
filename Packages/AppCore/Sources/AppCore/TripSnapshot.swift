@@ -41,6 +41,19 @@ public struct TripSnapshot: Codable, Equatable, Sendable {
     }
 
     public var shoppingProgress: ShoppingProgress { ShoppingProgress(shopping) }
+
+    /// 已排入的收藏沿用同一份名稱、地址與來源；舊版以 Place 自動標記的收藏也可讀到。
+    public func saved(for stop: Stop) -> SavedEntry? {
+        saved.first {
+            $0.saved.plannedStopId == stop.id ||
+                ($0.saved.plannedStopId == nil && $0.saved.placeId != nil && $0.saved.placeId == stop.placeId)
+        }
+    }
+
+    /// 已安排購買的商品與其店家線索；待定位時旅程與今天仍可顯示地址。
+    public func shopping(for stop: Stop) -> ShoppingEntry? {
+        shopping.first { $0.item.plannedStopId == stop.id }
+    }
 }
 
 /// 地圖圖層（規格 §3.4）。

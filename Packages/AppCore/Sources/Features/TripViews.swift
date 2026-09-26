@@ -279,6 +279,8 @@ struct TripDetailView: View {
     let trip: Trip
     @State private var timeline: [DayTimeline] = []
     @State private var places: [UUID: Place] = [:]
+    @State private var saved: [SavedEntry] = []
+    @State private var shopping: [ShoppingEntry] = []
     @State private var baseRoutes: [UUID: BaseRoute] = [:]
     @State private var errorMessage: String?
     @State private var showsRouteMatch = false
@@ -305,7 +307,8 @@ struct TripDetailView: View {
                     }
                     ForEach(day.stops) { stop in
                         Button { selectedStop = stop } label: {
-                            StopRow(stop: stop, place: stop.placeId.flatMap { places[$0] })
+                            StopRow(stop: stop, place: stop.placeId.flatMap { places[$0] }, saved: savedFor(stop),
+                                    shopping: shoppingFor(stop))
                         }
                         .buttonStyle(.plain)
                         if let leg = baseRoutes[day.id]?.leg(from: stop.id) {
@@ -351,7 +354,8 @@ struct TripDetailView: View {
             }
         }
         .sheet(item: $selectedStop) { stop in
-            StopDetailView(stop: stop, place: stop.placeId.flatMap { places[$0] },
+            StopDetailView(stop: stop, place: stop.placeId.flatMap { places[$0] }, saved: savedFor(stop),
+                           shopping: shoppingFor(stop),
                            mode: timeline.first { $0.id == stop.dayId }?.day.transportMode ?? .transit,
                            previous: previousPlace(before: stop),
                            editing: editingContext(for: stop),
@@ -424,6 +428,17 @@ struct TripDetailView: View {
         return stop.placeId.flatMap { places[$0] }?.displayTitle(fallbackChinese: stop.rawLabel) ?? stop.rawLabel
     }
 
+    private func savedFor(_ stop: Stop) -> SavedEntry? {
+        saved.first {
+            $0.saved.plannedStopId == stop.id ||
+                ($0.saved.plannedStopId == nil && $0.saved.placeId != nil && $0.saved.placeId == stop.placeId)
+        }
+    }
+
+    private func shoppingFor(_ stop: Stop) -> ShoppingEntry? {
+        shopping.first { $0.item.plannedStopId == stop.id }
+    }
+
     private func comparison(_ leg: BaseRoute.Leg, in day: DayTimeline) -> LegComparison? {
         guard let fromStop = day.stops.first(where: { $0.id == leg.from }), let toStop = day.stops.first(where: { $0.id == leg.to }),
               let from = fromStop.placeId.flatMap({ places[$0] }), let to = toStop.placeId.flatMap({ places[$0] }) else { return nil }
@@ -461,7 +476,11 @@ struct TripDetailView: View {
         do {
             async let d = session.trips.days(of: trip.id)
             async let s = session.trips.stops(of: trip.id)
-            let (days, stops) = try await (d, s)
+            async let sv = session.trips.savedEntries(of: trip.id)
+            async let sh = session.trips.shoppingEntries(of: trip.id)
+            let (days, stops, savedEntries, shoppingEntries) = try await (d, s, sv, sh)
+            saved = savedEntries
+            shopping = shoppingEntries
             let placeList = try await session.trips.places(ids: Array(Set(stops.compactMap(\.placeId))))
             places = Dictionary(uniqueKeysWithValues: placeList.map { ($0.id, $0) })
             timeline = DayTimeline.build(days: days, stops: stops)
@@ -514,6 +533,8 @@ struct TripDetailView: View {
 struct StopDetailView: View {
     let stop: Stop
     let place: Place?
+    var saved: SavedEntry? = nil
+    var shopping: ShoppingEntry? = nil
     let mode: TravelMode
     let previous: Place?
     /// Owner／Editor 才有；未定位的地點可以在這裡定位、改字或移除。
@@ -531,17 +552,29 @@ struct StopDetailView: View {
             Form {
                 Section {
                     Text(place?.displayTitle(fallbackChinese: stop.rawLabel) ?? stop.rawLabel).font(.title3.weight(.semibold))
-                    if let address = place?.address { Text(address).font(.caption).foregroundStyle(.secondary) }
+                    if let address = place?.localAddress ?? saved?.addressLabel ?? shopping?.item.scheduledStoreAddressLocal {
+                        Text(place == nil ? "地址線索：\(address)" : address)
+                            .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
                     if let start = stop.startTime { LabeledContent("時間", value: LocalTime.hourMinute(start)) }
                     if let dwell = stop.dwellMinutes { LabeledContent("停留", value: "\(dwell) 分") }
                     if stop.fixed { Label("固定行程", systemImage: "lock.fill").foregroundStyle(.secondary) }
+                    if let shopping {
+                        Text("要買：\(shopping.item.name) · 可詢問，販售與庫存未知")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     if place == nil { Text("未定位，不計入路線").font(.caption).foregroundStyle(.secondary) }
                 }
                 if place == nil {
                     let country = LocalMapCountry.guess(name: stop.rawLabel, timeZone: timeZone)
-                    Section { TaxiCardButton(unlocatedName: stop.rawLabel, countryCode: country) }
                     Section {
-                        LocalMapSearchButtons(name: stop.rawLabel, countryCode: country)
+                        TaxiCardButton(unlocatedName: stop.rawLabel, countryCode: country,
+                                       addressHint: saved?.saved.addressHint ?? shopping?.item.scheduledStoreAddressLocal)
+                    }
+                    Section {
+                        LocalMapSearchButtons(name: [stop.rawLabel, saved?.saved.addressHint,
+                                                      shopping?.item.scheduledStoreAddressLocal]
+                            .compactMap { $0 }.joined(separator: " "), countryCode: country)
                     } header: {
                         Text("當地地圖")
                     } footer: {
@@ -554,13 +587,20 @@ struct StopDetailView: View {
                 if let place {
                     Section {
                         NavigateButton(destination: place.mapPoint, mode: mode)
-                        TaxiCardButton(place: place, fallbackChineseLabel: stop.rawLabel)
+                        TaxiCardButton(place: place, fallbackChineseLabel: stop.rawLabel,
+                                       fallbackAddress: saved?.saved.addressHint ?? shopping?.item.scheduledStoreAddressLocal)
                     }
                 }
                 if let place, place.isInKorea {
                     Section("在地地圖") {
                         LocalMapButtons(destination: place.mapPoint, origin: previous?.mapPoint, mode: mode, address: place.localAddress)
                     }
+                }
+                if let source = saved?.source?.url.flatMap(URL.init(string:)), source.scheme == "https" {
+                    Section("收藏來源") { Link(source.host ?? "查看來源", destination: source) }
+                }
+                if let source = shopping?.item.scheduledStoreSourceURL.flatMap(URL.init(string:)), source.scheme == "https" {
+                    Section("店家線索來源") { Link(source.host ?? "查看來源", destination: source) }
                 }
                 if let place, let session {
                     NearbyAroundSection(session: session, center: Coordinate(latitude: place.latitude, longitude: place.longitude),
@@ -576,6 +616,8 @@ struct StopDetailView: View {
 struct StopRow: View {
     let stop: Stop
     let place: Place?
+    var saved: SavedEntry? = nil
+    var shopping: ShoppingEntry? = nil
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -596,8 +638,15 @@ struct StopRow: View {
                 if !stop.isRoutable {
                     Label("未定位，不計入路線", systemImage: "mappin.slash")
                         .font(.caption).foregroundStyle(.secondary)
-                } else if let address = place?.address {
+                    if let address = saved?.saved.addressHint ?? shopping?.item.scheduledStoreAddressLocal {
+                        Text(address).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                } else if let address = place?.localAddress ?? saved?.addressLabel ?? shopping?.item.scheduledStoreAddressLocal {
                     Text(address).font(.caption).foregroundStyle(.secondary)
+                }
+                if let shopping {
+                    Text("要買：\(shopping.item.name) · 庫存未知")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 if let dwell = stop.dwellMinutes {
                     Text("停留 \(dwell) 分").font(.caption).foregroundStyle(.secondary)

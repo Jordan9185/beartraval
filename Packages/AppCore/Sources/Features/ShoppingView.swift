@@ -7,6 +7,7 @@ import SwiftUI
 struct ShoppingTab: View {
     let session: SessionModel
     var preferredTripID: UUID? = nil
+    var onOpenDay: (UUID, UUID) -> Void = { _, _ in }
     var onTripSelected: (UUID?) -> Void = { _ in }
     private struct ImportRequest: Identifiable {
         let id = UUID()
@@ -33,6 +34,7 @@ struct ShoppingTab: View {
                                      queue: session.offlineQueue, reloadToken: reloadToken,
                                      personalItems: personalItems, candidateItems: candidateItems,
                                      personalRepository: inbox, personalError: personalError,
+                                     onOpenDay: onOpenDay,
                                      tripRegionName: trips.first { $0.id == tripID }?.name,
                                      tripCountryCode: trips.first { $0.id == tripID }.flatMap {
                                          LocalMapCountry.guess(name: $0.name, timeZone: $0.timeZone)
@@ -152,6 +154,7 @@ public struct ShoppingListView: View {
     let candidateItems: [InboxItemRecord]
     let personalRepository: InboxRepository?
     let personalError: String?
+    let onOpenDay: (UUID, UUID) -> Void
     let tripRegionName: String?
     let tripCountryCode: String?
     let personalChanged: () -> Void
@@ -172,6 +175,7 @@ public struct ShoppingListView: View {
     public init<MerchantScreen: View>(service: any ShoppingService, tripID: UUID, canEdit: Bool, queue: OfflineQueue?, reloadToken: Int,
                                       personalItems: [InboxItemRecord] = [], candidateItems: [InboxItemRecord] = [],
                                       personalRepository: InboxRepository? = nil, personalError: String? = nil,
+                                      onOpenDay: @escaping (UUID, UUID) -> Void = { _, _ in },
                                       tripRegionName: String? = nil, tripCountryCode: String? = nil,
                                       personalChanged: @escaping () -> Void = {},
                                       onPhotoSelected: ((Data) -> Void)? = nil,
@@ -185,6 +189,7 @@ public struct ShoppingListView: View {
         self.candidateItems = candidateItems
         self.personalRepository = personalRepository
         self.personalError = personalError
+        self.onOpenDay = onOpenDay
         self.tripRegionName = tripRegionName
         self.tripCountryCode = tripCountryCode
         self.personalChanged = personalChanged
@@ -197,6 +202,7 @@ public struct ShoppingListView: View {
                            discoveryRepository: personalRepository, regionName: tripRegionName ?? "",
                            regionCountry: tripCountryCode,
                            itineraryMatches: itineraryMatches, itineraryMatchesLoaded: itineraryMatchesLoaded,
+                           onOpenDay: onOpenDay,
                            toggle: { entry in Task { await togglePurchased(entry) } },
                            changed: { Task { await reload() } })
     }
@@ -349,6 +355,7 @@ struct ShoppingRowContext {
     let regionCountry: String?
     let itineraryMatches: [UUID: [ShoppingItineraryMatch]]
     let itineraryMatchesLoaded: Bool
+    let onOpenDay: (UUID, UUID) -> Void
     let toggle: (ShoppingEntry) -> Void
     let changed: () -> Void
 }
@@ -383,6 +390,7 @@ struct ShoppingEntryLink: View {
                                    regionCountry: context.regionCountry,
                                    itineraryMatches: context.itineraryMatches[entry.id] ?? [],
                                    itineraryMatchesLoaded: context.itineraryMatchesLoaded,
+                                   onOpenDay: context.onOpenDay,
                                    onChanged: context.changed)
         } label: {
             ShoppingRow(entry: entry, me: context.service.currentUserID, canEdit: context.canEdit, service: context.service,
@@ -418,7 +426,10 @@ struct ShoppingRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.item.name).strikethrough(entry.isPurchased)
-                if let store = entry.item.savedStoreSuggestions.first {
+                if let storeName = entry.item.scheduledStoreName {
+                    Text("已選店家：\(storeName)\(entry.item.scheduledStoreAddressLocal.map { " · \($0)" } ?? "")")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                } else if let store = entry.item.savedStoreSuggestions.first {
                     Text("店家線索：\(store.displayName)\(store.addressLocal.map { " · \($0)" } ?? "")")
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 } else if let hint = entry.item.storeHint {
@@ -602,6 +613,11 @@ struct ShoppingImage: View {
 }
 
 /// 商品詳情：照片、來源、到社群找這個商品、換照片。
+private struct ShoppingScheduleRequest: Identifiable, Hashable {
+    let id = UUID()
+    let candidate: ShoppingStoreSuggestion
+}
+
 struct ShoppingItemDetailView: View {
     let service: any ShoppingService
     let tripID: UUID
@@ -613,11 +629,14 @@ struct ShoppingItemDetailView: View {
     var regionCountry: String? = nil
     var itineraryMatches: [ShoppingItineraryMatch] = []
     var itineraryMatchesLoaded = false
+    var onOpenDay: (UUID, UUID) -> Void = { _, _ in }
     let onChanged: () -> Void
     @State private var photo: PhotosPickerItem?
     @State private var uploading = false
     @State private var errorMessage: String?
+    @State private var scheduleRequest: ShoppingScheduleRequest?
     @Environment(\.openURL) private var openURL
+    @Environment(\.dismiss) private var dismissDetail
 
     var body: some View {
         Form {
@@ -630,6 +649,16 @@ struct ShoppingItemDetailView: View {
             Section {
                 Text(entry.item.name).font(.title3.weight(.semibold))
                 if let note = entry.item.note { Text(note) }
+                if let storeName = entry.item.scheduledStoreName {
+                    LabeledContent("已安排店家", value: storeName)
+                    if let address = entry.item.scheduledStoreAddressLocal {
+                        Text(address).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                    Text(entry.plannedStoreLocated
+                         ? "已定位 · 是否販售與庫存未知。"
+                         : "可詢問 · 是否販售與庫存未知；店家尚待定位。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 if let link = entry.item.url.flatMap(URL.init(string:)) {
                     Link(link.host ?? link.absoluteString, destination: link)
                 }
@@ -649,12 +678,23 @@ struct ShoppingItemDetailView: View {
                                                 region: regionName, countryCode: regionCountry,
                                                 initialSuggestions: entry.item.savedStoreSuggestions,
                                                 searchOnAppear: canEdit && entry.item.storeSuggestionsChecked != true,
+                                                onSchedule: canEdit && entry.status == .unscheduled ? { candidate in
+                                                    scheduleRequest = ShoppingScheduleRequest(candidate: candidate)
+                                                } : nil,
                                                 onResults: canEdit ? { suggestions in
                                                     guard let repository = service as? TripRepository else { return }
                                                     try await repository.setShoppingStoreSuggestions(itemID: entry.id,
                                                                                                      suggestions: suggestions)
                                                     onChanged()
                                                 } : nil)
+                }
+            }
+            if let dayID = entry.plannedDayID {
+                Section {
+                    Button("查看第 \(entry.plannedDayNumber ?? 1) 天行程") {
+                        onOpenDay(tripID, dayID)
+                        dismissDetail()
+                    }
                 }
             }
             if let merchantScreen {
@@ -703,6 +743,15 @@ struct ShoppingItemDetailView: View {
         }
         .navigationTitle("商品")
         .navigationBarTitleDisplayModeInline()
+        .navigationDestination(item: $scheduleRequest) { request in
+            if let repository = service as? TripRepository {
+                ShoppingScheduleView(repository: repository, entry: entry, candidate: request.candidate) { dayID in
+                    onChanged()
+                    onOpenDay(tripID, dayID)
+                    dismissDetail()
+                }
+            }
+        }
         .onChange(of: photo) {
             Task {
                 guard let data = try? await photo?.loadTransferable(type: Data.self), let jpeg = ImageDownscale.jpeg(from: data) else { return }

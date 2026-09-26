@@ -9,6 +9,7 @@ public struct ProductStoreSuggestionsView: View {
     let region: String
     let countryCode: String?
     let onSelect: ((DiscoveredPlace) -> Void)?
+    let onSchedule: ((ShoppingStoreSuggestion) -> Void)?
     let searchOnAppear: Bool
     let onResults: (([ShoppingStoreSuggestion]) async throws -> Void)?
 
@@ -20,6 +21,7 @@ public struct ProductStoreSuggestionsView: View {
     public init(repository: InboxRepository, productName: String, storeHint: String? = nil,
                 region: String, countryCode: String?, initialSuggestions: [ShoppingStoreSuggestion] = [],
                 searchOnAppear: Bool = true, onSelect: ((DiscoveredPlace) -> Void)? = nil,
+                onSchedule: ((ShoppingStoreSuggestion) -> Void)? = nil,
                 onResults: (([ShoppingStoreSuggestion]) async throws -> Void)? = nil) {
         self.repository = repository
         self.productName = productName
@@ -27,6 +29,7 @@ public struct ProductStoreSuggestionsView: View {
         self.region = region
         self.countryCode = countryCode
         self.onSelect = onSelect
+        self.onSchedule = onSchedule
         self.searchOnAppear = searchOnAppear
         self.onResults = onResults
         _candidates = State(initialValue: initialSuggestions.map(DiscoveredPlace.init(saved:)))
@@ -69,6 +72,10 @@ public struct ProductStoreSuggestionsView: View {
                 Text(address).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
             Text("是否販售與庫存待確認").font(.caption).foregroundStyle(.secondary)
+            if let onSchedule {
+                Button("安排購買") { onSchedule(ShoppingStoreSuggestion(discovered: candidate)) }
+                    .buttonStyle(.borderedProminent)
+            }
             if let onSelect {
                 Button("用這間店查行程定位") { onSelect(candidate) }
                     .buttonStyle(.bordered)
@@ -94,8 +101,9 @@ public struct ProductStoreSuggestionsView: View {
         defer { loading = false; finished = true }
         do {
             let location = [countryCode, region].compactMap { $0 }.joined(separator: " ")
-            candidates = try await repository.discoverStores(product: product, storeHint: storeHint, region: location)
-            try await onResults?(candidates.map(ShoppingStoreSuggestion.init(discovered:)))
+            let found = try await repository.discoverStores(product: product, storeHint: storeHint, region: location)
+            try await onResults?(found.map(ShoppingStoreSuggestion.init(discovered:)))
+            candidates = found
         } catch let error as PlaceDiscoveryError {
             errorMessage = error.userMessage
         } catch let error as BackendError {

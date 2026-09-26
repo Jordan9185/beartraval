@@ -4,7 +4,7 @@
 
 範圍：文字、圖片、截圖與可讀的分享連結；影片內容辨識另列後續階段。
 
-狀態：【建議】依 2026-09-26 真機回報重寫，尚非已完成或已驗收功能。
+狀態：【實作中／待真機驗收】流程規格已確認；收藏排程、商品候選店排程已開發並部署，兩支手機的完整操作仍待使用者驗收。各階段現況見[實作交接](../handoff/2026-09-26-recognition-journey-implementation.md)。
 依據：[MVP 產品規格](../spec/ios-ai-travel-companion-mvp-spec.md)、[分享後整理提案](../spec/share-inbox-proposal.md)、[實作交接](../handoff/2026-09-26-travel-inbox-implementation.md)及使用者提供的 Threads 餐廳／商品截圖與真機回報。
 
 ## 1. 要解決的事
@@ -62,7 +62,7 @@
 
 【建議】從收藏選「排進旅程」時只問必要項：若只有一趟可編輯旅程就預選；若有多趟才選旅程；預選 AI 建議日期但可改。送出前顯示店名、地址、日期、定位與路線狀態；最後由使用者按「確認排入」。完成後在收藏顯示「第 N 天」，點一下直達那天。重複按不建立第二筆 Stop。
 
-【需實測或決策】現有 `commit_itinerary` 可新增 `pending_text` Stop，但它會整批替換某天 Stop；應提供專用、具 `client_op_id` 和 `expected_route_revision` 的原子操作，安全地新增單一收藏、保留既有順序與 Fixed Stop，並同步收藏狀態及關聯。若 revision 過期，重新載入當天並讓使用者再確認。`place_id` 之後確認成功，再更新該 Stop 與收藏；這一步不能覆寫其他 Trip 共用的 Place。
+【已開發／待真機驗收】`schedule_saved` 是專用、具 `client_op_id` 和 `expected_route_revision` 的原子操作；一次新增單一收藏、保留既有順序與 Fixed Stop，並同步收藏狀態及關聯。若 revision 過期，畫面重新載入當天並要求使用者再次確認。`place_id` 之後確認成功會同步收藏；這一步不覆寫其他 Trip 共用的 Place。
 
 ## 6. 商品與行程模板沿用同一套語言
 

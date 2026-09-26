@@ -47,12 +47,18 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
     public var storeEvidence: String?
     public var storeSuggestions: [ShoppingStoreSuggestion]?
     public var storeSuggestionsChecked: Bool?
+    /// 使用者選定排程的店家線索；仍是待定位且未證明有販售或庫存。
+    public var scheduledStoreName: String?
+    public var scheduledStoreAddressLocal: String?
+    public var scheduledStoreSourceURL: String?
 
     public var savedStoreSuggestions: [ShoppingStoreSuggestion] { storeSuggestions ?? [] }
 
     public init(id: UUID, tripId: UUID, name: String, note: String? = nil, url: String? = nil, addedBy: UUID?, plannedStopId: UUID? = nil,
                 imagePath: String? = nil, storeHint: String? = nil, storeEvidence: String? = nil,
-                storeSuggestions: [ShoppingStoreSuggestion]? = nil, storeSuggestionsChecked: Bool? = nil) {
+                storeSuggestions: [ShoppingStoreSuggestion]? = nil, storeSuggestionsChecked: Bool? = nil,
+                scheduledStoreName: String? = nil, scheduledStoreAddressLocal: String? = nil,
+                scheduledStoreSourceURL: String? = nil) {
         self.id = id
         self.tripId = tripId
         self.name = name
@@ -65,6 +71,9 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
         self.storeEvidence = storeEvidence
         self.storeSuggestions = storeSuggestions
         self.storeSuggestionsChecked = storeSuggestionsChecked
+        self.scheduledStoreName = scheduledStoreName
+        self.scheduledStoreAddressLocal = scheduledStoreAddressLocal
+        self.scheduledStoreSourceURL = scheduledStoreSourceURL
     }
 
     enum CodingKeys: String, CodingKey {
@@ -77,6 +86,9 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
         case storeEvidence = "store_evidence"
         case storeSuggestions = "store_suggestions"
         case storeSuggestionsChecked = "store_suggestions_checked"
+        case scheduledStoreName = "scheduled_store_name"
+        case scheduledStoreAddressLocal = "scheduled_store_address_local"
+        case scheduledStoreSourceURL = "scheduled_store_source_url"
     }
 }
 
@@ -228,6 +240,8 @@ public struct ShoppingEntry: Identifiable, Codable, Hashable, Sendable {
     public var plannedStore: String?
     /// 已安排在旅程的第幾天（1 起算），畫面用「第 N 天」而不是日期字串。
     public var plannedDayNumber: Int?
+    public var plannedDayID: UUID?
+    public var plannedStoreLocated = false
 
     public var id: UUID { item.id }
 
@@ -312,6 +326,26 @@ extension TripRepository: ShoppingService {
         } catch { throw BackendError.from(error) }
     }
 
+    /// 把已儲存的店家候選排到指定日期；候選與地址由後端核對，不由裝置自行填入。
+    public func scheduleShoppingStore(itemID: UUID, suggestionIndex: Int, sourceURL: String,
+                                      dayID: UUID, expectedRouteRevision: Int,
+                                      clientOpID: UUID) async throws -> SavedScheduleResult {
+        struct Params: Encodable {
+            let p_item_id: UUID
+            let p_suggestion_index: Int
+            let p_source_url: String
+            let p_day_id: UUID
+            let p_expected_route_revision: Int
+            let p_client_op_id: UUID
+        }
+        do {
+            return try await client.rpc("schedule_shopping_store", params: Params(
+                p_item_id: itemID, p_suggestion_index: suggestionIndex, p_source_url: sourceURL,
+                p_day_id: dayID, p_expected_route_revision: expectedRouteRevision,
+                p_client_op_id: clientOpID)).execute().value
+        } catch { throw BackendError.from(error) }
+    }
+
     public func itineraryMatches(tripID: UUID, items: [ShoppingItem]) async throws -> [UUID: [ShoppingItineraryMatch]] {
         guard !items.isEmpty else { return [:] }
         do {
@@ -349,8 +383,11 @@ extension TripRepository: ShoppingService {
                 let stop = item.plannedStopId.flatMap { stopByID[$0] }
                 let place = stop?.placeId.flatMap { placeByID[$0] }
                 var entry = ShoppingEntry(item: item, interestedUserIDs: interestByItem[item.id] ?? [], events: eventsByItem[item.id] ?? [],
-                                          plannedDate: stop.flatMap { dayByID[$0.dayId]?.localDate }, plannedStore: place.map { $0.displayTitle })
+                                          plannedDate: stop.flatMap { dayByID[$0.dayId]?.localDate },
+                                          plannedStore: place.map { $0.displayTitle } ?? item.scheduledStoreName ?? stop?.rawLabel)
                 entry.plannedDayNumber = stop.flatMap { dayByID[$0.dayId] }.map { $0.displayOrder + 1 }
+                entry.plannedDayID = stop?.dayId
+                entry.plannedStoreLocated = stop?.isRoutable == true
                 return entry
             }
         } catch {

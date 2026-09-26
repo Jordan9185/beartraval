@@ -52,6 +52,10 @@ struct TodayView: View {
                 }
             }
             .onChange(of: store.selectedTripID) { dayIndex = nil }
+            .onChange(of: store.requestedDayID) { openRequestedDay() }
+            .onChange(of: store.snapshot?.trip.id) { openRequestedDay() }
+            .onChange(of: store.snapshot?.revision) { openRequestedDay() }
+            .task { openRequestedDay() }
             .sheet(isPresented: $showsAccount) { AccountView(session: session) }
             .sheet(isPresented: $showsAssistant) {
                 if let snapshot = store.snapshot {
@@ -62,6 +66,13 @@ struct TodayView: View {
             }
             .refreshable { await store.reload() }
         }
+    }
+
+    private func openRequestedDay() {
+        guard let id = store.requestedDayID,
+              let index = store.snapshot?.timeline.firstIndex(where: { $0.id == id }) else { return }
+        dayIndex = index
+        store.requestedDayID = nil
     }
 
     @ViewBuilder
@@ -99,7 +110,8 @@ struct TodayView: View {
                 ForEach(day.stops) { stop in
                     // 與「旅程」同一個行程列元件（未定位標記、固定、購買一致）。
                     Button { selectedStop = stop } label: {
-                        StopRow(stop: stop, place: stop.placeId.flatMap { snapshot.places[$0] })
+                        StopRow(stop: stop, place: stop.placeId.flatMap { snapshot.places[$0] },
+                                saved: snapshot.saved(for: stop), shopping: snapshot.shopping(for: stop))
                     }
                     .buttonStyle(.plain)
                     if let leg = todayBase?.dayID == day.id ? todayBase?.leg(from: stop.id) : nil {
@@ -163,7 +175,9 @@ struct TodayView: View {
         }
         .task(id: "\(snapshot.revision)-\(index)") { await computeNearby(snapshot, index) }
         .sheet(item: $selectedStop) { stop in
-            StopDetailView(stop: stop, place: stop.placeId.flatMap { snapshot.places[$0] }, mode: day.day.transportMode,
+            StopDetailView(stop: stop, place: stop.placeId.flatMap { snapshot.places[$0] }, saved: snapshot.saved(for: stop),
+                           shopping: snapshot.shopping(for: stop),
+                           mode: day.day.transportMode,
                            previous: day.stops.prefix { $0.id != stop.id }.last(where: \.isRoutable)?.placeId.flatMap { snapshot.places[$0] },
                            editing: store.myRole?.canEdit == true ? StopEditingContext(session: session, day: day,
                                                                                        searchAreas: SearchAreas(places: Array(snapshot.places.values),
