@@ -73,7 +73,7 @@ public struct InboxCaptureStore: Sendable {
 
     public func all() -> [InboxCapture] {
         guard let folders = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
-        return folders.compactMap { folder in
+        return folders.filter { !$0.lastPathComponent.hasPrefix(".") }.compactMap { folder in
             try? PayloadLogStore.decoder.decode(InboxCapture.self, from: Data(contentsOf: folder.appending(path: "capture.json")))
         }.sorted { $0.createdAt > $1.createdAt }
     }

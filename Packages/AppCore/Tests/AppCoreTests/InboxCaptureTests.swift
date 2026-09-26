@@ -13,6 +13,11 @@ struct InboxCaptureTests {
         #expect(captured.title == "首爾散步路線")
         #expect(captured.rawText.isEmpty)
         #expect(captured.assets.isEmpty)
+        let abandonedDraft = directory.appending(path: ".abandoned")
+        try FileManager.default.createDirectory(at: abandonedDraft, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: directory.appending(path: captured.id.uuidString).appending(path: "capture.json"),
+                                         to: abandonedDraft.appending(path: "capture.json"))
+        #expect(InboxCaptureStore(directory: directory).all().count == 1)
     }
 
     @MainActor @Test func savesFullTextAndDeduplicatesURL() async throws {
