@@ -15,13 +15,13 @@
 
 - 本機 `CI=1 swift test --package-path Packages/AppCore`：147 項通過，OCR 裝置測試跳過。
 - 本機 `xcodegen generate` 與 iPhone 17 Pro 模擬器 Debug build：通過。
-- 文字／圖片首批版 `xcodegen generate` 與無簽章 iOS Release build：通過；產出的 Share Extension 啟用規則只有網址、文字、最多十張圖片，沒有純影片檔入口。收件詳情會自動輪詢整理結果，失敗時以可理解的訊息提供重試。
+- 文字／圖片首批版 `xcodegen generate`、無簽章 iOS Release build、使用本機 Team ID 的簽章封存與 `codesign --verify --deep --strict`：通過；產出的 Share Extension 啟用規則只有網址、文字、最多十張圖片，沒有純影片檔入口。收件詳情會自動輪詢整理結果，失敗時以可理解的訊息提供重試。
 - `ai/inbox-organize` TypeScript typecheck 與 4 項來源錨點／歧義／否定語境測試：通過；`organize-inbox`、`delete-account` Deno typecheck：通過。
 - Postgres 17 測試：既有 suite 全過，Travel Inbox 24 項斷言通過（owner 隔離、URL 去重、重送、更正與模板套用）。
 - CI：最終程式 commit `def0c5e` 的 [iOS run 36219655446](https://github.com/Jordan9185/beartraval/actions/runs/36219655446) 通過套件與模擬器測試；同一功能版本的 [AI run 36219263373](https://github.com/Jordan9185/beartraval/actions/runs/36219263373) 與 [DB run 36219263368](https://github.com/Jordan9185/beartraval/actions/runs/36219263368) 通過。`def0c5e` 只補了本機暫存資料夾過濾與對應測試。
 - 雲端：`20260926000019`～`20260926000022` 已套用；`organize-inbox` 與更新後的 `delete-account` 已部署且啟用 JWT 驗證。`21` 補背景工作讀取圖片紀錄的權限，`22` 讓 AI 額度紀錄接受 `inbox` 類型；雲端測試實際發現並修復這兩個缺口。
 - 兩個臨時帳號的雲端測試通過：文字加圖片得到 4 個候選、1 份模板；純圖片行程得到 2 個候選、1 份模板，圖片候選保持待確認。另驗證 owner-only 原文／候選／模板、明確確認後套用新 Trip、未定位停靠點、相同操作重送不重複建立。兩輪臨時帳號與資料均已刪除。
-- 社群 App 實際分享 payload、真機操作與簽章封存／TestFlight：**尚未驗證／完成**。本機缺少專案的 `DEVELOPMENT_TEAM` 與相符的佈署描述檔；已連接的 iPhone 在本輪編譯時處於鎖定狀態。
+- 社群 App 實際分享 payload、真機操作與 TestFlight：**尚未驗證／完成**。本機已設定 Team ID 並產出可驗證的簽章封存，但 App Store Connect 匯出回覆 `No Accounts`，主 App 與分享擴充功能都缺少發佈用描述檔；需要在 Xcode 登入具發佈權限的 Apple 帳號或提供 App Store Connect 簽章設定。已連接的 iPhone 在本輪編譯時處於鎖定狀態。
 
 ## 尚需驗證與限制
 

@@ -22,10 +22,10 @@ select tests.ok((select status = 'local_only' from app.inbox_assets where captur
 select tests.throws(
   'select app.register_inbox_asset(''' || :'capture_id' || ''', 1, ''image'', ''image/jpeg'', 100, ''' || repeat('d', 64) || ''', ''other-user/file.jpg'')',
   'PT422', '不可登記其他帳號的圖片路徑');
-
-set role service_role;
 select tests.ok(has_table_privilege('service_role', 'app.inbox_assets', 'SELECT'),
   '背景整理工作可讀取圖片中繼資料');
+
+set role service_role;
 select app.begin_inbox_analysis(:'capture_id') as attempt \gset
 select app.begin_inbox_analysis(:'capture_id') is null as running \gset
 select app.finish_inbox_analysis(:'capture_id', :'attempt',
