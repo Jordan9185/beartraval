@@ -28,6 +28,8 @@ public struct ShareFlowView: View {
     /// 截圖內容看起來是哪個國家（可修改）。
     @State private var country: String?
     @State private var readingScreenshot = false
+    /// 截圖的 OCR 與 AI 查找尚未結束時，不顯示可能錯誤的暫存店名及後續操作。
+    @State private var awaitingScreenshotResult = false
     @State private var discovered: [DiscoveredPlace] = []
     @State private var discovering = false
     @State private var discoveryMessage: String?
@@ -65,6 +67,7 @@ public struct ShareFlowView: View {
         _screenshot = State(initialValue: content.imageJPEG)
         // 一開始就標成辨識中，登入檢查那段時間不會先閃出「沒有店名」的提醒。
         _readingScreenshot = State(initialValue: Self.wantsScreenshotText(content.imageJPEG, analysis, query: analysis.suggestedQuery ?? ""))
+        _awaitingScreenshotResult = State(initialValue: Self.wantsScreenshotText(content.imageJPEG, analysis, query: analysis.suggestedQuery ?? ""))
     }
 
     /// 有截圖、文字又看不出店名時，才需要辨識截圖文字。
@@ -83,6 +86,10 @@ public struct ShareFlowView: View {
                             do { try saveDraft(); onFinish(.draftSaved) } catch { errorMessage = "無法儲存草稿。" }
                         }
                     }
+                }
+            } else if awaitingScreenshotResult {
+                if !readingScreenshot {
+                    Section { ProgressView("AI 正在查店名與地址…") }
                 }
             } else {
                 discoverySection
@@ -117,7 +124,7 @@ public struct ShareFlowView: View {
                 Text(excerpt).font(.subheadline).lineLimit(4)
             }
             // 截圖讀得到文字時，「拿不到貼文內容／沒有店名」的提醒就不適用。
-            if screenshotLines.isEmpty && !readingScreenshot {
+            if screenshotLines.isEmpty && !readingScreenshot && !awaitingScreenshotResult {
                 ForEach(Array(analysis.missing.enumerated()), id: \.offset) { _, missing in
                     Label(missingText(missing), systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
                 }
@@ -369,18 +376,23 @@ public struct ShareFlowView: View {
             analysis.missing = expandedAnalysis.missing
             if query.isEmpty { query = expandedAnalysis.suggestedQuery ?? "" }
         }
-        guard let repository, await repository.isSignedIn() else { readingScreenshot = false; signedIn = false; return }
+        guard let repository, await repository.isSignedIn() else {
+            readingScreenshot = false
+            awaitingScreenshotResult = false
+            signedIn = false
+            return
+        }
         do {
             trips = try await repository.editableTrips()
             signedIn = true
             tripID = Self.defaultTrip(trips)?.id
         } catch {
             readingScreenshot = false
+            awaitingScreenshotResult = false
             signedIn = false
             return
         }
         // 有截圖、文字又看不出店名時，在裝置上辨識截圖文字。
-        var waitingForDiscovery = false
         if let screenshot, Self.wantsScreenshotText(screenshot, analysis, query: query) {
             readingScreenshot = true
             let lines = await ScreenshotText.recognize(jpeg: screenshot)
@@ -394,14 +406,13 @@ public struct ShareFlowView: View {
             if let best = guess.name ?? guess.address { query = best }
             readingScreenshot = false
             if (country == "KR" || country == nil), discoveryRepository != nil {
-                waitingForDiscovery = true
-                Task { await discoverScreenshot() }
+                await discoverScreenshot()
+                return
             }
         } else {
             readingScreenshot = false
         }
-        // 韓國截圖先等有來源的店家候選，避免 Apple 地圖的模糊結果搶先佔滿畫面。
-        if waitingForDiscovery { return }
+        awaitingScreenshotResult = false
         if let coordinate = analysis.mapHint?.coordinate, query.isEmpty {
             candidates = await placeSearch.nearby(coordinate, limit: 5)
             searched = true
@@ -446,9 +457,16 @@ public struct ShareFlowView: View {
     private func discoverScreenshot() async {
         guard let discoveryRepository, !discovering else { return }
         let clue = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard clue.count >= 2 else { return }
+        guard clue.count >= 2 else {
+            awaitingScreenshotResult = false
+            return
+        }
+        awaitingScreenshotResult = true
         discovering = true
-        defer { discovering = false }
+        defer {
+            discovering = false
+            awaitingScreenshotResult = false
+        }
         do {
             discovered = try await discoveryRepository.discoverPlaces(query: clue,
                 context: recognizedLines.joined(separator: "\n"))
