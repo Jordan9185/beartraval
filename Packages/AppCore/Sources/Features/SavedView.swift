@@ -249,15 +249,26 @@ struct SavedView: View {
         await loadInbox()
         await session.flushOfflineQueue()
         queued = await session.offlineQueue.items.count
-        guard let tripID else { return }
+        guard let tripID else {
+            entries = []
+            scheduledDays = [:]
+            return
+        }
         do {
-            async let saved = session.trips.savedEntries(of: tripID)
+            entries = try await session.trips.savedEntries(of: tripID)
+            errorMessage = nil
+        } catch {
+            entries = []
+            scheduledDays = [:]
+            errorMessage = "收藏讀取失敗：\(userMessage(for: error))"
+            return
+        }
+        do {
             async let days = session.trips.days(of: tripID)
             async let stops = session.trips.stops(of: tripID)
-            let (loadedEntries, loadedDays, loadedStops) = try await (saved, days, stops)
-            entries = loadedEntries
+            let (loadedDays, loadedStops) = try await (days, stops)
             let dayByID = Dictionary(uniqueKeysWithValues: loadedDays.map { ($0.id, $0) })
-            scheduledDays = Dictionary(uniqueKeysWithValues: loadedEntries.compactMap { entry in
+            scheduledDays = Dictionary(uniqueKeysWithValues: entries.compactMap { entry in
                 let stop = loadedStops.first {
                     $0.id == entry.saved.plannedStopId ||
                         (entry.saved.plannedStopId == nil && entry.saved.placeId != nil && $0.placeId == entry.saved.placeId)
@@ -266,7 +277,8 @@ struct SavedView: View {
             })
             errorMessage = nil
         } catch {
-            errorMessage = "讀取失敗：\(userMessage(for: error))"
+            scheduledDays = [:]
+            errorMessage = "收藏已載入，行程日期暫時無法更新：\(userMessage(for: error))"
         }
     }
 
