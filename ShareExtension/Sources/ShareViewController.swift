@@ -43,6 +43,7 @@ final class ShareModel {
                     owner = session.user.id
                 }
                 let saved = try await store.capture(items, ownerHint: owner)
+                capture = saved
                 // 純文字／連結可直接送入雲端背景工作。多媒體先保留本機，避免分享面板等待大檔上傳。
                 if let repository, saved.ownerHint != nil,
                    !saved.assets.contains(where: \.isVideo), saved.assets.count <= 3 {
@@ -54,7 +55,6 @@ final class ShareModel {
                     cloudSynced = (try? await upload.value) != nil
                     deadline.cancel()
                 }
-                capture = saved
             } catch {
                 errorMessage = "無法保存這次分享：\(error.localizedDescription)"
             }

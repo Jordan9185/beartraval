@@ -303,7 +303,7 @@ struct SavedView: View {
             if Task.isCancelled { return }
             await loadInbox()
             await discoverRecentPlaces()
-            if localCaptures == 0 && !recentCaptures.contains(where: { $0.status == "saved" || $0.status == "processing" }) { return }
+            if !recentCaptures.contains(where: { $0.status == "saved" || $0.status == "processing" }) { return }
             try? await Task.sleep(for: .seconds(3))
         }
     }

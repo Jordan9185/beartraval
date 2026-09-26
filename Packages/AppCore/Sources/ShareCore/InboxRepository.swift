@@ -119,6 +119,20 @@ public enum InboxSyncError: Error {
     case accountConfirmationRequired
     case wrongAccount
     case uploadUnavailable
+    case cloudSave(BackendError)
+    case assetUpload(BackendError)
+    case analysisStart(BackendError)
+
+    public var userMessage: String {
+        switch self {
+        case .accountConfirmationRequired: "請先確認要將這份分享匯入目前帳號。"
+        case .wrongAccount: "這份分享屬於另一個帳號，請切回原帳號。"
+        case .uploadUnavailable: "無法讀取手機保存的圖片，請重新分享。"
+        case .cloudSave(let error): "建立雲端收件失敗：\(error.userMessage)"
+        case .assetUpload(let error): "圖片上傳失敗：\(error.userMessage)"
+        case .analysisStart(let error): "內容已上傳，啟動整理失敗：\(error.userMessage)"
+        }
+    }
 }
 
 public struct DiscoveredPlace: Decodable, Identifiable, Sendable {
@@ -322,7 +336,7 @@ public struct InboxRepository: Sendable {
                 p_raw_text: String(capture.rawText.prefix(20000)),
                 p_unavailable_count: capture.unavailableCount
             )).execute().value
-        } catch { throw BackendError.from(error) }
+        } catch { throw InboxSyncError.cloudSave(BackendError.from(error)) }
 
         if saved.created || saved.same_client {
             for asset in capture.assets {
@@ -341,7 +355,7 @@ public struct InboxRepository: Sendable {
                     do {
                         _ = try await client.storage.from("inbox-images").upload(path!, data: jpeg,
                             options: FileOptions(contentType: "image/jpeg", upsert: true))
-                    } catch { throw BackendError.from(error) }
+                    } catch { throw InboxSyncError.assetUpload(BackendError.from(error)) }
                 }
                 struct AssetParams: Encodable {
                     let p_capture_id: UUID, p_ordinal: Int, p_kind: String, p_mime_type: String
@@ -352,10 +366,11 @@ public struct InboxRepository: Sendable {
                         p_capture_id: saved.id, p_ordinal: asset.order, p_kind: kind, p_mime_type: mime,
                         p_byte_count: bytes, p_sha256: digest, p_storage_path: path
                     )).execute()
-                } catch { throw BackendError.from(error) }
+                } catch { throw InboxSyncError.assetUpload(BackendError.from(error)) }
             }
         }
-        try await requestAnalysis(captureID: saved.id)
+        do { try await requestAnalysis(captureID: saved.id) }
+        catch { throw InboxSyncError.analysisStart(BackendError.from(error)) }
         // 有影片的原檔只在本機，不能在同步完成後刪掉。
         if capture.assets.contains(where: \.isVideo) { try store.markSynced(capture, remoteID: saved.id) }
         else { try store.remove(capture.id) }

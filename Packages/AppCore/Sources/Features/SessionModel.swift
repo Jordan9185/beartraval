@@ -8,6 +8,11 @@ import Supabase
 @MainActor
 @Observable
 public final class SessionModel {
+    public enum InboxUploadState: Equatable {
+        case uploading
+        case failed(String)
+    }
+
     public enum State: Equatable {
         case loading
         case signedOut
@@ -27,7 +32,8 @@ public final class SessionModel {
     public let placeSearch: any PlaceSearching
 
     public let network = NetworkMonitor()
-    private var syncingInbox = false
+    public private(set) var inboxUploadState: [UUID: InboxUploadState] = [:]
+    @ObservationIgnored private var inboxSyncTask: Task<Void, Never>?
     private var resolvingInbox = false
 
     public init(client: SupabaseClient, routingProvider: any RoutingProvider = InstrumentedProvider(AppleMapKitProvider())) {
@@ -87,14 +93,33 @@ public final class SessionModel {
 
     /// 登入與恢復連線時重送 App Group 收件；換帳號或未確認歸屬的內容不會上傳。
     public func syncInboxCaptures() async {
-        guard !syncingInbox, network.isOnline, let me = trips.currentUserID,
-              let store = InboxCaptureStore.shared() else { return }
-        syncingInbox = true
-        defer { syncingInbox = false }
+        if let inboxSyncTask {
+            await inboxSyncTask.value
+            return
+        }
+        let task = Task { await uploadInboxCaptures() }
+        inboxSyncTask = task
+        await task.value
+        inboxSyncTask = nil
+    }
+
+    private func uploadInboxCaptures() async {
+        guard let me = trips.currentUserID, let store = InboxCaptureStore.shared() else { return }
         let repository = InboxRepository(client: client)
         for capture in store.all() where capture.ownerHint == me && capture.syncedRemoteID == nil {
-            do { _ = try await repository.sync(capture, from: store) }
-            catch { /* 保留本機檔，收件匣提供重試與狀態。 */ }
+            guard network.isOnline else {
+                inboxUploadState[capture.id] = .failed("目前離線，連線後會自動重試。")
+                continue
+            }
+            inboxUploadState[capture.id] = .uploading
+            do {
+                _ = try await repository.sync(capture, from: store)
+                inboxUploadState.removeValue(forKey: capture.id)
+            } catch let error as InboxSyncError {
+                inboxUploadState[capture.id] = .failed(error.userMessage)
+            } catch {
+                inboxUploadState[capture.id] = .failed("上傳未完成：\(userMessage(for: error))")
+            }
         }
     }
 

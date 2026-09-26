@@ -66,12 +66,19 @@ struct InboxView: View {
 
     private func localStatus(_ capture: InboxCapture) -> String {
         if capture.ownerHint == nil { return "尚未指定帳號；確認後才會上傳" }
+        if let state = session.inboxUploadState[capture.id] {
+            switch state {
+            case .uploading: return "正在上傳到雲端…"
+            case .failed(let message): return message
+            }
+        }
+        if !session.network.isOnline { return "目前離線，連線後會自動重試。" }
         if capture.assets.contains(where: \.isVideo) {
             return capture.syncedRemoteID == nil
                 ? "影片已保存在此裝置；等待同步來源資訊"
                 : "來源已同步；影片原檔保存在此裝置，畫面辨識仍待驗證"
         }
-        return "等待網路同步與自動整理"
+        return "已保存在此裝置，等待上傳"
     }
 
     private func statusTitle(_ status: String) -> String {

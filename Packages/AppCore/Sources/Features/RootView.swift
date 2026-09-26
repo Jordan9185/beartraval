@@ -5,6 +5,7 @@ import SwiftUI
 /// WP1 階段只有空狀態；沒有資料時不顯示假的 Base Route 或示意資料。
 public struct RootView: View {
     let session: SessionModel?
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showsDebug = false
     @State private var store: TripStore?
     /// 還沒有旅程時先停在「旅程」；有旅程時停在「今天」。
@@ -29,6 +30,14 @@ public struct RootView: View {
                     .onAppear { store = nil; choseInitialTab = false }
             case .signedIn:
                 tabs(session)
+                    .onChange(of: scenePhase) { _, phase in
+                        if phase == .active {
+                            Task {
+                                await session.syncInboxCaptures()
+                                await session.resolveInboxPlaces()
+                            }
+                        }
+                    }
                     .sheet(isPresented: Binding(get: { session.pendingInviteToken != nil },
                                                 set: { if !$0 { session.pendingInviteToken = nil } })) {
                         JoinTripView(session: session, initialToken: session.pendingInviteToken) { tripID in
