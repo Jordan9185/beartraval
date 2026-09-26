@@ -1,4 +1,6 @@
-# Travel Inbox 與行程模板：下一階段開發計畫
+# Travel Inbox 與行程模板：原始開發計畫
+
+此文件保留 2026-09-26 的原始分階段設計。現行跨畫面的實作順序與驗收，以[辨識到出發完整使用流程與開發計畫 v2](recognition-to-trip-journey-v2.md)為準。
 
 版本：提案 v0.1 · 2026-09-26  
 依據：[分享後整理產品提案](../spec/share-inbox-proposal.md)、[現行 MVP 規格](../spec/ios-ai-travel-companion-mvp-spec.md)、[2026-09-26 交接](../handoff/2026-09-26-codex-handoff.md)。  

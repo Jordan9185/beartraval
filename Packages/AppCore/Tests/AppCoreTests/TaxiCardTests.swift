@@ -43,6 +43,35 @@ struct TaxiCardTests {
         #expect(card.nameZh == "Onion 咖啡")
     }
 
+    @Test func unlocatedSavedCardShowsAddressHint() {
+        let card = TaxiCard(unlocatedName: "無垢屋人參雞", countryCode: "KR",
+                            addressHint: " 서울특별시 성동구 연무장길 1 ")
+        #expect(card.address == "서울특별시 성동구 연무장길 1")
+        #expect(card.latitude == nil && card.longitude == nil)
+        #expect(card.warnings.contains { $0.contains("地點尚未定位") })
+        #expect(!card.warnings.contains { $0.contains("卡片上沒有地址") })
+    }
+
+    @Test func confirmedSavedCardUsesLocalHintBeforeChineseMapAddress() {
+        let p = place("무구옥", local: "무구옥", zh: "無垢屋人參雞",
+                      address: "南韓首爾特別市聖水洞", country: "KR")
+        let card = TaxiCard(place: p, fallbackAddress: "서울특별시 성동구 연무장길 1")
+        #expect(card.address == "서울특별시 성동구 연무장길 1")
+        #expect(card.warnings.contains { $0.contains("查得的線索") })
+        #expect(!card.warnings.contains(TaxiCard.foreignAddressWarning))
+
+        var corrected = card
+        corrected.useLocalAddress("서울특별시 성동구 연무장길 2")
+        #expect(corrected.address == "서울특별시 성동구 연무장길 2")
+        #expect(!corrected.warnings.contains { $0.contains("查得的線索") })
+    }
+
+    @Test func blankAddressHintStillCountsAsMissing() {
+        let card = TaxiCard(unlocatedName: "無垢屋人參雞", countryCode: "KR", addressHint: "  \n ")
+        #expect(card.address == nil)
+        #expect(card.warnings.contains { $0.contains("卡片上沒有地址") })
+    }
+
     @Test(arguments: [TaxiCard.Language.korean, .japanese, .chinese, .english])
     func requestsArePoliteNotCommands(language: TaxiCard.Language) {
         let (request, zh, extras) = TaxiCard.phrases(language)

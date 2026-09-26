@@ -463,10 +463,12 @@ struct SavedDetailView: View {
                 Section {
                     if let place = entry.place {
                         NavigateButton(destination: place.mapPoint, mode: .walking)
-                        TaxiCardButton(place: place, fallbackChineseLabel: entry.saved.rawLabel)
+                        TaxiCardButton(place: place, fallbackChineseLabel: entry.saved.rawLabel,
+                                       fallbackAddress: addressHint ?? entry.saved.addressHint)
                     } else {
                         let country = tripCountry ?? LocalMapCountry.guess(name: entry.saved.rawLabel, timeZone: nil)
-                        TaxiCardButton(unlocatedName: entry.saved.rawLabel, countryCode: country)
+                        TaxiCardButton(unlocatedName: entry.saved.rawLabel, countryCode: country,
+                                       addressHint: addressHint ?? entry.saved.addressHint)
                         LocalMapSearchButtons(name: [entry.saved.rawLabel, addressHint ?? entry.saved.addressHint].compactMap { $0 }.joined(separator: " "), countryCode: country)
                     }
                 }

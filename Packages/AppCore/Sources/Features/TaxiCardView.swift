@@ -40,7 +40,7 @@ struct TaxiCardView: View {
                         .font(.body.weight(.semibold))
                     LabeledContent("請求", value: card.requestZh)
                     LabeledContent("目的地", value: card.nameZh ?? "（沒有中文名稱）")
-                    if card.address == nil { LabeledContent("地址", value: "（沒有地址）") }
+                    LabeledContent("地址", value: card.address ?? "（沒有地址）")
                     ForEach(Array(card.extras.enumerated()), id: \.offset) { _, extra in
                         LabeledContent("補充", value: extra.zh)
                     }
@@ -77,18 +77,18 @@ struct TaxiCardView: View {
     }
 }
 
-/// 「給司機看」按鈕；需要有已確認的地點。
+/// 「給司機看」按鈕；未定位的收藏可帶入地址線索。
 struct TaxiCardButton: View {
     let card: TaxiCard
     @State private var showing = false
 
-    init(place: Place, fallbackChineseLabel: String? = nil) {
-        card = TaxiCard(place: place, fallbackChineseLabel: fallbackChineseLabel)
+    init(place: Place, fallbackChineseLabel: String? = nil, fallbackAddress: String? = nil) {
+        card = TaxiCard(place: place, fallbackChineseLabel: fallbackChineseLabel, fallbackAddress: fallbackAddress)
     }
 
-    /// 未定位的地點：只用名稱。
-    init(unlocatedName name: String, countryCode: String?) {
-        card = TaxiCard(unlocatedName: name, countryCode: countryCode)
+    /// 未定位的地點可顯示地址線索，卡片上保留待核對提醒。
+    init(unlocatedName name: String, countryCode: String?, addressHint: String? = nil) {
+        card = TaxiCard(unlocatedName: name, countryCode: countryCode, addressHint: addressHint)
     }
 
     var body: some View {
