@@ -1,6 +1,6 @@
 # Travel Inbox 實作交接：2026-09-26
 
-本文件接續[原交接](2026-09-26-codex-handoff.md)與[分享後整理開發計畫](../planning/share-inbox-delivery-plan.md)。下列「已實作」指程式與本機測試，不等同雲端部署或真機驗收。
+本文件接續[原交接](2026-09-26-codex-handoff.md)與[分享後整理開發計畫](../planning/share-inbox-delivery-plan.md)。程式、CI 與後端部署狀態分開記錄；雲端已部署不等於真機驗收或 App 已發布。
 
 ## 已實作
 
@@ -17,8 +17,8 @@
 - 本機 `xcodegen generate` 與 iPhone 17 Pro 模擬器 Debug build：通過。
 - `ai/inbox-organize` TypeScript typecheck 與 4 項來源錨點／歧義／否定語境測試：通過；`organize-inbox`、`delete-account` Deno typecheck：通過。
 - Postgres 17 測試：既有 suite 全過，Travel Inbox 24 項斷言通過（owner 隔離、URL 去重、重送、更正與模板套用）。
-- 雲端 migration dry-run：只列出待套用的 `20260926000019` 與 `20260926000020`；dry-run 不代表已套用。
-- 遠端 CI、雲端 migration／Edge Function、實機社群 payload 與真機使用流程：**尚未驗證**。原 iOS CI run `36216558544` 在 macOS 測試步驟跑滿 30 分鐘後取消；本次修正需新 run 證實。
+- CI：最終程式 commit `def0c5e` 的 [iOS run 36219655446](https://github.com/Jordan9185/beartraval/actions/runs/36219655446) 通過套件與模擬器測試；同一功能版本的 [AI run 36219263373](https://github.com/Jordan9185/beartraval/actions/runs/36219263373) 與 [DB run 36219263368](https://github.com/Jordan9185/beartraval/actions/runs/36219263368) 通過。`def0c5e` 只補了本機暫存資料夾過濾與對應測試。
+- 雲端：`20260926000019`、`20260926000020` 已套用；`organize-inbox` 與更新後的 `delete-account` 顯示 ACTIVE 且啟用 JWT 驗證。未登入呼叫 `organize-inbox` 回 401。雲端兩帳號資料隔離、實際 AI 輸出、社群分享 payload、真機使用流程與 App 發布：**尚未驗證**。
 
 ## 尚需驗證與限制
 
@@ -26,4 +26,4 @@
 2. 大型附件或超過三張圖片：需在主 App 開啟後同步；十張圖片可送 AI，取得失敗的附件會在收件詳情標明。影片原檔目前留在 App Group，尚無自動清理期限；刪除帳號會清理。
 3. 無 Trip 也可先保存並整理；正式 Trip 套用需使用者確認。未定位地點不能算 Route Match；模板整組最佳日優化與影片行程自動拆天待後續工作。
 4. 個人清單目前以來源項目顯示。跨不同貼文的同店推薦次數、商品型號級實體去重與雲端多裝置影片原檔尚未完成。
-5. 推送後檢查 iOS、DB、AI 三條 CI；再做雲端 migration dry-run、實際部署與兩帳號／真機驗證，才可宣稱可用於正式環境。
+5. 下階段需要以兩個測試帳號驗證雲端來源隔離、AI 整理、個人／共同清單與模板套用；再收集 Threads／IG／相簿真機 payload 與操作證據，確認影片可得性和記憶體、延遲。完成這些驗證及 App 發布後，才可宣稱正式使用者可用。

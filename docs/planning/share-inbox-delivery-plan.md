@@ -2,7 +2,7 @@
 
 版本：提案 v0.1 · 2026-09-26  
 依據：[分享後整理產品提案](../spec/share-inbox-proposal.md)、[現行 MVP 規格](../spec/ios-ai-travel-companion-mvp-spec.md)、[2026-09-26 交接](../handoff/2026-09-26-codex-handoff.md)。  
-狀態：【建議】供排程與技術審查；不代表已採納、已實作或已驗收。現有 MVP 的 D1–D13 與 AC-01～AC-14 保持原基準。
+狀態：原始排程提案；實際完成與驗證狀態以[實作交接](../handoff/2026-09-26-travel-inbox-implementation.md)為準。現有 MVP 的 D1–D13 與 AC-01～AC-14 保持原基準。
 
 2026-09-26 實作追蹤：文字／圖片收件、個人候選、可編輯模板與確認套用的首批程式已建立；各工作包的實際驗證與剩餘範圍見[實作交接](../handoff/2026-09-26-travel-inbox-implementation.md)。本計畫中的影片畫面／語音管線及真機驗收仍未完成。
 

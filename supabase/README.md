@@ -175,7 +175,7 @@ swift test --package-path Packages/AppCore
 
 ## 雲端專案（首爾）
 
-- 專案：`BeaRTravel`（`dchzimksdgxzjvzswzrh`，ap-northeast-2）。原有 migration 與 Edge Functions 已部署；本次新增的 `20260926000019`／`20` 與 `organize-inbox` 是否部署，以部署紀錄和雲端驗證為準，不能僅憑本機檔案推定。既有設定已開放 `app` schema、關閉 Email 確認、密碼最短 8。
+- 專案：`BeaRTravel`（`dchzimksdgxzjvzswzrh`，ap-northeast-2）。截至 2026-09-26，已套用至 `20260926000020`，`organize-inbox` 與更新後的 `delete-account` 已部署並顯示 ACTIVE、JWT 驗證開啟；未登入的整理請求回 401。這是部署與基本權限入口驗證，兩帳號與真機流程尚待驗收。既有設定已開放 `app` schema、關閉 Email 確認、密碼最短 8。
 - 更新：`supabase db push`、`supabase functions deploy`；`supabase config push` 會把本機 `config.toml` 的 auth 設定一併推上去，推之前先看差異。
 - App：Release build 連雲端，網址與 anon key 放在 `Config/Cloud.xcconfig.local`（gitignore）；Debug build 連本機。
 - AI：`supabase secrets set ANTHROPIC_API_KEY=...` 後，匯入解析與 AI 助手才會運作。
