@@ -74,8 +74,7 @@ extension TripRepository {
             let status: String, answer: AssistantAnswer?, reason: String?
         }
         do {
-            let r: Response = try await client.functions.invoke(
-                "ask-trip", options: FunctionInvokeOptions(body: Body(trip_id: tripID, question: question, today: today, route_facts: routeFacts)))
+            let r: Response = try await PersonalAI.invoke(client: client, function: "ask-trip", options: FunctionInvokeOptions(body: Body(trip_id: tripID, question: question, today: today, route_facts: routeFacts)))
             if r.status == "answered", let answer = r.answer { return .answered(answer) }
             return .failed(reason: r.reason ?? "unknown")
         } catch {

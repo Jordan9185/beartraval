@@ -1,8 +1,7 @@
+import { enqueuePersonalAI } from "../_shared/personal-ai.ts";
 // 從尚未確認的收藏線索查近期公開網頁，回傳具來源的餐廳名稱。
 // 不寫入正式地點或座標；定位仍由 App 的地點服務與使用者確認。
-import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
-import { discoverPlaces } from "../../../ai/inbox-organize/src/discover.ts";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -59,29 +58,7 @@ Deno.serve(async (req) => {
     const { data: auth, error } = await db.auth.getUser(token);
     if (error || !auth.user) return json({ error: "UNAUTHENTICATED" }, 401);
   }
-  const key = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!key) return json({ status: "failed", reason: "missing_api_key" });
-  const { data: allowed, error: quotaError } = await db.rpc("consume_ai_quota", { p_kind: "inbox" });
-  if (quotaError) return json({ status: "failed", reason: "quota_error" });
-  if (allowed !== true) return json({ status: "failed", reason: "rate_limited" });
-  try {
-    const candidates = await discoverPlaces(new Anthropic({ apiKey: key }), query!,
-      context, Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5", purpose);
-    const checkedAt = new Date().toISOString();
-    if (item) {
-      const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-        { db: { schema: "app" } });
-      const { error: saveError } = await admin.from("inbox_items")
-        .update({ discovery_candidates: candidates, discovery_checked_at: checkedAt })
-        .eq("id", item.id).eq("revision", item.revision);
-      if (saveError) console.warn("discover-places cache not saved", { item_id: item.id });
-    }
-    console.log("discover-places", { item_id: itemID, purpose, candidates: candidates.length });
-    return json({ status: candidates.length > 0 ? "found" : "none", candidates, checked_at: checkedAt });
-  } catch (failure) {
-    const providerStatus = failure instanceof Anthropic.APIError ? failure.status : null;
-    console.error("discover-places", { item_id: itemID, status: providerStatus,
-      error: failure instanceof Error ? failure.name : "unknown" });
-    return json({ status: "failed", reason: providerStatus === 400 ? "search_unavailable" : "provider_error" });
-  }
+  return enqueuePersonalAI(authorization, "discover",
+    { query, context, purpose }, item ? { item_id: item.id, revision: item.revision } : {});
+
 });

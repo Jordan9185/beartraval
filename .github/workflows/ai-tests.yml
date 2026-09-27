@@ -91,7 +91,23 @@ jobs:
       - name: deno check
         run: |
           for dir in supabase/functions/*/; do
+            test -f "${dir}index.ts" || continue
             echo "::group::${dir}"
             deno check --config "${dir}deno.json" "${dir}index.ts"
             echo "::endgroup::"
           done
+
+  personal-worker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # CI 僅執行模擬接頭測試，不提供訂閱登入或工作憑證。
+      - run: |
+          for package in itinerary-parse trip-assistant product-extract inbox-organize personal-worker; do
+            npm ci --prefix "ai/$package"
+          done
+      - run: npm test --prefix ai/personal-worker
+      - run: npm run build --prefix ai/personal-worker

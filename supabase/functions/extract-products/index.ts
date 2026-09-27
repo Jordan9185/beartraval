@@ -1,3 +1,4 @@
+import { enqueuePersonalAI } from "../_shared/personal-ai.ts";
 // Products from a shared post for the shopping list.
 // POST { trip_id, text?, url?, image_base64? } with the user's JWT.
 //
@@ -5,9 +6,7 @@
 // picks and edits, then adds items with add_shopping_item. Only trip owners
 // and editors may call it (RLS decides membership). Logs carry timings only.
 
-import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
-import { extractProducts } from "../../../ai/product-extract/src/extract.ts";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -42,25 +41,7 @@ Deno.serve(async (req) => {
   if (error) return json({ error: "UNAUTHENTICATED" }, 401);
   if (role !== "owner" && role !== "editor") return json({ error: "FORBIDDEN" }, 403);
 
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!apiKey) return json({ status: "failed", reason: "missing_api_key" });
+  return enqueuePersonalAI(auth, "extract",
+    { text, url: body.url ?? null, imageBase64: image }, { trip_id: body.trip_id });
 
-  // Per-user limit on AI calls.
-  const { data: allowed } = await db.rpc("consume_ai_quota", { p_kind: "extract" });
-  if (allowed !== true) return json({ status: "failed", reason: "rate_limited" });
-
-  const started = Date.now();
-  try {
-    const outcome = await extractProducts(new Anthropic({ apiKey }), {
-      text,
-      url: body.url ?? null,
-      imageBase64: image,
-    }, { model: Deno.env.get("ANTHROPIC_MODEL") || undefined });
-    console.log("extract-products", { ms: Date.now() - started, status: outcome.status, image: Boolean(image) });
-    if (outcome.status === "failed") return json({ status: "failed", reason: outcome.reason });
-    return json({ status: "extracted", products: outcome.result.products, warnings: outcome.result.warnings });
-  } catch (e) {
-    console.error("extract-products failed", e instanceof Error ? e.message : e);
-    return json({ status: "failed", reason: "provider_error" });
-  }
 });

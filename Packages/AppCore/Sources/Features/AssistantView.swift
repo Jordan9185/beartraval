@@ -42,7 +42,7 @@ struct AssistantView: View {
                             ProgressView("思考中…")
                         case .failed(let reason)?:
                             Text(reason == "missing_api_key" ? "AI 服務尚未設定。"
-                                 : reason == "rate_limited" ? "AI 使用次數已達上限，請稍後再試。" : "暫時無法回答，請稍後再試。")
+                                 : PersonalAI.waitingMessage(reason) != nil ? PersonalAI.waitingMessage(reason)! : reason == "rate_limited" ? "AI 使用次數已達上限，請稍後再試。" : "暫時無法回答，請稍後再試。")
                                 .foregroundStyle(.secondary)
                         case .answered(let answer)?:
                             if answer.cannotDetermine {

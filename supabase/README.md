@@ -146,8 +146,8 @@ supabase status     # 取得 anon key
 
 `functions/parse-import` 以使用者 JWT 讀取 ImportSession（RLS）。由 `createItineraryDraft()` 一起讀取旅程名稱、日期與原文：完整行程按原文解析，部分行程保留已有安排並補未提供的日期，短句需求搜尋公開資料提出逐日草稿。名稱與原文分開傳遞，名稱已提供的目的地不要求再寫一次。網路推薦需有支持店名的引用；使用者明確指定但來源暫缺的地點仍可保留為待定位草稿。結果寫回 `parse_result`（service role），不是正式行程，使用者在 App 確認後才由 `commit_import` 寫入。
 
-- API key：本機放 `supabase/functions/.env`（`ANTHROPIC_API_KEY=...`，已 gitignore），雲端用 `supabase secrets set ANTHROPIC_API_KEY=...`。
-- 沒有 key 時回 `missing_api_key`，session 標為 failed，原文保留。
+- 現行個人 GPT 模式：入口驗證後寫入 `personal_ai_jobs`，回 `202 {status: queued, job_id}`；Mac 透過官方 Codex CLI 執行共用模組並寫回草稿。
+- Mac 離線／睡眠時等待；額度不足延後重試，不呼叫付費 API。
 - 同一份匯入同時只跑一個解析（`begin_parse` 的 attempt id）；解析中使用者改了原文，舊解析的結果會被丟棄。
 - 日誌：每次一行 JSON（`ms`、`input_tokens`、`output_tokens`、`status`），不記原文與 prompt（D11）。
 
@@ -161,7 +161,7 @@ supabase status     # 取得 anon key
 
 ## Edge Function：`organize-inbox`
 
-以使用者 JWT 及 owner-only RLS 確認來源，背景讀取實際分享的文字與最多十張私有圖片縮圖，用 `ai/inbox-organize` 整理個人候選與行程模板。Threads 公開分享短連結可在限定網域與轉址範圍內讀取 Open Graph 摘要，另存 `public_text`，不覆寫原始分享內容；讀不到時保留來源並標示資訊不足。純連結、無可讀內容的影片不猜測畫面。圖片裡明確可讀的名稱可進個人清單，模糊料理與區域只作候選。商品店名線索另存 `store_hint`，不代表可購買或有庫存。分析結果只寫個人收件匣；套用正式旅程需使用者在 App 明確確認。缺少 `ANTHROPIC_API_KEY` 時標示失敗，來源保留可重試。
+以使用者 JWT 及 owner-only RLS 確認來源，背景讀取實際分享的文字與最多十張私有圖片縮圖，用 `ai/inbox-organize` 整理個人候選與行程模板。Threads 公開分享短連結可在限定網域與轉址範圍內讀取 Open Graph 摘要，另存 `public_text`，不覆寫原始分享內容；讀不到時保留來源並標示資訊不足。純連結、無可讀內容的影片不猜測畫面。圖片裡明確可讀的名稱可進個人清單，模糊料理與區域只作候選。商品店名線索另存 `store_hint`，不代表可購買或有庫存。分析結果只寫個人收件匣；套用正式旅程需使用者在 App 明確確認。現在由 Mac 以 GPT 處理；Mac 離線時保留工作等待。
 
 ## Edge Function：`discover-places`
 
@@ -179,13 +179,21 @@ swift test --package-path Packages/AppCore
 
 ## 雲端專案（首爾）
 
-- 專案：`BeaRTravel`（`dchzimksdgxzjvzswzrh`，ap-northeast-2）。截至 2026-09-26，migration 已套用至 `20260926000026`；`organize-inbox`、`discover-places`、`extract-products` 已重新部署。Jordan 的 iPhone 已安裝簽章 Release 版供人工測試；這代表裝置交付，尚未代表分享、辨識與地點品質已驗收。既有設定已開放 `app` schema、關閉 Email 確認、密碼最短 8。
+- 專案：`BeaRTravel`（`dchzimksdgxzjvzswzrh`，ap-northeast-2）。截至 2026-09-27，migration 已套用至 `20260927000034`；五個 AI 入口及 `personal-ai` 已部署為個人 GPT 佇列模式。Jordan 的 iPhone 已安裝簽章 Release 版供人工測試；這代表裝置交付，尚未代表分享、辨識與地點品質已驗收。既有設定已開放 `app` schema、關閉 Email 確認、密碼最短 8。
 - 更新：`supabase db push`、`supabase functions deploy`；`supabase config push` 會把本機 `config.toml` 的 auth 設定一併推上去，推之前先看差異。
 - App：Release build 連雲端，網址與 anon key 放在 `Config/Cloud.xcconfig.local`（gitignore）；Debug build 連本機。
-- AI：`supabase secrets set ANTHROPIC_API_KEY=...` 後，匯入解析與 AI 助手才會運作。
+- AI：`PERSONAL_AI_OWNER_ID` 與 `PERSONAL_AI_WORKER_TOKEN` 限定個人工作程式；ChatGPT 登入只在 Mac。見 [設定說明](../ai/personal-worker/README.md)。
 
 ## 部署到 Supabase 專案時
 
 - 在專案的 API 設定把 `app` 加入 exposed schemas，用戶端以 `schema: 'app'` 呼叫 RPC。
 - Auth → Providers → Email：關閉 **Confirm email**，密碼最短長度設 8（與 App 檢查一致）。
 - 不要套用 `tests/support/` 下的檔案。
+
+## 個人 GPT 工作佇列
+
+`personal-ai` 自行驗證 App JWT（查本人工作狀態）或 `X-Personal-AI-Token`（只處理設定 owner 的工作），所以 Gateway `verify_jwt=false`。其他五個入口仍驗證 JWT 與原有 RLS／角色。
+
+`enqueue_personal_ai`、`claim_personal_ai`、`finish_personal_ai` 僅授予 service_role；一般 App 無法直接讀取工作輸入或租約。Mac 沒有 service_role key。完成以租約鎖定，同一交易寫回原草稿與工作結果；原文 attempt、項目 revision、旅程成員權限仍核對。關機重啟後重新領取過期工作，已生成的本機結果優先寫回。
+
+同步結果入口 `ask-trip`、`extract-products`、`discover-places` 現在可能回 202，App 以 `job_id` 輪詢。短暫等待後可先離開，重試同內容沿用工作。舊版 App 不支援這三個入口的佇列結果，需更新本輪 Release；匯入與收件仍依既有資料表狀態取得結果。

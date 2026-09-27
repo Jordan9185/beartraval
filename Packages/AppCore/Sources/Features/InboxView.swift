@@ -103,7 +103,7 @@ struct InboxView: View {
     private func statusTitle(_ status: String) -> String {
         switch status {
         case "saved": "已同步，等待整理"
-        case "processing": "正在整理"
+        case "processing": "等待 Mac／GPT 整理"
         case "ready": "已整理"
         case "insufficient": "資訊不足，已保存來源"
         case "failed": "整理失敗，可重試"
@@ -193,6 +193,12 @@ private struct InboxDetailView: View {
                 Section {
                     Text("資訊不足，來源已保留。可重新讀取公開貼文摘要，或分享有文字的截圖。")
                     Button("重新整理") { Task { await retry() } }
+                }
+            }
+            if record.status == "processing" {
+                Section {
+                    Text("由 Mac 使用 GPT 訂閱額度整理。需求已保存；Mac 開機、連網且保持喚醒後會繼續。")
+                        .foregroundStyle(.secondary)
                 }
             }
             if record.status == "failed" {

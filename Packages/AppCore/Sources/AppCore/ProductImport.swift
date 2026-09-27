@@ -63,6 +63,7 @@ public enum ProductExtractionError: Error, Equatable {
 
     public var userMessage: String {
         switch self {
+        case .failed(let reason) where PersonalAI.waitingMessage(reason) != nil: PersonalAI.waitingMessage(reason)!
         case .failed("missing_api_key"): "AI 服務尚未設定。"
         case .failed("rate_limited"): "AI 辨識次數已達上限，請稍後再試，或直接手動輸入。"
         case .failed(let reason): "辨識失敗（\(reason)），可以直接手動輸入。"
@@ -78,7 +79,7 @@ extension TripRepository {
         }
         let r: Response
         do {
-            r = try await client.functions.invoke("extract-products", options: FunctionInvokeOptions(
+            r = try await PersonalAI.invoke(client: client, function: "extract-products", options: FunctionInvokeOptions(
                 body: Body(trip_id: tripID, text: text, url: url, image_base64: imageJPEG?.base64EncodedString())))
         } catch {
             throw BackendError.from(error)

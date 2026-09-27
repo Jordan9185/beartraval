@@ -226,6 +226,7 @@ public enum PlaceDiscoveryError: Error {
 
     public var userMessage: String {
         switch self {
+        case .unavailable(let reason) where PersonalAI.waitingMessage(reason) != nil: PersonalAI.waitingMessage(reason)!
         case .unavailable("rate_limited"): "AI 查找次數暫時已達上限，請稍後再試。"
         case .unavailable("search_unavailable"): "即時網路查找尚未啟用；可先用店名搜尋地圖。"
         default: "暫時無法查找店家資料，請稍後重試。"
@@ -323,7 +324,7 @@ public struct InboxRepository: Sendable {
         struct Result: Decodable { let status: String, candidates: [DiscoveredPlace]?, reason: String? }
         let result: Result
         do {
-            result = try await client.functions.invoke("discover-places", options: FunctionInvokeOptions(body: Body(item_id: itemID, force: force)))
+            result = try await PersonalAI.invoke(client: client, function: "discover-places", options: FunctionInvokeOptions(body: Body(item_id: itemID, force: force)))
         } catch { throw BackendError.from(error) }
         guard result.status != "failed" else { throw PlaceDiscoveryError.unavailable(result.reason ?? "unknown") }
         return result.candidates ?? []
@@ -335,7 +336,7 @@ public struct InboxRepository: Sendable {
         struct Result: Decodable { let status: String, candidates: [DiscoveredPlace]?, reason: String? }
         let result: Result
         do {
-            result = try await client.functions.invoke("discover-places", options: FunctionInvokeOptions(
+            result = try await PersonalAI.invoke(client: client, function: "discover-places", options: FunctionInvokeOptions(
                 body: Body(query: String(query.prefix(200)), context: String(context.prefix(1000)))))
         } catch { throw BackendError.from(error) }
         guard result.status != "failed" else { throw PlaceDiscoveryError.unavailable(result.reason ?? "unknown") }
@@ -352,7 +353,7 @@ public struct InboxRepository: Sendable {
         if let cached = await StoreDiscoveryCache.shared.get(cacheKey) { return cached }
         let result: Result
         do {
-            result = try await client.functions.invoke("discover-places", options: FunctionInvokeOptions(
+            result = try await PersonalAI.invoke(client: client, function: "discover-places", options: FunctionInvokeOptions(
                 body: Body(query: String(product.prefix(200)), context: String(context.prefix(1000)), purpose: "product_store")))
         } catch { throw BackendError.from(error) }
         guard result.status != "failed" else { throw PlaceDiscoveryError.unavailable(result.reason ?? "unknown") }

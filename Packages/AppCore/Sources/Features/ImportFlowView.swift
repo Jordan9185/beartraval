@@ -68,7 +68,7 @@ public struct ImportFlowView: View {
     private var failedView: some View {
         Form {
             Section {
-                Label("解析失敗", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                Label(session.parseStatus == .parsing ? "需求已保留" : "解析失敗", systemImage: session.parseStatus == .parsing ? "clock" : "exclamationmark.triangle").foregroundStyle(.orange)
                 Text(failureText).foregroundStyle(.secondary)
             }
             Section("原文（已保留）") {
@@ -101,10 +101,11 @@ public struct ImportFlowView: View {
     }
 
     private var failureText: String {
-        if session.parseStatus == .parsing { return "解析花的時間比預期長，可能還在進行。請稍後按重試查看結果。" }
+        if session.parseStatus == .parsing { return PersonalAI.waitingMessage(session.parseProgress?.stage) ?? PersonalAI.waitingMessage("personal_ai_waiting")! }
+        if let message = PersonalAI.waitingMessage(session.parseError) { return message }
         return switch session.parseError {
         case "missing_api_key": "解析服務尚未設定（缺少 API key）。"
-        case "rate_limited": "AI 解析次數已達上限（每小時 10 次），請稍後再試。"
+        case "rate_limited": "AI 等待中的需求已達上限，請稍後再試。"
         case "refusal": "無法處理這段文字。"
         case "max_tokens": "文字太長，請分段匯入。"
         case "invalid_output": "解析結果格式不正確。"
@@ -590,13 +591,13 @@ struct ParsingProgressView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             step(done: true, active: false, title: "已送出需求（\(characters.formatted()) 字）")
-            step(done: writing, active: !writing, title: suggestedTemplate ? "AI 搜尋公開旅遊資料" : "AI 閱讀行程",
-                 detail: writing ? nil : suggestedTemplate ? "查具名景點，保留可回查的來源" : "分辨地點與備註")
+            step(done: writing, active: !writing, title: waiting ? "等待 Mac 處理" : suggestedTemplate ? "AI 搜尋公開旅遊資料" : "AI 閱讀行程",
+                 detail: waiting ? "需求已保留，Mac 開機連網後會繼續；你可以先離開此頁" : writing ? nil : suggestedTemplate ? "查具名景點，保留可回查的來源" : "分辨地點與備註")
             step(done: false, active: writing, title: suggestedTemplate ? "安排建議樣板" : "整理成每日行程", detail: draftDetail)
             step(done: false, active: false, title: "搜尋地點，讓你逐一確認")
             TimelineView(.periodic(from: started, by: 1)) { context in
                 let seconds = max(0, Int(context.date.timeIntervalSince(started)))
-                Text("已經過 \(seconds / 60) 分 \(seconds % 60) 秒 · 長行程約需 1～2 分鐘")
+                Text("已經過 \(seconds / 60) 分 \(seconds % 60) 秒 · 由你的 Mac 使用 GPT 處理")
                     .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
         }
@@ -604,6 +605,8 @@ struct ParsingProgressView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("parsingProgress")
     }
+
+    private var waiting: Bool { progress?.stage == "queued" || progress?.stage.hasPrefix("personal_ai_") == true }
 
     private var writing: Bool { progress?.stage == "writing" }
 

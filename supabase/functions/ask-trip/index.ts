@@ -1,3 +1,4 @@
+import { enqueuePersonalAI } from "../_shared/personal-ai.ts";
 // AI trip assistant (WP10). POST { trip_id, question, today?, route_facts? } with the user's JWT.
 //
 // Builds the trip context with the user's own permissions (RLS), so members
@@ -7,9 +8,7 @@
 // proposal hint that the app turns into a change proposal the user confirms.
 // Logs carry timings and token counts only, never the prompt (D11).
 
-import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
-import { askTrip } from "../../../ai/trip-assistant/src/ask.ts";
 import { TripContext } from "../../../ai/trip-assistant/src/schema.ts";
 
 const json = (body: unknown, status = 200) =>
@@ -42,8 +41,7 @@ Deno.serve(async (req) => {
   if (!trip) return json({ error: "NOT_FOUND" }, 404);
 
   // Per-user limit on AI calls.
-  const { data: allowed } = await db.rpc("consume_ai_quota", { p_kind: "ask" });
-  if (allowed !== true) return json({ status: "failed", reason: "rate_limited" });
+
 
   // Every query is scoped to this trip: RLS alone would return rows from all the
   // caller's trips, cut off at PostgREST's max_rows. A failed query means the
@@ -138,32 +136,7 @@ Deno.serve(async (req) => {
   const context = TripContext.safeParse(candidate);
   if (!context.success) return json({ error: "INVALID_CONTEXT", detail: context.error.message }, 422);
 
-  const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { db: { schema: "app" } });
-  const record = (status: string, answer: unknown, model: string | null) =>
-    admin.from("ai_messages").insert({ trip_id: trip.id, user_id: userId, question, answer, status, model });
+  return enqueuePersonalAI(auth, "ask",
+    { context: context.data, question }, { trip_id: trip.id });
 
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!apiKey) {
-    await record("failed", null, null);
-    return json({ status: "failed", reason: "missing_api_key" });
-  }
-
-  const started = Date.now();
-  try {
-    const outcome = await askTrip(new Anthropic({ apiKey }), context.data, question,
-      { model: Deno.env.get("ANTHROPIC_MODEL") || undefined });
-    const latency_ms = Date.now() - started;
-    if (outcome.status === "failed") {
-      console.log(JSON.stringify({ fn: "ask-trip", status: "failed", reason: outcome.reason, latency_ms }));
-      await record("failed", null, null);
-      return json({ status: "failed", reason: outcome.reason });
-    }
-    console.log(JSON.stringify({ fn: "ask-trip", status: "answered", latency_ms, model: outcome.model, ...outcome.usage, issues: outcome.issues.length }));
-    await record("answered", outcome.answer, outcome.model);
-    return json({ status: "answered", answer: outcome.answer });
-  } catch (e) {
-    console.log(JSON.stringify({ fn: "ask-trip", status: "error", latency_ms: Date.now() - started, error: e instanceof Error ? e.name : "unknown" }));
-    await record("failed", null, null);
-    return json({ status: "failed", reason: "provider_error" });
-  }
 });

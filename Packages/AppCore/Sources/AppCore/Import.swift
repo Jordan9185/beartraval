@@ -241,12 +241,20 @@ public struct SupabaseImportService: ImportService {
 
     public func parse(importID: UUID) async throws -> ImportSession {
         struct Body: Encodable { let import_id: UUID }
+        struct Response: Decodable { let status: String; let reason: String? }
+        var failure: String?
         do {
-            try await client.functions.invoke("parse-import", options: FunctionInvokeOptions(body: Body(import_id: importID)))
+            let response: Response = try await client.functions.invoke("parse-import", options: FunctionInvokeOptions(body: Body(import_id: importID)))
+            if response.status == "failed" { failure = response.reason }
         } catch {
             // 函式失敗時 session 仍保留原文；以資料庫狀態為準。
         }
-        return try await session(importID: importID)
+        var latest = try await session(importID: importID)
+        if let failure, latest.parseStatus == .pending || latest.parseStatus == .failed {
+            latest.parseStatus = .failed
+            latest.parseError = failure
+        }
+        return latest
     }
 
     public func session(importID: UUID) async throws -> ImportSession {

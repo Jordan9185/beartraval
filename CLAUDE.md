@@ -41,3 +41,5 @@
 
 - 後端 Supabase（Postgres + RLS + Realtime + Edge Functions）；iOS 17+；登入用 Email＋密碼（D7，2026-09-24 改定）。
 - 路線與 POI：MVP 只用 Apple Maps；算不出時顯示無法估算。韓國地點提供按鈕外開 Naver／Kakao 地圖（帶店名、座標、起點、交通方式），不串接其 API、不讀回分鐘數（§4.3.1）。
+
+- AI 個人模式（2026-09-27 已確認）：所有 App AI 入口改用 Mac 上的 ChatGPT／Codex 訂閱額度；Mac 離線或額度不足時保留佇列，不退回付費 API。設定及維護見 [個人 GPT 工作程式](ai/personal-worker/README.md)。

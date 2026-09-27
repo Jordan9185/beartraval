@@ -26,7 +26,8 @@
 | `Packages/AppCore/Sources/Features` | SwiftUI 頁面（旅程／今天／地圖／收藏／購物） |
 | `Packages/AppCore/Sources/ShareCore` | 分享流程（App 與 Extension 共用）、截圖文字辨識、共用元件 |
 | `supabase/migrations`、`supabase/tests`、`supabase/functions` | DB migration、SQL 測試、Edge Functions |
-| `ai/itinerary-parse`、`ai/trip-assistant`、`ai/product-extract` | Claude 呼叫（行程解析、AI 助手、商品辨識），Edge Function 直接 import |
+| `ai/itinerary-parse`、`ai/trip-assistant`、`ai/product-extract` | 行程解析、AI 助手、商品辨識的提示／格式／驗證，個人 GPT 工作程式共用 |
+| `ai/personal-worker` | Mac 背景領取雲端工作，以 ChatGPT 登入呼叫 Codex；設定與憑證不進 repo |
 | `project.yml` | XcodeGen 設定；`.xcodeproj` 由它產生 |
 
 ## 指令
@@ -73,7 +74,7 @@ supabase functions deploy <name> --use-api   # parse-import、ask-trip、extract
 ```
 
 - Migration 要向後相容：已安裝的舊版 App 會繼續呼叫舊參數。新增 RPC 參數一律給預設值，並 `drop function` 舊簽名、重新 `grant`（範例見 `20260925000018_place_local_address.sql`）。
-- Claude 模型：`ai/*/src` 的 `DEFAULT_MODEL`（目前 `claude-sonnet-5`），可用 Edge Function 環境變數 `ANTHROPIC_MODEL` 覆寫。API key 由擁有者用 `supabase secrets set` 設定。
+- 現行 AI 全部使用個人 ChatGPT／Codex 訂閱：見 `ai/personal-worker/README.md`。五個 Edge Functions 只排隊，Mac 執行 GPT；不得自動退回 Claude 或 OpenAI 付費 API。共用模組中的歷史 Claude 接頭僅供舊評測，正式入口不建立該 client。文字先用帳號可用的 `gpt-5.6-luna`，圖片用 `gpt-5.6-sol`；更換模型先查官方帳號清單。
 
 ## 踩過的坑（改相關程式前請先看）
 
