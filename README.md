@@ -6,7 +6,7 @@
 
 - 平台：原生 iOS（SwiftUI + Share Extension）
 - 分頁：旅程／今天／地圖／收藏／購物（Trip / Today / Map / Saved / Shopping）
-- 目前階段：**核心模組已有實作，完整主線仍有缺口；依 2026-09-27 主軸重新交付，尚未整體驗收**（見[邏輯稽核](docs/review/2026-09-27-app-logic-audit.md)與[最新交接](docs/handoff/2026-09-27-screenshot-recognition.md)）
+- 目前階段：**核心模組已有實作，完整主線仍有缺口；依 2026-09-27 主軸重新交付，尚未整體驗收**（見[邏輯稽核](docs/review/2026-09-27-app-logic-audit.md)與[最新交接](docs/handoff/2026-09-27-trip-input-recovery.md)）
 
 ## 主流程
 

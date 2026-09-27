@@ -7,8 +7,8 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
-import { parseItinerary } from "../../../ai/itinerary-parse/src/parse.ts";
-import { suggestItinerary, templateRequest } from "../../../ai/itinerary-parse/src/suggest.ts";
+import { createItineraryDraft } from "../../../ai/itinerary-parse/src/complete.ts";
+import { templateRequest, SuggestionError } from "../../../ai/itinerary-parse/src/suggest.ts";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
   // Read the text again after claiming: an edit made before the claim is what we parse;
   // one made after it ends this attempt.
   const { data: claimed } = await asUser.from("import_sessions")
-    .select("start_date, end_date, time_zone, raw_text, parse_attempt").eq("id", importId).maybeSingle();
+    .select("trip_name, start_date, end_date, time_zone, raw_text, parse_attempt").eq("id", importId).maybeSingle();
   if (!claimed) {
     await record("failed", null, "provider_error", null);
     return json({ status: "failed", reason: "provider_error" });
@@ -101,21 +101,12 @@ Deno.serve(async (req) => {
 
   try {
     const client = new Anthropic({ apiKey });
-    const input = { tripStart: claimed.start_date, tripEnd: claimed.end_date,
+    const input = { tripName: claimed.trip_name, tripStart: claimed.start_date, tripEnd: claimed.end_date,
       timeZone: claimed.time_zone, rawText: claimed.raw_text };
     const tripDays = Math.round((Date.parse(input.tripEnd) - Date.parse(input.tripStart)) / 86_400_000) + 1;
     const wantsTemplate = templateRequest(input.rawText, tripDays);
-    if (wantsTemplate) onProgress({ stage: "reading", days: 0, stops: 0, last_place: null });
-    const suggested = wantsTemplate
-      ? await suggestItinerary(client, input, Deno.env.get("ANTHROPIC_MODEL") || undefined)
-      : null;
-    const outcome = wantsTemplate
-      ? suggested == null
-        ? { status: "failed" as const, reason: "invalid_output" as const }
-        : { status: "parsed" as const, result: suggested.result, issues: [],
-          model: suggested.model, usage: suggested.usage }
-      : await parseItinerary(client, input,
-        { model: Deno.env.get("ANTHROPIC_MODEL") || undefined, onProgress });
+    const outcome = await createItineraryDraft(client, input,
+      { model: Deno.env.get("ANTHROPIC_MODEL") || undefined, onProgress });
     await writing;
     if (outcome.status === "failed") {
       const recorded = await record("failed", null, outcome.reason, null);
@@ -127,6 +118,11 @@ Deno.serve(async (req) => {
       model: outcome.model, ...outcome.usage, issues: outcome.issues.length });
     return json({ status: recorded ? "parsed" : "superseded" });
   } catch (e) {
+    if (e instanceof SuggestionError) {
+      const recorded = await record("failed", null, e.reason, null);
+      log({ status: recorded ? "failed" : "superseded", reason: e.reason, mode: "suggested_template" });
+      return json({ status: recorded ? "failed" : "superseded", reason: e.reason });
+    }
     // Network or API errors: keep the raw text so the user can retry.
     log({ status: "error", error: e instanceof Error ? e.name : "unknown" });
     await record("failed", null, "provider_error", null);

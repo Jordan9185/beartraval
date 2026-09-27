@@ -144,7 +144,7 @@ supabase status     # 取得 anon key
 
 ## Edge Function：`parse-import`（AI Gateway）
 
-`functions/parse-import` 以使用者 JWT 讀取 ImportSession（RLS）。有明確日期／Day 標記的原行程用 `parseItinerary()` 按原文解析；只有目的地、天數或尚未排日期的想去清單用 `suggestItinerary()` 搜尋公開資料並依表單日期提出樣板。網路推薦需有支持店名的引用；使用者明確指定但來源暫缺的地點仍可保留為待定位草稿。結果寫回 `parse_result`（service role），不是正式行程，使用者在 App 確認後才由 `commit_import` 寫入。
+`functions/parse-import` 以使用者 JWT 讀取 ImportSession（RLS）。由 `createItineraryDraft()` 一起讀取旅程名稱、日期與原文：完整行程按原文解析，部分行程保留已有安排並補未提供的日期，短句需求搜尋公開資料提出逐日草稿。名稱與原文分開傳遞，名稱已提供的目的地不要求再寫一次。網路推薦需有支持店名的引用；使用者明確指定但來源暫缺的地點仍可保留為待定位草稿。結果寫回 `parse_result`（service role），不是正式行程，使用者在 App 確認後才由 `commit_import` 寫入。
 
 - API key：本機放 `supabase/functions/.env`（`ANTHROPIC_API_KEY=...`，已 gitignore），雲端用 `supabase secrets set ANTHROPIC_API_KEY=...`。
 - 沒有 key 時回 `missing_api_key`，session 標為 failed，原文保留。

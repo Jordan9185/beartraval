@@ -79,6 +79,8 @@ export type ParsedDay = z.infer<typeof ParsedDay>;
 export type ParseResult = z.infer<typeof ParseResult>;
 
 export interface ParseInput {
+  // 旅程名稱是獨立背景，不能覆寫或冒充使用者貼上的原文。
+  tripName?: string;
   tripStart: string; // YYYY-MM-DD
   tripEnd: string; // YYYY-MM-DD
   timeZone: string; // IANA, e.g. "Asia/Seoul"

@@ -5,12 +5,14 @@ import { buildSuggestedDraft, explicitWishPlaces, requestedDays, templateRequest
 test("只有目的地與天數的短句走建議樣板，逐日行程保持原文解析", () => {
   assert.equal(templateRequest("我要去 日本東京五天旅遊"), true);
   assert.equal(templateRequest("想安排東京 5 天行程"), true);
+  assert.equal(templateRequest("幫我排輕鬆一點，想逛街", 5), true);
   assert.equal(templateRequest("東京十五天旅遊"), false);
   assert.equal(requestedDays("東京五天"), 5);
   assert.equal(templateRequest("東京五天行程\nDay 1 淺草寺"), false);
   assert.equal(templateRequest("想去淺草寺、上野、迪士尼", 5), true);
   assert.equal(templateRequest("週一淺草寺、週二上野", 5), false);
   assert.deepEqual(explicitWishPlaces("我想去淺草寺、上野、迪士尼"), ["淺草寺", "上野", "迪士尼"]);
+  assert.deepEqual(explicitWishPlaces("幫我排輕鬆一點，想逛街"), []);
 });
 
 test("建議景點必須有支持名稱的網頁引用，且不能超出旅程天數", () => {

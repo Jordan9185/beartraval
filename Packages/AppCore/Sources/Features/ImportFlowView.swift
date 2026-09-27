@@ -108,6 +108,8 @@ public struct ImportFlowView: View {
         case "refusal": "無法處理這段文字。"
         case "max_tokens": "文字太長，請分段匯入。"
         case "invalid_output": "解析結果格式不正確。"
+        case "incomplete_suggestions": "部分日期的建議尚未完成，原始需求已保留，請重試。"
+        case "no_verified_suggestions": "暫時無法取得可核對的旅遊資料，原始需求已保留，請稍後重試。"
         default: "暫時無法連線到解析服務。"
         }
     }
