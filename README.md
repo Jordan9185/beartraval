@@ -1,22 +1,28 @@
 # BearTravel — iOS AI Travel Companion
 
-把已排好的旅行匯入，將旅途中看到的地點或想買的商品與**每日既定路線**比較，讓使用者自己決定是否加入行程。
+**把旅行資料丟進來，AI 幫你看懂、整理、提出安排；你只需要確認重要選擇，就能帶著行程出發。**
+
+核心為懶人收集、AI 辨識整理與可直接使用的旅程。沒有旅程也能先收內容；正式安排由使用者確認，排入後仍能修改與撤回。這是已採用的產品方向，完整功能仍依開發與驗收證據交付。
 
 - 平台：原生 iOS（SwiftUI + Share Extension）
-- 分頁：旅程／今天／地圖／收藏／購物（Trip / Today / Map / Saved / Shopping）；右上 AI 入口，右下全域新增
-- 目前階段：**MVP 功能完成（WP1–WP11），待真機、雲端與實地驗收**（見 [驗收報告](docs/acceptance/mvp-acceptance.md)）
+- 分頁：旅程／今天／地圖／收藏／購物（Trip / Today / Map / Saved / Shopping）
+- 目前階段：**核心模組已有實作，完整主線仍有缺口；依 2026-09-27 主軸重新交付，尚未整體驗收**（見[邏輯稽核](docs/review/2026-09-27-app-logic-audit.md)與[最新交接](docs/handoff/2026-09-27-ai-first-direction.md)）
 
-## 三條必須走通的主流程
+## 主流程
 
-1. 貼文字行程 → 解析 → 確認地點／固定時間 → 建立 Trip 與 Base Route → Today
-2. Threads／IG 分享 → 辨識候選地點 → 確認 → Route Match → 收藏或加入某天
-3. 新增商品 → 搜尋可能販售店 → Route Match → 安排購買 → 標記已購買
+1. 分享、文字、連結或照片 → 先保存 → AI 辨識多個地點／商品／行程 → 自動整理個人清單或草稿。
+2. 明確結果直接可用，歧義集中確認 → 建議旅程與日期 → 使用者核對後排入，保留來源與當地地址。
+3. 正式旅程可修改、撤回與重新安排 → 今天／地圖對應同一天 → 導航、司機卡、完成／撤銷購買。
+
+既有行程、收藏集合或一句旅行想法都能作為起點。每個功能都要交代「存在哪、目前狀態、下一步、如何更正、失敗怎麼恢復」。
 
 ## 文件
 
 | 文件 | 說明 |
 |---|---|
-| [docs/spec/ios-ai-travel-companion-mvp-spec.md](docs/spec/ios-ai-travel-companion-mvp-spec.md) | 產品／行為規格草案 v0.1（規則、範圍、驗收情境 AC-01～AC-14） |
+| [docs/spec/ai-first-product-direction.md](docs/spec/ai-first-product-direction.md) | 已確認產品主軸、確認邊界與 AIJ-01～12 驗收基準 |
+| [docs/planning/ai-first-delivery-plan-v3.md](docs/planning/ai-first-delivery-plan-v3.md) | 現行工程優先順序、工作包 AJ-0～AJ-4 與交付依賴 |
+| [docs/spec/ios-ai-travel-companion-mvp-spec.md](docs/spec/ios-ai-travel-companion-mvp-spec.md) | 產品／行為規格 v0.2（已對齊新主軸，保留 AC-01～AC-14） |
 | [docs/spec/share-inbox-proposal.md](docs/spec/share-inbox-proposal.md) | 分享後整理／Travel Inbox 產品流程與驗收情境；實作狀態見最新交接 |
 | [docs/spec/claude-ios-planning-brief.md](docs/spec/claude-ios-planning-brief.md) | 規劃任務說明 |
 | [docs/acceptance/mvp-acceptance.md](docs/acceptance/mvp-acceptance.md) | MVP 驗收報告：AC-01～AC-14 證據與待辦 |
@@ -45,4 +51,4 @@ open BearTravel.xcodeproj
 
 ## 下一步
 
-技術決策見規劃文件第 6 節（D1–D13；D9 每日以住宿為起訖尚未實作）。Spike S1–S4 與 MVP WP1–WP11 已完成；接下來是真機、雲端與實地驗收（見[驗收報告](docs/acceptance/mvp-acceptance.md)「需要人工完成」），以及 [2026-09-25 review](docs/review/2026-09-25-project-review.md) 的後續修正。
+依[主線交付計畫 v3](docs/planning/ai-first-delivery-plan-v3.md)從 AJ-0 的真實樣本基線與路線可信度修正開始，再完成 AJ-1「無 Trip 也能收件、AI 整理後找得到結果」。技術決策 D1–D13 沿用，D9 住宿起訖仍未實作；過去 WP 完成記錄不代表本版使用主線或真機驗收完成。

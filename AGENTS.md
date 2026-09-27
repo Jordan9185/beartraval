@@ -6,7 +6,8 @@
 
 1. [CLAUDE.md](CLAUDE.md)：**不可違反的產品規則**、UI 慣例、畫面設計原則、已確認技術決策。全部適用，以它為準。
 2. [docs/handoff/](docs/handoff/) 最新一份：目前狀態、未驗證項目、已知問題、下一步。
-3. 動到對應功能時再讀：規格 [docs/spec/](docs/spec/)、技術規劃 [docs/planning/mvp-technical-plan.md](docs/planning/mvp-technical-plan.md)（決策 D1–D13）、後端 [supabase/README.md](supabase/README.md)（RPC、權限、錯誤代碼）。
+3. [現行產品主軸](docs/spec/ai-first-product-direction.md)與[主線交付計畫 v3](docs/planning/ai-first-delivery-plan-v3.md)：以懶人收集、AI 辨識整理與旅行使用為交付主線。
+4. 動到對應功能時再讀：規格 [docs/spec/](docs/spec/)、技術規劃 [docs/planning/mvp-technical-plan.md](docs/planning/mvp-technical-plan.md)（沿用決策 D1–D13，舊開發順序已由 v3 取代）、後端 [supabase/README.md](supabase/README.md)（RPC、權限、錯誤代碼）。
 
 ## 慣例
 

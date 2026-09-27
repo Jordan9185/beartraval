@@ -1,5 +1,7 @@
 # iOS AI Travel Companion — MVP 技術規劃 v0.1
 
+【2026-09-27 更新】技術決策 D1–D13 與既有契約持續供參考；下方架構提案、WP 排程與完成敘述是歷史記錄，部分已由實作調整。現行產品定位依[AI 辨識與懶人整理主軸](../spec/ai-first-product-direction.md)，新增開發順序依[交付計畫 v3](ai-first-delivery-plan-v3.md)。不得再以「先行程、最後 AI」作為開發優先順序。
+
 日期：2026-09-24 · 依據：[MVP 規格草案 v0.1](../spec/ios-ai-travel-companion-mvp-spec.md)、[規劃任務](../spec/claude-ios-planning-brief.md)
 
 標記說明：

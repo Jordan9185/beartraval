@@ -1,5 +1,7 @@
 # BeaRTravel 分享後整理：Travel Inbox 產品流程與規格提案
 
+【2026-09-27 文件定位】本文件保留當時提案及觀察，不代表目前實作狀態。懶人收集與 AI 整理的主軸已由[現行產品規格](ai-first-product-direction.md)採用；影片、通知等原提案細節未因此全部採用，實作順序依[交付計畫 v3](../planning/ai-first-delivery-plan-v3.md)。
+
 版本：提案 v0.3 · 2026-09-26  
 狀態：【建議】尚未取代 [現行 MVP 規格](ios-ai-travel-companion-mvp-spec.md)，亦不代表功能已實作或驗收。
 開發拆解與驗收門檻見[下一階段開發計畫](../planning/share-inbox-delivery-plan.md)。

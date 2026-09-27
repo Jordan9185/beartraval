@@ -1,5 +1,7 @@
 # 給 Claude 的規劃任務
 
+【歷史任務】以下是 2026-09-24 的初始規劃委託，不是目前工作指令。後續開發先讀[現行產品主軸](ai-first-product-direction.md)、[交付計畫 v3](../planning/ai-first-delivery-plan-v3.md)及最新交接；不可因舊文「先做規劃」而停止已獲授權的開發。
+
 請先閱讀我附上的《iOS AI Travel Companion — MVP 規格草案》，再開啟 [可互動 HTML wireframe](https://ai-travel-companion-mvp-wireframe.jordan8125.chatgpt.site/) 了解畫面順序。Wireframe 的 AI、地圖、店家、邀請與同步是示意資料，請以規格中的產品規則與驗收情境為準。
 
 我要以 **原生 iOS App（SwiftUI + Share Extension）** 規劃 MVP。先做規劃，不要直接寫程式。請交付：
