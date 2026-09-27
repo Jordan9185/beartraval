@@ -40,8 +40,7 @@ struct InboxView: View {
                             InboxDetailView(record: record, repository: repository)
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(record.title ?? record.sourceURL.flatMap { URL(string: $0)?.host } ??
-                                     String(record.rawText.prefix(50)).trimmingCharacters(in: .whitespacesAndNewlines))
+                                Text(record.displayTitle)
                                     .lineLimit(2)
                                 HStack {
                                     Text(statusTitle(record.status))

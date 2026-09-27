@@ -16,6 +16,14 @@ public struct InboxRecord: Decodable, Identifiable, Sendable {
     public var errorCode: String?
     public var lastSharedAt: String
 
+    /// 純圖片或空標題的分享也要有可辨識的列標題。
+    public var displayTitle: String {
+        if let title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return title }
+        if let sourceURL, let host = URL(string: sourceURL)?.host { return host }
+        let preview = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return preview.isEmpty ? "分享內容" : String(preview.prefix(50))
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, title, status
         case sourceURL = "source_url"
