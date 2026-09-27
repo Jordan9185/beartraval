@@ -22,8 +22,8 @@ public struct ImportUITestRoot: View {
 
     public var body: some View {
         NavigationStack {
-            if ["savedButtons", "personalButtons", "removeFailure", "savedViewer"].contains(scenario) {
-                SavedButtonsUITestScene(personal: scenario == "personalButtons", failFirst: scenario == "removeFailure", viewer: scenario == "savedViewer")
+            if ["savedButtons", "personalButtons", "removeFailure", "savedViewer", "confirmMultiple", "confirmFailure"].contains(scenario) {
+                SavedButtonsUITestScene(personal: scenario == "personalButtons" || scenario.hasPrefix("confirm"), failFirst: scenario == "removeFailure", viewer: scenario == "savedViewer", multiple: scenario == "confirmMultiple", confirmFails: scenario == "confirmFailure")
             } else if scenario == "startup" || scenario == "startupRetry" {
                 StartupUITestScene(failFirst: scenario == "startupRetry")
             } else if scenario == "sourceImage" {
@@ -216,6 +216,10 @@ private struct SavedButtonsUITestScene: View {
     let personal: Bool
     var failFirst = false
     var viewer = false
+    var multiple = false
+    var confirmFails = false
+    @State private var confirmedItem: InboxItemRecord?
+    @State private var confirmations = 0
     @State private var removed = false
     @State private var attempts = 0
     @State private var opened = 0
@@ -228,13 +232,21 @@ private struct SavedButtonsUITestScene: View {
         rawLabel: "測試收藏", category: .eat, sourceId: nil, addedBy: nil, status: .saved),
         place: nil, source: nil, interestedUserIDs: [])
     private var item: InboxItemRecord {
-        try! JSONDecoder().decode(InboxItemRecord.self, from: Data(#"""
+        if let confirmedItem { return confirmedItem }
+        var value = try! JSONDecoder().decode(InboxItemRecord.self, from: Data(#"""
         {"id":"00000000-0000-0000-0000-000000000001","capture_id":"00000000-0000-0000-0000-000000000002",
          "kind":"place","display_name":"測試個人收藏","source_span":"image:1","confidence":"low","origin_type":"explicit",
          "resolution_status":"unresolved","archived":true,"revision":0,
          "discovery_candidates":[{"name":"測試餐廳","korean_name":"테스트 식당","address_local":"서울 성동구 연무장길 12-1",
            "search_query":"測試店名","reason":"測試來源","source_url":"https://example.invalid/source"}]}
         """#.utf8))
+        if multiple, var second = value.discoveryCandidates?.first {
+            second.name = "第二間餐廳"
+            second.koreanName = "두 번째 식당"
+            second.sourceURL = "https://example.invalid/second"
+            value.discoveryCandidates?.append(second)
+        }
+        return value
     }
     var body: some View {
         List {
@@ -244,7 +256,16 @@ private struct SavedButtonsUITestScene: View {
                 Text(mapQuery).accessibilityIdentifier("mapQuery")
             }
             if personal {
-                PersonalInboxRow(item: item, kind: "place", repository: repository) { _ in }
+                PersonalInboxRow(item: item, kind: "place", repository: repository,
+                    onUpdated: { confirmedItem = $0 }, confirmDiscovery: { original, index in
+                        confirmations += 1
+                        if confirmFails && confirmations == 1 { throw BackendError.staleRevision }
+                        var result = original
+                        result.confirmedDiscovery = original.discoveryCandidates?[index]
+                        result.revision += 1
+                        result.archived = true
+                        return result
+                    })
             } else if !removed {
                 SavedRow(entry: entry, me: nil, canEdit: !viewer, scheduledDay: nil,
                          toggleInterest: { interested += 1 }, schedule: { scheduled += 1 },

@@ -819,6 +819,7 @@ struct CollectionRemoveButton: View {
     let scope: Scope
     var showsMenu = false
     var edit: (() -> Void)? = nil
+    var locate: (() -> Void)? = nil
     let action: () async throws -> Void
     @State private var confirming = false
     @State private var removing = false
@@ -830,6 +831,7 @@ struct CollectionRemoveButton: View {
                 if showsMenu {
                     Menu {
                         if let edit { Button("更正名稱或分類", systemImage: "pencil", action: edit) }
+                        if let locate { Button("在地圖定位", systemImage: "map", action: locate) }
                         Button(scope.title, systemImage: "trash", role: .destructive) { confirming = true }
                             .accessibilityIdentifier("removeCollection")
                     } label: {

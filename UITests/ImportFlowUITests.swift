@@ -103,6 +103,34 @@ final class ImportFlowUITests: XCTestCase {
         add(attachment)
     }
 
+    func testSingleAICandidateConfirmsWithoutOpeningSearch() {
+        let app = launch("personalButtons")
+        app.buttons["確認 AI 地點"].tap()
+        XCTAssertTrue(app.staticTexts["已確認：테스트 식당"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["確認 AI 地點"].exists)
+        XCTAssertFalse(app.navigationBars["查找與定位"].exists)
+        XCTAssertTrue(app.staticTexts["已確認店家；地圖定位待補，不計算路線。"].exists)
+    }
+
+    func testMultipleAICandidatesConfirmOnlyTappedCandidate() {
+        let app = launch("confirmMultiple")
+        let second = app.buttons["confirmCandidate-1"]
+        reveal(second, in: app)
+        second.tap()
+        XCTAssertTrue(app.staticTexts["已確認：두 번째 식당"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["已確認：테스트 식당"].exists)
+        XCTAssertFalse(app.navigationBars["查找與定位"].exists)
+    }
+
+    func testAICandidateFailureDoesNotClaimConfirmedAndCanRetry() {
+        let app = launch("confirmFailure")
+        app.buttons["確認 AI 地點"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "確認失敗：")).firstMatch.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["已確認：테스트 식당"].exists)
+        app.buttons["確認 AI 地點"].tap()
+        XCTAssertTrue(app.staticTexts["已確認：테스트 식당"].waitForExistence(timeout: 3))
+    }
+
     func testStartupWaitsWithoutFalseLoadFailure() {
         let app = launch("startup")
         XCTAssertTrue(app.staticTexts["載入中…"].waitForExistence(timeout: 2))

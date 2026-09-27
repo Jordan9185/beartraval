@@ -310,8 +310,12 @@ private struct InboxItemRow: View {
             }
             Text("來源：\(item.sourceSpan)").font(.caption).foregroundStyle(.secondary).lineLimit(3)
             if item.kind == "place" {
-                ForEach(item.discoveryCandidates ?? []) { suggestion in
-                    InboxDiscoveryCandidateRow(suggestion: suggestion)
+                if let selected = item.confirmedDiscovery {
+                    InboxDiscoveryCandidateRow(suggestion: selected, confirmed: true)
+                } else {
+                    ForEach(item.discoveryCandidates ?? []) { suggestion in
+                        InboxDiscoveryCandidateRow(suggestion: suggestion)
+                    }
                 }
             }
             if item.kind == "place" && item.resolutionStatus != "verified" {
@@ -320,7 +324,7 @@ private struct InboxItemRow: View {
             HStack {
                 Button("更正", action: edit)
                 if item.kind == "place" && item.resolutionStatus != "verified" {
-                    Button("確認地點", action: resolve)
+                    Button("在地圖定位", action: resolve)
                 }
                 Button("加入旅伴清單", action: publish)
                 Button(item.archived ? "撤銷收藏" : "加入個人清單", action: toggle)
@@ -400,9 +404,10 @@ private struct InboxPublishView: View {
             } else {
                 // 同一篇可能有多間店；來源保留 URL，但不以單一 canonical URL 把不同店誤合併。
                 let source = SavedSource(type: "share", url: sourceURL, canonicalUrl: nil, summary: item.sourceSpan)
-                let (saved, _) = try await tripRepository.savePlace(tripID: selectedTripID, label: item.displayName,
+                let selected = item.confirmedDiscovery
+                let (saved, _) = try await tripRepository.savePlace(tripID: selectedTripID, label: selected?.name ?? item.displayName,
                     category: .place, placeID: item.placeID, source: source, clientOpID: operationID)
-                if let only = item.discoveryCandidates?.count == 1 ? item.discoveryCandidates?.first : nil,
+                if let only = selected ?? (item.discoveryCandidates?.count == 1 ? item.discoveryCandidates?.first : nil),
                    let address = only.addressLocal {
                     try await tripRepository.setSavedAddressHint(savedID: saved.id, address: address,
                         sourceURL: only.sourceURL)
@@ -502,7 +507,7 @@ private struct InboxPlaceResolveView: View {
                     }
                 }
             }
-            .navigationTitle("確認地點")
+            .navigationTitle("查找與定位")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("關閉") { dismiss() } } }
             .task { await search(discoverFallback: true) }
         }
@@ -864,6 +869,8 @@ struct PersonalInboxRow: View {
     var tripRegionName: String? = nil
     var tripCountryCode: String? = nil
     let onUpdated: (InboxItemRecord) -> Void
+    var confirmDiscovery: ((InboxItemRecord, Int) async throws -> InboxItemRecord)? = nil
+    @State private var confirming = false
     @State private var resolves = false
     @State private var publishes = false
     @State private var editing = false
@@ -875,14 +882,28 @@ struct PersonalInboxRow: View {
                 Text(item.displayName).frame(maxWidth: .infinity, alignment: .leading)
                 CollectionRemoveButton(name: item.displayName,
                     scope: candidate ? .candidate : (kind == "product" ? .personalProduct : .personalPlace),
-                    showsMenu: true, edit: { editing = true }) {
+                    showsMenu: true, edit: { editing = true }, locate: kind == "place" ? { resolves = true } : nil) {
                     onUpdated(try await repository.updateItem(item, archived: false))
                 }
             }
             Text("來源：\(item.sourceSpan)").font(.caption).foregroundStyle(.secondary)
             if kind == "place" {
-                ForEach(item.discoveryCandidates ?? []) { suggestion in
-                    InboxDiscoveryCandidateRow(suggestion: suggestion)
+                if let selected = item.confirmedDiscovery {
+                    InboxDiscoveryCandidateRow(suggestion: selected, confirmed: true)
+                    Text("已確認店家；地圖定位待補，不計算路線。")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array((item.discoveryCandidates ?? []).enumerated()), id: \.offset) { index, suggestion in
+                        InboxDiscoveryCandidateRow(suggestion: suggestion)
+                        if (item.discoveryCandidates?.count ?? 0) > 1 {
+                            Button { Task { await confirm(index) } } label: {
+                                CollectionActionLabel(title: "就是這間", icon: "checkmark")
+                            }
+                            .buttonStyle(.bordered).controlSize(.mini)
+                            .disabled(confirming)
+                            .accessibilityIdentifier("confirmCandidate-\(index)")
+                        }
+                    }
                 }
             }
             if kind == "product" {
@@ -937,9 +958,15 @@ struct PersonalInboxRow: View {
                 CollectionActionLabel(title: kind == "product" ? "加入想買" : "加入收藏", icon: "bookmark")
             }
         }
-        if kind == "place", item.resolutionStatus != "verified" {
-            Button { resolves = true } label: {
-                CollectionActionLabel(title: "確認地點", icon: "mappin.and.ellipse")
+        if kind == "place", item.resolutionStatus != "verified", item.confirmedDiscovery == nil {
+            if item.discoveryCandidates?.count == 1 {
+                Button { Task { await confirm(0) } } label: {
+                    CollectionActionLabel(title: confirming ? "確認中…" : "確認 AI 地點", icon: "checkmark")
+                }.disabled(confirming)
+            } else if item.discoveryCandidates?.isEmpty != false {
+                Button { resolves = true } label: {
+                    CollectionActionLabel(title: "查找地點", icon: "magnifyingglass")
+                }
             }
         }
         if !candidate {
@@ -947,6 +974,19 @@ struct PersonalInboxRow: View {
                 CollectionActionLabel(title: "加入旅伴清單", icon: "person.2")
             }
         }
+    }
+
+    @MainActor private func confirm(_ index: Int) async {
+        guard !confirming else { return }
+        confirming = true
+        errorMessage = nil
+        defer { confirming = false }
+        do {
+            let updated: InboxItemRecord
+            if let confirmDiscovery { updated = try await confirmDiscovery(item, index) }
+            else { updated = try await repository.confirmDiscovery(item, candidateIndex: index) }
+            onUpdated(updated)
+        } catch { errorMessage = "確認失敗：\(userMessage(for: error))" }
     }
 
     private func archive() async {
@@ -958,10 +998,11 @@ struct PersonalInboxRow: View {
 /// 有網頁來源的韓國候選直接顯示在清單；不要求先進入 Apple 地圖搜尋畫面。
 private struct InboxDiscoveryCandidateRow: View {
     let suggestion: DiscoveredPlace
+    var confirmed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("可能是：\(suggestion.koreanName ?? suggestion.name)").font(.subheadline)
+            Text("\(confirmed ? "已確認：" : "可能是：")\(suggestion.koreanName ?? suggestion.name)").font(.subheadline)
             if let address = suggestion.addressLocal {
                 Text("韓文地址線索：\(address)").font(.caption).textSelection(.enabled)
             }

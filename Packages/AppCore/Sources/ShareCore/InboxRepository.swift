@@ -60,6 +60,8 @@ public struct InboxItemRecord: Decodable, Identifiable, Sendable {
     /// 網路來源支持的候選；不等於已確認地圖座標。
     public var discoveryCandidates: [DiscoveredPlace]?
     public var discoveryCheckedAt: String?
+    /// 使用者確認的店名與地址；不代表地圖座標已驗證。
+    public var confirmedDiscovery: DiscoveredPlace?
     public var archived: Bool
     public var revision: Int
 
@@ -76,6 +78,7 @@ public struct InboxItemRecord: Decodable, Identifiable, Sendable {
         case storeEvidence = "store_evidence"
         case discoveryCandidates = "discovery_candidates"
         case discoveryCheckedAt = "discovery_checked_at"
+        case confirmedDiscovery = "confirmed_discovery"
     }
 }
 
@@ -448,6 +451,15 @@ public struct InboxRepository: Sendable {
         do {
             return try await client.rpc("update_inbox_item", params: Params(
                 p_item_id: item.id, p_expected_revision: item.revision, p_display_name: name, p_archived: archived, p_kind: kind
+            )).execute().value
+        } catch { throw BackendError.from(error) }
+    }
+
+    public func confirmDiscovery(_ item: InboxItemRecord, candidateIndex: Int) async throws -> InboxItemRecord {
+        struct Params: Encodable { let p_item_id: UUID, p_expected_revision: Int, p_candidate_index: Int }
+        do {
+            return try await client.rpc("confirm_inbox_discovery", params: Params(
+                p_item_id: item.id, p_expected_revision: item.revision, p_candidate_index: candidateIndex
             )).execute().value
         } catch { throw BackendError.from(error) }
     }
