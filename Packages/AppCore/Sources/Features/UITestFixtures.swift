@@ -21,7 +21,9 @@ public struct ImportUITestRoot: View {
 
     public var body: some View {
         NavigationStack {
-            if scenario == "sourceImage" {
+            if scenario == "startup" || scenario == "startupRetry" {
+                StartupUITestScene(failFirst: scenario == "startupRetry")
+            } else if scenario == "sourceImage" {
                 Form {
                     Section("原始內容") { SourceImagePreview(data: Self.sourceImageData) }
                 }
@@ -175,5 +177,34 @@ final class FakeShoppingService: ShoppingService, @unchecked Sendable {
     func setShoppingInterest(itemID: UUID, interested: Bool) async throws {}
     func merchants(of itemID: UUID) async throws -> [MerchantCandidate] { [] }
     func addMerchant(itemID: UUID, placeID: UUID, evidence: MerchantCandidate.EvidenceType, url: String?, note: String?) async throws {}
+}
+
+/// 刻意延遲內容，重現清單先完成但行程尚未到達的啟動順序。
+private struct StartupUITestScene: View {
+    @State private var store: TripStore
+    init(failFirst: Bool) { _store = State(initialValue: TripStore(dataSource: StartupUITestSource(failFirst: failFirst))) }
+    var body: some View {
+        Group {
+            if store.snapshot != nil {
+                Text("已載入測試旅程").accessibilityIdentifier("startupReady")
+            } else {
+                TripUnavailableView(store: store, systemImage: "sun.max", goToTrips: {})
+            }
+        }
+        .navigationTitle("今天")
+        .task { await store.start() }
+    }
+}
+private actor StartupUITestSource: TripStoreDataSource {
+    enum Failure: Error { case offline }
+    var failFirst: Bool
+    let trip = Trip(id: UUID(), name: "測試旅程", startDate: "2026-10-01", endDate: "2026-10-01", timeZone: "Asia/Tokyo", revision: 0)
+    init(failFirst: Bool) { self.failFirst = failFirst }
+    func myTrips() async throws -> [Trip] { [trip] }
+    func snapshot(of trip: Trip) async throws -> TripSnapshot {
+        try await Task.sleep(for: .seconds(3))
+        if failFirst { failFirst = false; throw Failure.offline }
+        return TripSnapshot(trip: trip, revision: 0, timeline: [], places: [:], saved: [], shopping: [])
+    }
 }
 #endif

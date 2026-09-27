@@ -58,6 +58,10 @@ select id as discovery_job from app.enqueue_personal_ai(:'owner','discover','{}'
 select lease as discovery_lease from app.claim_personal_ai(:'owner') \gset
 select tests.ok(app.finish_personal_ai(:'owner', :'discovery_job', :'discovery_lease', '{"status":"none","candidates":[]}', 'codex/test'), '店家補查寫入自己的候選快取');
 select tests.ok((select discovery_checked_at is not null from app.inbox_items where id = :'item_id'), '候選快取保留檢查時間');
+select tests.ok((app.enqueue_personal_ai(:'owner','discover','{}',jsonb_build_object('item_id', :'item_id','revision',0),'discovery')).id = :'discovery_job',
+  '完成後相同需求重用同一工作，不再排隊');
+select tests.ok((select attempts = 1 and result->>'status' = 'none' from app.personal_ai_jobs where id = :'discovery_job'),
+  '零候選也是已保存結果，不重複呼叫模型');
 set role authenticated;
 select tests.login(:'owner');
 select id as trip_id from app.create_trip('問答測試','2026-10-01','2026-10-01','Asia/Tokyo') \gset

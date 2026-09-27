@@ -441,13 +441,13 @@ public struct InboxRepository: Sendable {
         return saved.id
     }
 
-    public func updateItem(_ item: InboxItemRecord, name: String? = nil, archived: Bool? = nil) async throws -> InboxItemRecord {
+    public func updateItem(_ item: InboxItemRecord, name: String? = nil, archived: Bool? = nil, kind: String? = nil) async throws -> InboxItemRecord {
         struct Params: Encodable {
-            let p_item_id: UUID, p_expected_revision: Int, p_display_name: String?, p_archived: Bool?
+            let p_item_id: UUID, p_expected_revision: Int, p_display_name: String?, p_archived: Bool?, p_kind: String?
         }
         do {
             return try await client.rpc("update_inbox_item", params: Params(
-                p_item_id: item.id, p_expected_revision: item.revision, p_display_name: name, p_archived: archived
+                p_item_id: item.id, p_expected_revision: item.revision, p_display_name: name, p_archived: archived, p_kind: kind
             )).execute().value
         } catch { throw BackendError.from(error) }
     }

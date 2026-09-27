@@ -18,8 +18,10 @@ export async function enqueuePersonalAI(authorization: string, kind: string, inp
   }
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([kind, input, context])));
   const key = Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
+  const payload = input as Record<string, unknown>;
+  const label = String(payload.query ?? payload.tripName ?? payload.title ?? "").slice(0, 80);
   const { data: job, error: enqueueError } = await admin.rpc("enqueue_personal_ai", {
-    p_owner: owner, p_kind: kind, p_input: input, p_context: context, p_key: key,
+    p_owner: owner, p_kind: kind, p_input: input, p_context: { ...context, display_label: label }, p_key: key,
   });
   if (enqueueError) {
     if (enqueueError.code === "PT429") return reply({ status: "failed", reason: "rate_limited" });
@@ -28,5 +30,6 @@ export async function enqueuePersonalAI(authorization: string, kind: string, inp
     return reply({ status: "failed", reason: "queue_error" }, 503);
   }
   if (job.result) return reply(job.result);
-  return reply({ status: "queued", job_id: job.id, reason: "personal_ai_waiting" }, 202);
+  return reply({ status: job.status, job_id: job.id, reason: job.reason ??
+    (job.status === "running" ? "personal_ai_running" : "personal_ai_waiting") }, 202);
 }

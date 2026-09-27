@@ -58,6 +58,7 @@ struct InboxView: View {
                 }
             }
             .navigationTitle("分享收件匣")
+            .onChange(of: session.aiActivity.completionVersion) { Task { await reload() } }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("關閉") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) {
@@ -103,7 +104,7 @@ struct InboxView: View {
     private func statusTitle(_ status: String) -> String {
         switch status {
         case "saved": "已同步，等待整理"
-        case "processing": "等待 Mac／GPT 整理"
+        case "processing": "整理中 · 可查看 AI 進度"
         case "ready": "已整理"
         case "insufficient": "資訊不足，已保存來源"
         case "failed": "整理失敗，可重試"
@@ -208,7 +209,7 @@ private struct InboxDetailView: View {
             }
             if record.status == "processing" {
                 Section {
-                    Text("由 Mac 使用 GPT 訂閱額度整理。需求已保存；Mac 開機、連網且保持喚醒後會繼續。")
+                    Text("需求已保存，整理完成會自動更新。可先離開此頁，在主畫面的 AI 進度查看排隊與處理狀態。")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -221,9 +222,9 @@ private struct InboxDetailView: View {
         }
         .navigationTitle("分享內容")
         .sheet(item: $editing) { item in
-            InboxItemEditor(item: item) { name in
+            InboxItemEditor(item: item) { name, kind in
                 do {
-                    let updated = try await repository.updateItem(item, name: name)
+                    let updated = try await repository.updateItem(item, name: name, kind: kind)
                     replace(updated)
                     editing = nil
                 } catch { errorMessage = "更正失敗：\(error.localizedDescription)" }
@@ -395,14 +396,7 @@ private struct InboxPublishView: View {
                 if let hint = item.storeHint {
                     try await tripRepository.setShoppingStoreHint(itemID: shopping.id, name: hint, evidence: item.storeEvidence)
                 }
-                if let trip = trips.first(where: { $0.id == selectedTripID }) {
-                    let country = LocalMapCountry.guess(name: trip.name, timeZone: trip.timeZone)
-                    let region = [country, trip.name].compactMap { $0 }.joined(separator: " ")
-                    let candidates = try await repository.discoverStores(product: item.displayName,
-                        storeHint: item.storeHint, region: region)
-                    try await tripRepository.setShoppingStoreSuggestions(itemID: shopping.id,
-                        suggestions: candidates.map(ShoppingStoreSuggestion.init(discovered:)))
-                }
+                // 商品保存完成即回報；店家補查由購物頁明確啟動，不把排隊當作加入失敗。
             } else {
                 // 同一篇可能有多間店；來源保留 URL，但不以單一 canonical URL 把不同店誤合併。
                 let source = SavedSource(type: "share", url: sourceURL, canonicalUrl: nil, summary: item.sourceSpan)
@@ -493,7 +487,7 @@ private struct InboxPlaceResolveView: View {
                     }
                 }
                 if !discovering {
-                    Button("重新查韓文店名與地址") { Task { await discover(force: true) } }
+                    Button(discovered.isEmpty ? "用 AI 查找店家" : "重新查找店家") { Task { await discover(force: true) } }
                 }
                 Section("供行程定位的地圖候選") {
                     ForEach(candidates) { option in
@@ -523,7 +517,7 @@ private struct InboxPlaceResolveView: View {
         case .unavailable: candidates = []; errorMessage = "地圖暫時無法搜尋，請稍後再試。"
         }
         if !discovered.isEmpty { await mapDiscovered() }
-        if discoverFallback && item.discoveryCheckedAt == nil { await discover() }
+        // 開啟確認頁只查地圖、顯示已保存線索；AI 補查由使用者明確啟動。
     }
 
     private func discover(force: Bool = false) async {
@@ -570,27 +564,35 @@ private struct InboxPlaceResolveView: View {
 
 private struct InboxItemEditor: View {
     let item: InboxItemRecord
-    let save: (String) async -> Void
+    let save: (String, String) async -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
+    @State private var kind: String
 
-    init(item: InboxItemRecord, save: @escaping (String) async -> Void) {
+    init(item: InboxItemRecord, save: @escaping (String, String) async -> Void) {
         self.item = item
         self.save = save
         _name = State(initialValue: item.displayName)
+        _kind = State(initialValue: item.kind)
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 TextField("名稱", text: $name)
+                Picker("放入哪個清單", selection: $kind) {
+                    Text("收藏 · 想去吃、玩、逛").tag("place")
+                    Text("購物 · 想買帶走").tag("product")
+                }
+                Text("餐廳料理放收藏；包裝食品、伴手禮放購物。只更正個人清單，已加入的旅程不會改動。")
+                    .font(.caption).foregroundStyle(.secondary)
                 Text("來源：\(item.sourceSpan)").font(.caption).foregroundStyle(.secondary)
             }
             .navigationTitle("更正項目")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("儲存") { Task { await save(name.trimmingCharacters(in: .whitespacesAndNewlines)) } }
+                    Button("儲存") { Task { await save(name.trimmingCharacters(in: .whitespacesAndNewlines), kind) } }
                         .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
@@ -809,6 +811,10 @@ struct PersonalInboxItemsView: View {
 
     var body: some View {
         List {
+            Section {
+                Text(kind == "product" ? "想買帶走的商品、包裝食品與伴手禮。想去吃的餐廳放收藏。" : "想去吃、玩、逛的地方。想買帶走的商品放購物。")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } header: { Text(kind == "product" ? "想買的東西" : "想去的地方") }
             if let errorMessage { ErrorText(errorMessage) }
             if !items.isEmpty {
                 Section("我的清單") {
@@ -835,6 +841,7 @@ struct PersonalInboxItemsView: View {
             }
         }
         .navigationTitle(kind == "product" ? "只有我看得到 · 想買" : "只有我看得到 · 收藏")
+        .onChange(of: session.aiActivity.completionVersion) { Task { await reload() } }
         .task { await reload() }
         .refreshable { await reload() }
     }
@@ -865,6 +872,7 @@ struct PersonalInboxRow: View {
     let onUpdated: (InboxItemRecord) -> Void
     @State private var resolves = false
     @State private var publishes = false
+    @State private var editing = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -897,6 +905,7 @@ struct PersonalInboxRow: View {
             if kind == "place", item.resolutionStatus != "verified" {
                 Button("確認地點") { resolves = true }.font(.caption)
             }
+            Button("更正名稱或分類") { editing = true }.font(.caption)
             if !candidate { Button("加入旅伴清單") { publishes = true }.font(.caption) }
             if let errorMessage { ErrorText(errorMessage) }
         }
@@ -904,6 +913,14 @@ struct PersonalInboxRow: View {
             InboxPlaceResolveView(item: item, repository: repository) { updated in
                 onUpdated(updated)
                 resolves = false
+            }
+        }
+        .sheet(isPresented: $editing) {
+            InboxItemEditor(item: item) { name, kind in
+                do {
+                    onUpdated(try await repository.updateItem(item, name: name, kind: kind))
+                    editing = false
+                } catch { errorMessage = "更正失敗：\(userMessage(for: error))" }
             }
         }
         .sheet(isPresented: $publishes) {

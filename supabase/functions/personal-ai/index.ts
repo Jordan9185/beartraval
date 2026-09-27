@@ -1,4 +1,5 @@
 // App 查自己的工作；Mac 以專用憑證領取限定帳號的工作，不持有資料庫或 ChatGPT 雲端憑證。
+import { activitySummary } from "../_shared/personal-ai-activity.ts";
 import { adminClient, reply } from "../_shared/personal-ai.ts";
 
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -17,16 +18,27 @@ Deno.serve(async (req) => {
   let body;
   try { body = await req.json(); } catch { return reply({ error: "INVALID_REQUEST" }, 400); }
   const admin = adminClient();
-  if (body.action === "status") {
+  if (body.action === "status" || body.action === "activity") {
     const token = req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
     if (!token) return reply({ error: "UNAUTHENTICATED" }, 401);
     const { data: auth } = await admin.auth.getUser(token);
     if (!auth.user) return reply({ error: "UNAUTHENTICATED" }, 401);
+    if (body.action === "activity") {
+      const columns = "id,kind,status,reason,created_at,updated_at,context,query:input->>query,trip_name:input->>tripName,model:result->>model";
+      const [active, recent] = await Promise.all([
+        admin.from("personal_ai_jobs").select(columns).eq("owner_id", auth.user.id)
+          .in("status", ["queued", "running"]).order("created_at"),
+        admin.from("personal_ai_jobs").select(columns).eq("owner_id", auth.user.id)
+          .in("status", ["completed", "failed"]).order("updated_at", { ascending: false }).limit(10),
+      ]);
+      if (active.error || recent.error) return reply({ error: "READ_ERROR" }, 503);
+      return reply({ jobs: activitySummary([...(active.data ?? []), ...(recent.data ?? [])]) });
+    }
     if (!UUID.test(body.job_id ?? "")) return reply({ error: "INVALID_REQUEST" }, 400);
     const { data: job } = await admin.from("personal_ai_jobs").select("status,result,reason")
       .eq("id", body.job_id).eq("owner_id", auth.user.id).maybeSingle();
     if (!job) return reply({ error: "NOT_FOUND" }, 404);
-    return reply(job.result ?? { status: job.status, job_id: body.job_id, reason: job.reason ?? "personal_ai_waiting" });
+    return reply(job.result ?? { status: job.status, job_id: body.job_id, reason: job.reason ?? (job.status === "running" ? "personal_ai_running" : "personal_ai_waiting") });
   }
   const owner = Deno.env.get("PERSONAL_AI_OWNER_ID");
   if (!owner || !await sameSecret(req.headers.get("X-Personal-AI-Token") ?? "",

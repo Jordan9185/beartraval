@@ -50,6 +50,7 @@ struct TripListView: View {
                 }
             }
             .navigationTitle("旅程")
+            .onChange(of: session.aiActivity.completionVersion) { Task { await reload() } }
             .navigationDestination(for: Trip.self) { trip in
                 TripDetailView(session: session, trip: trip) {
                     trips.removeAll { $0.id == trip.id }

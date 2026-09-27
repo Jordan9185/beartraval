@@ -1,4 +1,5 @@
 import SwiftUI
+import ShareCore
 
 /// 主分頁骨架（Today / Trip / Map / Saved / Shopping）。
 ///
@@ -82,7 +83,11 @@ public struct RootView: View {
 
     private func tabs(_ session: SessionModel) -> some View {
         tabView(session)
+            .task(id: scenePhase) {
+                if scenePhase == .active { await session.aiActivity.watch() }
+            }
             .safeAreaInset(edge: .top, spacing: 0) {
+                AIActivityBanner(monitor: session.aiActivity)
                 if !session.network.isOnline {
                     Label("離線中：顯示最近一次的資料", systemImage: "wifi.slash")
                         .font(.caption)

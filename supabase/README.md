@@ -52,7 +52,7 @@
 |---|---|---|
 | `save_inbox_capture(client_capture_id, fingerprint, canonical_url, source_url, title, raw_text, unavailable_count?)` | 已登入 | 保存實際取得的來源；同帳號、同連結或同內容重送不覆寫原文與更正 |
 | `register_inbox_asset(capture_id, ordinal, kind, mime_type, byte_count, sha256, storage_path?)` | 來源擁有者 | 登記附件；目前只有圖片縮圖上傳私有 bucket，影片原檔留在裝置 |
-| `update_inbox_item(item_id, expected_revision, display_name?, archived?)` | 來源擁有者 | 更正候選名稱或撤銷個人清單項目；版本過期拒絕 |
+| `update_inbox_item(item_id, expected_revision, display_name?, archived?, kind?)` | 來源擁有者 | 更正候選名稱、想去／想買分類或撤銷個人清單項目；版本過期拒絕，改名稱或分類時清除舊定位與店家快取 |
 | `confirm_inbox_place(item_id, expected_revision, place_id)` | 來源擁有者 | 確認 MapKit 地點；未確認項目不參與路線 |
 | `update_inbox_template(template_id, expected_revision, title, draft)` | 來源擁有者 | 編輯無日期行程模板；版本過期拒絕 |
 | `apply_inbox_template(template_id, expected_template_revision, client_op_id, trip_id?, start_date?, time_zone?, expected_day_revisions?)` | 來源擁有者，既有 Trip 須 Owner／Editor | 使用者確認後原子建立或追加旅程；保留既有 Fixed Stop，新增項目為待定位文字，檢查模板與每日版本，重送冪等 |

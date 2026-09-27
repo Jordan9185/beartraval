@@ -31,7 +31,6 @@ struct SavedView: View {
     @State private var recentProducts: [InboxItemRecord] = []
     @State private var localCaptures = 0
     @State private var inboxError: String?
-    @State private var discoveringPlaces = false
     @State private var showsInbox = false
     @Environment(\.scenePhase) private var scenePhase
 
@@ -40,6 +39,10 @@ struct SavedView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Text("收藏想去吃、玩、逛的地方；想買帶走的商品放在購物。")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                } header: { Text("想去的地方") }
                 if localCaptures > 0 || !recentCaptures.isEmpty {
                     Section("最近分享") {
                         if localCaptures > 0 {
@@ -70,7 +73,6 @@ struct SavedView: View {
                     }
                 }
                 if let inboxError { ErrorText(inboxError) }
-                if discoveringPlaces { ProgressView("正在查韓文店名與地址…") }
                 if !personalItems.isEmpty {
                     Section("我的收藏") {
                         ForEach(personalItems) { item in
@@ -137,7 +139,7 @@ struct SavedView: View {
             }
             .overlay {
                 if loaded && trips.isEmpty && personalItems.isEmpty && candidateItems.isEmpty && recentCaptures.isEmpty && localCaptures == 0 {
-                    ContentUnavailableView("還沒有旅程", systemImage: "bookmark", description: Text("先到「旅程」建立或加入旅程。"))
+                    ContentUnavailableView("還沒有想去的地方", systemImage: "bookmark", description: Text("從貼文、相簿或地圖分享給 BeaRTravel；還沒建立旅程也能先收藏。"))
                 } else if loaded && filter.apply(entries, includeAdded: true).isEmpty && drafts.isEmpty &&
                             personalItems.isEmpty && candidateItems.isEmpty && recentCaptures.isEmpty && localCaptures == 0 {
                     ContentUnavailableView("還沒有收藏", systemImage: "bookmark",
@@ -145,6 +147,7 @@ struct SavedView: View {
                 }
             }
             .navigationTitle("收藏")
+            .onChange(of: session.aiActivity.completionVersion) { Task { await reload() } }
             // 換旅程與今天、購物一樣放在工具列。
             .toolbar {
                 ToolbarItem(placement: .secondaryAction) {
@@ -315,33 +318,8 @@ struct SavedView: View {
         for _ in 0..<30 {
             if Task.isCancelled { return }
             await loadInbox()
-            await discoverRecentPlaces()
             if !recentCaptures.contains(where: { $0.status == "saved" || $0.status == "processing" }) { return }
             try? await Task.sleep(for: .seconds(3))
-        }
-    }
-
-    /// 分享整理完成後自動補韓文店名與地址線索，使用者不用先進確認頁點搜尋。
-    private func discoverRecentPlaces() async {
-        let recentIDs = Set(recentCaptures.prefix(10).map(\.id))
-        let unresolved = (personalItems + candidateItems).filter {
-            recentIDs.contains($0.captureID) && $0.resolutionStatus != "verified" && $0.discoveryCheckedAt == nil
-        }
-        guard !unresolved.isEmpty else { return }
-        discoveringPlaces = true
-        defer { discoveringPlaces = false }
-        for item in unresolved.prefix(3) {
-            guard !Task.isCancelled else { return }
-            do {
-                _ = try await inbox.discoverPlaces(for: item.id)
-                await loadInbox()
-            } catch let error as PlaceDiscoveryError {
-                inboxError = error.userMessage
-                return
-            } catch {
-                inboxError = "韓文店名暫時無法查找：\(userMessage(for: error))"
-                return
-            }
         }
     }
 

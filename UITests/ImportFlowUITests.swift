@@ -22,6 +22,24 @@ final class ImportFlowUITests: XCTestCase {
         XCTAssertTrue(element.exists && element.isHittable, "\(element) not reachable", file: file, line: line)
     }
 
+    func testStartupWaitsWithoutFalseLoadFailure() {
+        let app = launch("startup")
+        XCTAssertTrue(app.staticTexts["載入中…"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["無法載入旅程"].exists)
+        XCTAssertFalse(app.staticTexts["還沒有旅程"].exists)
+        XCTAssertTrue(app.staticTexts["startupReady"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["無法載入旅程"].exists)
+    }
+
+    func testStartupRealFailureStillOffersWorkingRetry() {
+        let app = launch("startupRetry")
+        XCTAssertTrue(app.buttons["重新載入"].waitForExistence(timeout: 8))
+        app.buttons["重新載入"].tap()
+        XCTAssertTrue(app.staticTexts["載入中…"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["無法載入旅程"].exists)
+        XCTAssertTrue(app.staticTexts["startupReady"].waitForExistence(timeout: 8))
+    }
+
     func testAmbiguousBranchMustBeChosenBeforeSubmit() {
         let app = launch("ambiguous")
         let submit = app.buttons["submitImport"]

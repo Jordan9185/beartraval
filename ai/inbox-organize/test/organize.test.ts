@@ -118,3 +118,27 @@ test("三日行程保留來源天數，不從未提供的文字造停靠點", ()
   });
   assert.deepEqual(result.template_days.map((day) => day.day_index), [1, 2, 3]);
 });
+
+test("生紫蘇油冷麵等料理不當成高信心購物商品", () => {
+  const names = ["生紫蘇油冷麵", "水波蛋寬麵", "嫩切豬肉", "水芹菜生牛肉拌飯"];
+  const result = validateResult({ title: null, rawText: "", imageBase64: ["jpeg"] }, {
+    content_kind: "shopping", template_days: [],
+    items: names.map((name) => ({ ...pictureItem(name), kind: "product" })),
+  });
+  assert.equal(result.content_kind, "recommendations");
+  assert.ok(result.items.every((item) => item.kind === "place" && item.confidence === "low" && !item.auto_archive));
+  assert.deepEqual(result.items.map((item) => item.display_name), names);
+});
+
+test("冷麵料理包與禮盒仍是商品，同圖其他商品不能替菜名充當包裝證據", () => {
+  const result = validateResult({ title: null, rawText: "冷麵料理包伴手禮", imageBase64: ["jpeg"] }, {
+    content_kind: "mixed", template_days: [], items: [
+      { ...pictureItem("冷麵", "冷麵料理包伴手禮"), kind: "product" },
+      { ...pictureItem("生紫蘇油冷麵"), kind: "product" },
+      { ...pictureItem("MilkyShop 奶油餅乾禮盒"), kind: "product" },
+      { ...pictureItem("LOE 香水"), kind: "product" },
+    ],
+  });
+  assert.deepEqual(result.items.map((item) => item.kind), ["product", "place", "product", "product"]);
+  assert.equal(result.content_kind, "mixed");
+});

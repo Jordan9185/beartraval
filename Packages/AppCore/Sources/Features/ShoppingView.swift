@@ -55,6 +55,7 @@ struct ShoppingTab: View {
                 }
             }
             .navigationTitle("購物清單")
+            .onChange(of: session.aiActivity.completionVersion) { Task { await reloadPersonal() } }
             .toolbar {
                 ToolbarItem(placement: .secondaryAction) {
                     NavigationLink {
@@ -213,6 +214,10 @@ public struct ShoppingListView: View {
 
     public var body: some View {
         List {
+            Section {
+                Text("記下要買帶走的商品、包裝食品與伴手禮；想去吃的餐廳放在收藏。")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } header: { Text("想買的東西") }
             if let personalError { ErrorText(personalError) }
             if let personalRepository, !personalItems.isEmpty {
                 Section("我的想買") {

@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
     if (error) return json({ error: "UNAUTHENTICATED" }, 401);
     if (!found || found.kind !== "place") return json({ error: "NOT_FOUND" }, 404);
     item = found;
-    if (!force && found.discovery_checked_at && Date.now() - Date.parse(found.discovery_checked_at) < 24 * 60 * 60 * 1000) {
+    if (!force && found.discovery_checked_at) {
       return json({ status: found.discovery_candidates?.length ? "found" : "none",
         candidates: found.discovery_candidates ?? [], checked_at: found.discovery_checked_at });
     }

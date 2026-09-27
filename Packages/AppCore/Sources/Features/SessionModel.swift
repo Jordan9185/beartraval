@@ -26,6 +26,7 @@ public final class SessionModel {
     public let offlineQueue = OfflineQueue.shared()
     public let client: SupabaseClient
     public let trips: TripRepository
+    public let aiActivity: AIActivityMonitor
     /// 同一個 matcher（與快取）供 Base Route 與 Route Match 共用，確保同一計算基準。
     public let routes: RouteMatcher
     public let imports: any ImportService
@@ -39,6 +40,7 @@ public final class SessionModel {
     public init(client: SupabaseClient, routingProvider: any RoutingProvider = InstrumentedProvider(AppleMapKitProvider())) {
         self.client = client
         self.trips = TripRepository(client: client)
+        self.aiActivity = AIActivityMonitor(client: client)
         self.routes = RouteMatcher(provider: routingProvider)
         self.imports = SupabaseImportService(client: client)
         self.placeSearch = MapKitPlaceSearch()
@@ -53,6 +55,7 @@ public final class SessionModel {
                 state = .signedIn(email: session.user.email)
             } else {
                 if state != .signedOut && state != .loading { await clearLocalData() }
+                aiActivity.reset()
                 state = .signedOut
             }
         }

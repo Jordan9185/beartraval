@@ -29,10 +29,8 @@ struct TodayView: View {
                 // 換旅程後原本的第 N 天可能不存在：夾在範圍內，不會一直轉圈。
                 if let snapshot = store.snapshot, !snapshot.timeline.isEmpty {
                     content(snapshot, min(max(dayIndex ?? snapshot.todayIndex(), 0), snapshot.timeline.count - 1))
-                } else if store.loaded {
-                    TripUnavailableView(store: store, systemImage: "sun.max", goToTrips: goToTrips)
                 } else {
-                    ProgressView("載入中…")
+                    TripUnavailableView(store: store, systemImage: "sun.max", goToTrips: goToTrips)
                 }
             }
             .navigationTitle("今天")

@@ -591,8 +591,8 @@ struct ParsingProgressView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             step(done: true, active: false, title: "已送出需求（\(characters.formatted()) 字）")
-            step(done: writing, active: !writing, title: waiting ? "等待 Mac 處理" : suggestedTemplate ? "AI 搜尋公開旅遊資料" : "AI 閱讀行程",
-                 detail: waiting ? "需求已保留，Mac 開機連網後會繼續；你可以先離開此頁" : writing ? nil : suggestedTemplate ? "查具名景點，保留可回查的來源" : "分辨地點與備註")
+            step(done: writing, active: !writing, title: waiting ? "排隊等待整理" : suggestedTemplate ? "AI 搜尋公開旅遊資料" : "AI 閱讀行程",
+                 detail: waiting ? "需求已保存，可先離開；在主畫面的 AI 進度查看排隊順序" : writing ? nil : suggestedTemplate ? "查具名景點，保留可回查的來源" : "分辨地點與備註")
             step(done: false, active: writing, title: suggestedTemplate ? "安排建議樣板" : "整理成每日行程", detail: draftDetail)
             step(done: false, active: false, title: "搜尋地點，讓你逐一確認")
             TimelineView(.periodic(from: started, by: 1)) { context in

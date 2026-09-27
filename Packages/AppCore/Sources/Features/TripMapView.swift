@@ -64,10 +64,8 @@ struct TripMapView: View {
                         PinDetailView(session: session, snapshot: snapshot, pin: pin, dayIndex: dayIndex, canEdit: store.myRole?.canEdit == true)
                             .presentationDetents([.medium, .large])
                     }
-                } else if store.loaded {
-                    TripUnavailableView(store: store, systemImage: "map", goToTrips: goToTrips)
                 } else {
-                    ProgressView("載入中…")
+                    TripUnavailableView(store: store, systemImage: "map", goToTrips: goToTrips)
                 }
             }
             .navigationTitle("地圖")

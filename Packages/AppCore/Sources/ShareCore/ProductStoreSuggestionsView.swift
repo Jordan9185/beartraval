@@ -20,7 +20,7 @@ public struct ProductStoreSuggestionsView: View {
 
     public init(repository: InboxRepository, productName: String, storeHint: String? = nil,
                 region: String, countryCode: String?, initialSuggestions: [ShoppingStoreSuggestion] = [],
-                searchOnAppear: Bool = true, onSelect: ((DiscoveredPlace) -> Void)? = nil,
+                searchOnAppear: Bool = false, onSelect: ((DiscoveredPlace) -> Void)? = nil,
                 onSchedule: ((ShoppingStoreSuggestion) -> Void)? = nil,
                 onResults: (([ShoppingStoreSuggestion]) async throws -> Void)? = nil) {
         self.repository = repository
@@ -33,12 +33,18 @@ public struct ProductStoreSuggestionsView: View {
         self.searchOnAppear = searchOnAppear
         self.onResults = onResults
         _candidates = State(initialValue: initialSuggestions.map(DiscoveredPlace.init(saved:)))
-        _finished = State(initialValue: !searchOnAppear)
+        _finished = State(initialValue: !initialSuggestions.isEmpty)
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if loading { ProgressView("AI 正在查可能的實體店…") }
+            if loading {
+                ProgressView("正在查找店家…")
+                Text("可在主畫面的 AI 進度查看排隊與處理狀態。").font(.caption).foregroundStyle(.secondary)
+            }
+            if !loading && !finished && candidates.isEmpty {
+                Button("用 AI 查找店家") { Task { await search() } }
+            }
             if let errorMessage {
                 ErrorText(errorMessage)
                 Button("重新查店家") { Task { await search() } }
@@ -60,7 +66,7 @@ public struct ProductStoreSuggestionsView: View {
             }
         }
         .task(id: "\(productName)|\(storeHint ?? "")|\(region)") {
-            if searchOnAppear { await search() }
+            if searchOnAppear && candidates.isEmpty { await search() }
         }
     }
 

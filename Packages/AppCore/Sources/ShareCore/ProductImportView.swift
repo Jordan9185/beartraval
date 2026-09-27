@@ -256,14 +256,7 @@ public struct ProductImportView: View {
                 if let storeHint = draft.storeHint {
                     try await repository.setShoppingStoreHint(itemID: item.id, name: storeHint, evidence: draft.storeEvidence)
                 }
-                if let discoveryRepository, let selectedTrip, name.count >= 2 {
-                    let country = LocalMapCountry.guess(name: selectedTrip.name, timeZone: selectedTrip.timeZone)
-                    let region = [country, selectedTrip.name].compactMap { $0 }.joined(separator: " ")
-                    let found = try await discoveryRepository.discoverStores(
-                        product: name, storeHint: draft.storeHint, region: region)
-                    try await repository.setShoppingStoreSuggestions(itemID: item.id,
-                        suggestions: found.map(ShoppingStoreSuggestion.init(discovered:)))
-                }
+                // 儲存不再逐件等待 AI 找門市；已辨識商品立即加入，門市可在購物頁補查。
                 if let imageJPEG { try await repository.setShoppingImage(tripID: tripID, itemID: item.id, jpeg: imageJPEG) }
             }
             onFinish(added)
