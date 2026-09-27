@@ -139,6 +139,8 @@ private struct InboxDetailView: View {
     @State private var record: InboxRecord
     let repository: InboxRepository
     @State private var items: [InboxItemRecord] = []
+    @State private var sourceImages: [InboxImageRecord] = []
+    @State private var sourceImagesError: String?
     @State private var templates: [InboxTemplateRecord] = []
     @State private var editing: InboxItemRecord?
     @State private var resolving: InboxItemRecord?
@@ -171,6 +173,15 @@ private struct InboxDetailView: View {
                 if record.rawText.isEmpty, record.publicText == nil, record.sourceURL != nil {
                     Text("只有連結時無法讀到影片畫面或貼文內文，地點不會憑網址猜測。")
                         .foregroundStyle(.secondary)
+                }
+            }
+            if !sourceImages.isEmpty || sourceImagesError != nil {
+                Section("原始圖片") {
+                    ForEach(sourceImages) { image in InboxSourceImageRow(image: image, repository: repository) }
+                    if let sourceImagesError {
+                        ErrorText(sourceImagesError)
+                        Button("重新載入圖片") { Task { await loadSourceImages() } }
+                    }
                 }
             }
             if !items.isEmpty {
@@ -228,7 +239,13 @@ private struct InboxDetailView: View {
             InboxPublishView(item: item, repository: repository) { publishing = nil }
         }
         .task { await watchAnalysis() }
+        .task { await loadSourceImages() }
         .refreshable { await reload() }
+    }
+
+    private func loadSourceImages() async {
+        do { sourceImages = try await repository.sourceImages(captureID: record.id); sourceImagesError = nil }
+        catch { sourceImagesError = "來源圖片暫時無法載入，辨識結果仍可查看。" }
     }
 
     private var failureDescription: String {
@@ -918,5 +935,31 @@ private struct InboxDiscoveryCandidateRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// 每張圖各自載入，某張失敗不影響其他來源與辨識結果。
+private struct InboxSourceImageRow: View {
+    let image: InboxImageRecord
+    let repository: InboxRepository
+    @State private var data: Data?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let data {
+                SourceImagePreview(data: data, title: "來源圖片 \(image.ordinal + 1)")
+            } else if failed {
+                Button("圖片 \(image.ordinal + 1) 載入失敗，點此重試") { Task { await load() } }
+            } else { ProgressView("載入來源圖片…") }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        guard data == nil else { return }
+        failed = false
+        do { data = try await repository.sourceImageData(image) }
+        catch { failed = true }
     }
 }

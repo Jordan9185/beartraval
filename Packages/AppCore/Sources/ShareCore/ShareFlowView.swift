@@ -119,10 +119,7 @@ public struct ShareFlowView: View {
             if readingScreenshot { ProgressView("讀取截圖中的文字…") }
             if screenshot != nil || analysis.excerpt != nil {
                 DisclosureGroup("查看原始內容") {
-                    if let screenshot, let image = platformImage(screenshot) {
-                        image.resizable().scaledToFit().frame(maxHeight: 180).frame(maxWidth: .infinity)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
+                    if let screenshot { SourceImagePreview(data: screenshot) }
                     if let excerpt = analysis.excerpt {
                         Text(excerpt).font(.subheadline).textSelection(.enabled)
                     }
@@ -134,14 +131,6 @@ public struct ShareFlowView: View {
                 }
             }
         }
-    }
-
-    private func platformImage(_ data: Data) -> Image? {
-        #if canImport(UIKit)
-        UIImage(data: data).map(Image.init(uiImage:))
-        #else
-        NSImage(data: data).map(Image.init(nsImage:))
-        #endif
     }
 
     /// 原始 OCR 只供修正辨識結果，不佔據主要確認畫面。

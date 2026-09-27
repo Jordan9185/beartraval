@@ -37,6 +37,13 @@ public struct InboxRecord: Decodable, Identifiable, Sendable {
     }
 }
 
+public struct InboxImageRecord: Decodable, Identifiable, Sendable {
+    public var id: UUID
+    public var ordinal: Int
+    public var storagePath: String
+    enum CodingKeys: String, CodingKey { case id, ordinal; case storagePath = "storage_path" }
+}
+
 public struct InboxItemRecord: Decodable, Identifiable, Sendable {
     public var id: UUID
     public var captureID: UUID
@@ -270,6 +277,17 @@ public struct InboxRepository: Sendable {
                 .limit(1).execute().value
             return rows.first
         } catch { throw BackendError.from(error) }
+    }
+
+    /// 來源圖片維持私人 bucket 權限，僅由目前登入帳號下載，不產生公開網址。
+    public func sourceImages(captureID: UUID) async throws -> [InboxImageRecord] {
+        try await client.from("inbox_assets").select("id,ordinal,storage_path")
+            .eq("capture_id", value: captureID).eq("kind", value: "image").eq("status", value: "uploaded")
+            .order("ordinal").execute().value
+    }
+
+    public func sourceImageData(_ image: InboxImageRecord) async throws -> Data {
+        try await client.storage.from("inbox-images").download(path: image.storagePath)
     }
 
     public func listItems(captureID: UUID) async throws -> [InboxItemRecord] {

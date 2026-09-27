@@ -1,6 +1,10 @@
 #if DEBUG
 import AppCore
 import Foundation
+import ShareCore
+#if canImport(UIKit)
+import UIKit
+#endif
 import SwiftUI
 
 /// XCUITest 用的匯入情境（不需登入、不連後端）。App 以 `-UITestImport <scenario>` 啟動時使用。
@@ -17,7 +21,11 @@ public struct ImportUITestRoot: View {
 
     public var body: some View {
         NavigationStack {
-            if let created {
+            if scenario == "sourceImage" {
+                Form {
+                    Section("原始內容") { SourceImagePreview(data: Self.sourceImageData) }
+                }
+            } else if let created {
                 ContentUnavailableView("已建立 \(created.name)", systemImage: "checkmark.circle")
                     .accessibilityIdentifier("tripCreated")
             } else {
@@ -26,6 +34,21 @@ public struct ImportUITestRoot: View {
             }
         }
     }
+    private static var sourceImageData: Data {
+        #if canImport(UIKit)
+        return UIGraphicsImageRenderer(size: CGSize(width: 300, height: 1600)).pngData { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 300, height: 1600))
+            for line in 0..<30 {
+                ("來源文字第 \(line + 1) 列" as NSString).draw(at: CGPoint(x: 12, y: 12 + line * 50),
+                    withAttributes: [.font: UIFont.systemFont(ofSize: 18), .foregroundColor: UIColor.black])
+            }
+        }
+        #else
+        return Data()
+        #endif
+    }
+
 }
 
 final class FakeImportService: ImportService, @unchecked Sendable {

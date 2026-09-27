@@ -13,13 +13,14 @@ export function missingItineraryDays(input: ParseInput, draft: ParseResult): num
   return dates.flatMap((date, index) => mentioned.has(date) ? [] : [index + 1]);
 }
 
-export function mergeSuggestedDays(original: ParseResult, suggestion: ParseResult, dates: string[]): ParseResult {
+export function mergeSuggestedDays(original: ParseResult, suggestion: ParseResult, dates: string[], expandExisting = false): ParseResult {
   const result = structuredClone(original);
   const nameKey = (value: string) => value.normalize("NFKC").replace(/\s+/g, "").toLocaleLowerCase();
   const keys = (stop: ParsedStop) => [stop.place_name, stop.search_query].filter((name): name is string => !!name).map(nameKey);
   const seen = new Set(original.days.flatMap((day) => day.stops.flatMap(keys)));
   for (const date of dates) {
-    if (result.days.some((day) => day.date === date)) continue;
+    const existing = result.days.find((day) => day.date === date);
+    if (existing && !expandExisting) continue;
     const day = suggestion.days.find((candidate) => candidate.date === date);
     if (!day) continue;
     const stops = day.stops.filter((stop) => {
@@ -28,12 +29,15 @@ export function mergeSuggestedDays(original: ParseResult, suggestion: ParseResul
       names.forEach((name) => seen.add(name));
       return true;
     });
-    if (stops.length) result.days.push({ ...structuredClone(day), stops: structuredClone(stops) });
+    if (stops.length) {
+      if (existing) existing.stops.push(...structuredClone(stops));
+      else result.days.push({ ...structuredClone(day), stops: structuredClone(stops) });
+    }
   }
   result.days.sort((a, b) => (a.date ?? "9999").localeCompare(b.date ?? "9999"));
   result.city_candidates = [...new Set([...original.city_candidates, ...suggestion.city_candidates])];
   result.warnings = [...new Set([...original.warnings, ...suggestion.warnings,
-    "已保留原文指定的日期、順序與時間；未提供安排的日期另補 AI 建議，確認後才建立旅程。"])];
+    "已保留原文指定的日期、順序與時間；另補可核對的 AI 建議，確認後才建立旅程。"])];
   return result;
 }
 
@@ -46,16 +50,20 @@ export async function createItineraryDraft(client: Anthropic, input: ParseInput,
   }
   const parsed = await parseItinerary(client, input, options);
   if (parsed.status !== "parsed") return parsed;
-  const missing = missingItineraryDays(input, parsed.result);
+  // 明確請求整趟規劃時，目的地／交通骨架也需要景點；只整理或指定留白仍保留。
+  const expandExisting = /(?:幫我|替我|請)(?:安排|規劃)(?:一下)?(?:行程|旅程)|(?:完整|整趟)(?:安排|規劃)/u.test(input.rawText)
+    && !/其[餘余他].{0,8}(?:自由活動|留白|不安排)|(?:不要|不必|不用)(?:補|新增|安排)|只(?:需|要)(?:整理|解析)/u.test(input.rawText);
+  const missing = expandExisting ? dates.map((_, index) => index + 1) : missingItineraryDays(input, parsed.result);
   if (!missing.length) return parsed;
   try {
     const suggested = await suggestItinerary(client, input, options.model, { existingDraft: parsed.result, dayIndexes: missing });
     if (suggested) {
-      const result = mergeSuggestedDays(parsed.result, suggested.result, missing.map((index) => dates[index - 1]!));
+      const result = mergeSuggestedDays(parsed.result, suggested.result, missing.map((index) => dates[index - 1]!), expandExisting);
       // 補入較早日期後，既有檢查問題仍需指向原來那一天，而不是新插入的日期。
       const used = new Set<number>();
       const dayIndexes = parsed.result.days.map((original) => {
-        const index = result.days.findIndex((day, index) => !used.has(index) && JSON.stringify(day) === JSON.stringify(original));
+        const index = result.days.findIndex((day, index) => !used.has(index) && day.date === original.date && day.day_label === original.day_label
+          && JSON.stringify(day.stops.slice(0, original.stops.length)) === JSON.stringify(original.stops));
         used.add(index);
         return index;
       });

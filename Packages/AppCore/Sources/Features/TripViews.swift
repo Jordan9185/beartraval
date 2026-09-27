@@ -241,7 +241,7 @@ struct CreateTripView: View {
     }
 
     private func applyIdeaDates() {
-        guard !endTouched, let days = TripIdeaIntent.inferredDayCount(in: ideaInput),
+        guard !endTouched, let days = TripIdeaIntent.inferredDayCount(name: name, text: rawText),
               let suggested = Calendar.current.date(byAdding: .day, value: days - 1, to: start) else { return }
         end = suggested
     }
@@ -266,7 +266,7 @@ struct CreateTripView: View {
                 ? TripIdeaIntent.suggestedName(for: rawText) ?? "" : name.trimmingCharacters(in: .whitespaces)
         let startDate = LocalDate.string(from: start, timeZone: device)
         let suggestedEnd = !endTouched && hasText
-            ? Calendar.current.date(byAdding: .day, value: (TripIdeaIntent.inferredDayCount(in: importText) ?? tripDays) - 1, to: start) : nil
+            ? Calendar.current.date(byAdding: .day, value: (TripIdeaIntent.inferredDayCount(name: name, text: importText) ?? tripDays) - 1, to: start) : nil
         let endDate = LocalDate.string(from: max(start, suggestedEnd ?? end), timeZone: device)
         do {
             if hasText {

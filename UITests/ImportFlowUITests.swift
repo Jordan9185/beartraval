@@ -74,4 +74,30 @@ final class ImportFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["rawText"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["rawText"].label.contains("19:00 晚餐訂位"), "重試後原文完整")
     }
+    func testSourceImageOpensZoomsAndCloses() {
+        let app = launch("sourceImage")
+        let open = app.buttons["放大來源圖片"]
+        XCTAssertTrue(open.waitForExistence(timeout: 10))
+        open.tap()
+        let zoom = app.otherElements["sourceImageZoom"]
+        let image = app.images["sourceImageContent"]
+        XCTAssertTrue(zoom.waitForExistence(timeout: 5))
+        XCTAssertEqual(image.value as? String, "100%")
+        zoom.doubleTap()
+        let enlarged = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "300%"), object: image)
+        XCTAssertEqual(XCTWaiter.wait(for: [enlarged], timeout: 3), .completed)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "來源圖片放大"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        zoom.pinch(withScale: 1.5, velocity: 1)
+        XCTAssertNotEqual(image.value as? String, "300%")
+        zoom.swipeUp()
+        zoom.doubleTap()
+        XCTAssertEqual(image.value as? String, "100%")
+        app.buttons["完成"].tap()
+        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        XCTAssertFalse(zoom.exists)
+    }
+
 }

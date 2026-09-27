@@ -66,10 +66,7 @@ public struct ProductImportView: View {
     public var body: some View {
         Form {
             Section {
-                if let imageJPEG, let image = platformImage(imageJPEG) {
-                    image.resizable().scaledToFit().frame(maxHeight: extracted ? 120 : 220).frame(maxWidth: .infinity)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
+                if let imageJPEG { SourceImagePreview(data: imageJPEG, maxHeight: extracted ? 120 : 220) }
                 if extracted {
                     Text("已辨識 \(drafts.filter { !$0.manual }.count) 項商品，勾選想買的即可加入。")
                         .font(.subheadline).foregroundStyle(.secondary)
@@ -277,11 +274,4 @@ public struct ProductImportView: View {
         }
     }
 
-    private func platformImage(_ data: Data) -> Image? {
-        #if canImport(UIKit)
-        UIImage(data: data).map(Image.init(uiImage:))
-        #else
-        NSImage(data: data).map(Image.init(nsImage:))
-        #endif
-    }
 }

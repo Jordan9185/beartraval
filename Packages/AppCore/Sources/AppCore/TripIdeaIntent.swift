@@ -3,9 +3,13 @@ import Foundation
 /// 只有目的地與天數的短句，應走 AI 建議樣板；已貼上的逐日行程仍走原文解析。
 public enum TripIdeaIntent {
     public static func dayCount(in text: String) -> Int? {
-        let pattern = #"(?<![0-9])([0-9]{1,2}|[一二三四五六七八九十兩]+)\s*[天日]"#
+        let pattern = #"(?<![0-9一二三四五六七八九十兩第前後餘余他])([0-9]{1,2}|[一二三四五六七八九十兩]+)\s*[天日]"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let match = regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).first(where: { match in
+                  guard let range = Range(match.range, in: text) else { return false }
+                  let prefix = text[..<range.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+                  return prefix.last.map { !"第前後餘余他".contains($0) } ?? true
+              }),
               let range = Range(match.range(at: 1), in: text) else { return nil }
         let value = String(text[range])
         let days = Int(value) ?? chineseNumber(value)
@@ -28,6 +32,13 @@ public enum TripIdeaIntent {
             return nil
         }
         return [duration, values.max()].compactMap { $0 }.max()
+    }
+
+    /// 提示中的整趟天數優先，其次旅程名稱；局部「前三天／第三天」不縮短整趟旅程。
+    public static func inferredDayCount(name: String, text: String) -> Int? {
+        let total = dayCount(in: text) ?? dayCount(in: name)
+        let lastMentioned = inferredDayCount(in: text)
+        return [total, lastMentioned].compactMap { $0 }.max()
     }
 
     public static func isRequest(_ text: String) -> Bool {

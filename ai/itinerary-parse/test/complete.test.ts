@@ -108,3 +108,41 @@ test("補入較早日期後，原本的時間問題仍指向原站點", async ()
   assert.ok(result.issues.some((issue) => issue.path === "days[2].stops[0].start_time"));
   assert.equal(result.result.days[2]?.stops[0]?.start_time, null);
 });
+
+test("明確要求規劃時，保留原站與 Fixed，再為已給目的地的日期補建議", async () => {
+  const draft = original();
+  // 未固定的第二天只寫城市，仍需補上具名景點。
+  draft.days.push({ date: "2026-09-28", day_label: "第二天", stops: [{ ...draft.days[0]!.stops[0]!,
+    place_name: "東京", search_query: "Tokyo", start_time: null, fixed_suspected: false, fixed_reason: null }] });
+  calls.length = 0;
+  const result = await createItineraryDraft(client(draft), { ...input, rawText: "Day 1 10:00 晴空塔訂位，第二天東京，幫我安排行程" });
+  assert.equal(result.status, "parsed");
+  if (result.status !== "parsed") return;
+  assert.equal(result.result.days.length, 5);
+  assert.deepEqual(result.result.days[0]!.stops[0], draft.days[0]!.stops[0]);
+  assert.deepEqual(result.result.days[1]!.stops[0], draft.days[1]!.stops[0]);
+  assert.ok(result.result.days[1]!.stops.length > 1);
+  assert.deepEqual(JSON.parse(calls[1]!.messages[0].content).days_to_suggest, [1, 2, 3, 4, 5]);
+});
+
+test("日韓七日保留前三天骨架，兩國景點皆可核對，不被單一國家濾掉", async () => {
+  const dates = Array.from({ length: 7 }, (_, i) => `2026-10-${23 + i}`);
+  const names = ["景福宮", "北村韓屋村", "平和記念公園", "廣島城", "縮景園", "嚴島神社", "尾道"];
+  const originalDraft: ParseResult = { city_candidates: ["首爾", "廣島"], warnings: [], days: dates.slice(0, 3).map((date, i) => ({ date,
+    day_label: `第 ${i + 1} 天`, stops: [{ ...original().days[0]!.stops[0]!, place_name: i < 2 ? "首爾" : "廣島",
+      search_query: i < 2 ? "서울" : "広島", city: i < 2 ? "Seoul" : "Hiroshima", country_code: i < 2 ? "KR" : "JP",
+      source_excerpt: i < 2 ? "前三天要去首爾" : "第三天飛日本廣島", start_time: null, fixed_suspected: false, fixed_reason: null }] })) };
+  const fixture = client(originalDraft);
+  fixture.messages.create = (async () => ({ model: "fixture", usage, content: [{ type: "text", text: names.join("、"), citations: [{
+    type: "web_search_result_location", ...source, title: "日韓景點", cited_text: names.join("、") }] }] })) as any;
+  fixture.beta.messages.parse = (async () => ({ model: "fixture", usage, parsed_output: { stops: names.map((name, i) => ({ ...suggestion,
+    day_index: i + 1, name, local_name: null, city: i < 2 ? "首爾" : "廣島", country_code: i < 2 ? "KR" : "JP" })) } })) as any;
+  const result = await createItineraryDraft(fixture, { tripName: "日韓七日遊", rawText: "我前三天要去首爾 第三天飛日本廣島 幫我安排行程",
+    tripStart: dates[0]!, tripEnd: dates[6]!, timeZone: "Asia/Seoul" });
+  assert.equal(result.status, "parsed");
+  if (result.status !== "parsed") return;
+  assert.deepEqual(result.result.days.map(day => day.date), dates);
+  assert.ok(result.result.days.every(day => day.stops.some(stop => names.includes(stop.place_name ?? ""))));
+  assert.equal(result.result.days[0]!.stops[1]!.country_code, "KR");
+  assert.equal(result.result.days[6]!.stops[0]!.country_code, "JP");
+});

@@ -44,3 +44,10 @@ test("無網頁來源只能保留使用者原文指定的地點", () => {
   assert.equal(draft.days[0]?.stops[0]?.confidence, "medium");
   assert.equal(draft.days[1]?.stops.length, 0);
 });
+
+test("局部前三天與其他四天不被當成總天數", () => {
+  assert.equal(requestedDays("前三天首爾，第三天飛日本廣島"), undefined);
+  assert.equal(requestedDays("其他四天幫我安排"), undefined);
+  assert.equal(requestedDays("前 3 天首爾，第 3 天飛廣島"), undefined);
+  assert.equal(requestedDays("前三天首爾，總共七日"), 7);
+});

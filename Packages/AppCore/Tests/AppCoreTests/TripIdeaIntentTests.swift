@@ -21,4 +21,17 @@ struct TripIdeaIntentTests {
         #expect(!TripIdeaIntent.isRequest("10/2 14:00 淺草寺"))
         #expect(TripIdeaIntent.dayCount(in: "首爾十五天") == nil)
     }
+    @Test func partialDaysDoNotShortenNamedTrip() {
+        let text = "我前三天要去首爾 第三天飛日本廣島 幫我安排行程"
+        #expect(TripIdeaIntent.dayCount(in: text) == nil)
+        #expect(TripIdeaIntent.inferredDayCount(name: "日韓七日遊", text: text) == 7)
+        #expect(TripIdeaIntent.inferredDayCount(name: "東京五日", text: "幫我安排行程") == 5)
+        #expect(TripIdeaIntent.inferredDayCount(name: "東京五日", text: "改成東京七天") == 7)
+        #expect(TripIdeaIntent.inferredDayCount(name: "東京七日", text: "改成五天") == 5)
+        #expect(TripIdeaIntent.inferredDayCount(name: "東京五日", text: "Day 7 回程") == 7)
+        #expect(TripIdeaIntent.dayCount(in: "前三天首爾，總共七天") == 7)
+        #expect(TripIdeaIntent.dayCount(in: "其他四天幫我安排") == nil)
+        #expect(TripIdeaIntent.inferredDayCount(name: "日韓七日遊", text: "前 3 天首爾，第 3 天飛廣島") == 7)
+    }
+
 }

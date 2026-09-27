@@ -57,3 +57,16 @@ test("HTTP 成功但搜尋工具不可用時，不把錯誤或無引用摘要當
     { type: "text", text: "推薦浅草寺", citations: [] }])], [], []), input),
     (error: unknown) => error instanceof SuggestionError && error.reason === "no_verified_suggestions");
 });
+
+test("多個日期缺少可核對來源時有限補查，第二輪取得拒收項目而非重複同一提示", async () => {
+  const requests: any[] = [];
+  const result = await suggestItinerary(fake([
+    message([citation("浅草寺")]), message([citation("上野公園、明治神宮")]),
+  ], [{ stops: [stop(1, "浅草寺"), stop(2, "沒有來源的點")] },
+      { stops: [stop(2, "上野公園"), stop(3, "明治神宮")] }], requests),
+    { ...input, tripName: "東京三日", tripEnd: "2026-09-29", rawText: "幫我規劃三日旅遊" });
+  assert.deepEqual(result?.result.days.map(day => day.stops.length), [1, 1, 1]);
+  assert.equal(requests.length, 4);
+  assert.deepEqual(JSON.parse(requests[2].messages[0].content).days_to_suggest, [2, 3]);
+  assert.equal(JSON.parse(requests[3].messages[0].content).rejected_stops[1].name, "沒有來源的點");
+});
