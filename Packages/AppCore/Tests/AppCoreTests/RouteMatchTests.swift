@@ -196,6 +196,52 @@ struct RouteMatchTests {
         #expect([6, 7].contains(best.index))
     }
 
+    @Test func unknownMinutesNeverBecomeBestDayEvenWhenKnownDayNeedsFixedCheck() async {
+        let matcher = RouteMatcher(provider: FakeProvider(legs([(a, b, 10), (a, x, 5), (x, b, 8)])))
+        let empty = await matcher.match(RouteCandidate(point: x, dwellMinutes: 30), into: plan([]), mode: .walking)
+        let known = await matcher.match(RouteCandidate(point: x, dwellMinutes: 30),
+                                       into: plan([stop(a), stop(b, start: 600, fixed: true)]),
+                                       mode: .walking, allowEndpoints: false)
+        #expect(known.best?.fixedCheck == .unknown)
+        #expect(RouteMatcher.bestDay([empty, known])?.dayID == known.dayID)
+        #expect(RouteMatcher.bestDay([empty]) == nil)
+        #expect(empty.best != nil, "未知日仍能由使用者自行安排")
+    }
+
+    @Test func pendingFixedSurvivesTimelineConversionAndPreventsFalseFeasibility() async throws {
+        let tripID = UUID()
+        let day = TripDay(id: UUID(), tripId: tripID, localDate: "2026-10-01", transportMode: .walking,
+                          displayOrder: 0, routeRevision: 3, timeZone: "Asia/Tokyo")
+        let pending = Stop(id: UUID(), tripId: tripID, dayId: day.id, placeId: nil, rawLabel: "固定航班",
+                           resolutionStatus: .pendingText, startTime: "16:30:00", endTime: nil,
+                           dwellMinutes: 60, fixed: true, kind: .standard, sortOrder: 7, revision: 0)
+        let converted = try #require(DayPlan.from(DayTimeline(day: day, stops: [pending]), places: [:]))
+        #expect(converted.stops.isEmpty)
+        #expect(converted.excludedPendingCount == 1)
+        #expect(converted.unlocatedFixedStops == [UnlocatedFixedStop(
+            id: pending.id, label: "固定航班", startMinutes: 990, dwellMinutes: 60, displayOrder: 7)])
+        let provider = FakeProvider(legs([(a, b, 10), (a, x, 5), (x, b, 8), (x, a, 15), (b, x, 20)]))
+        let matcher = RouteMatcher(provider: provider)
+        let empty = await matcher.match(RouteCandidate(point: x, dwellMinutes: 30), into: converted, mode: .walking)
+        #expect(empty.best?.addedTravelMinutes == nil)
+        #expect(empty.best?.fixedCheck == .unknown)
+        #expect(provider.calls == 0, "不能替未定位事項製造座標或路線")
+        var mixed = plan([stop(a, start: 540), stop(b, start: 720, fixed: true)])
+        mixed.unlocatedFixedStops = converted.unlocatedFixedStops
+        mixed.excludedPendingCount = 1
+        let result = await matcher.match(RouteCandidate(point: x, dwellMinutes: 30), into: mixed, mode: .walking)
+        guard case .matched(_, let all) = result.result else { Issue.record("應保留可手動安排的位置"); return }
+        #expect(all.allSatisfy { $0.fixedCheck == .unknown }, "不以省略固定事項的路線保證能趕上")
+    }
+
+    @Test func fixedWithoutTimeIsUnknownInsteadOfAbsent() async {
+        let matcher = RouteMatcher(provider: FakeProvider(legs([(a, b, 10), (a, x, 5), (x, b, 8)])))
+        let result = await matcher.match(RouteCandidate(point: x, dwellMinutes: 30),
+                                        into: plan([stop(a, start: 540), stop(b, fixed: true)]),
+                                        mode: .walking, allowEndpoints: false)
+        #expect(result.best?.fixedCheck == .unknown)
+    }
+
     @Test func bestDayPrefersFeasibleThenFewestMinutes() {
         func day(_ minutes: Int?, _ check: Insertion.FixedCheck) -> DayMatch {
             let ins = Insertion(index: 0, previousStopID: nil, nextStopID: nil, addedTravelMinutes: minutes, addedDwellMinutes: 0, fixedCheck: check, approximate: false)

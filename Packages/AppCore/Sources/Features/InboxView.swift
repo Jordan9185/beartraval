@@ -10,6 +10,7 @@ struct InboxView: View {
     @State private var remote: [InboxRecord] = []
     @State private var errorMessage: String?
     @State private var loading = true
+    @State private var showsCapture = false
 
     private var repository: InboxRepository { InboxRepository(client: session.client) }
 
@@ -58,9 +59,28 @@ struct InboxView: View {
                 }
             }
             .navigationTitle("分享收件匣")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("關閉") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("收下內容", systemImage: "plus") { showsCapture = true }
+                }
+            }
+            .sheet(isPresented: $showsCapture, onDismiss: { Task { await reload() } }) {
+                InboxComposeView(ownerHint: session.trips.currentUserID) {
+                    Task { await syncAndReload() }
+                }
+            }
             .refreshable { await reload() }
-            .task { await syncAndReload() }
+            .task {
+                await syncAndReload()
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(5)) } catch { break }
+                    guard session.network.isOnline,
+                          remote.contains(where: { $0.status == "saved" || $0.status == "processing" }) ||
+                          session.inboxUploadState.values.contains(.uploading) else { continue }
+                    await reload()
+                }
+            }
         }
     }
 

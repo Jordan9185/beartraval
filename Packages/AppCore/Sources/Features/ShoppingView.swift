@@ -532,7 +532,16 @@ struct MerchantSearchView: View {
                         Text("店面線索 · 商品販售與庫存待詢問")
                             .font(.caption).foregroundStyle(.secondary)
                         if let best = option.best, let ins = best.best {
-                            Text("最適合 \(dayTitles[best.dayID] ?? "")：路程 +\(ins.addedTravelMinutes ?? 0) 分").font(.caption)
+                            if let minutes = ins.addedTravelMinutes {
+                                Text("可比較 \(dayTitles[best.dayID] ?? "")：路程 +\(minutes) 分").font(.caption)
+                            } else {
+                                Text("可安排 \(dayTitles[best.dayID] ?? "")：路程無法估算").font(.caption)
+                            }
+                            if case .unknown = ins.fixedCheck {
+                                Text("固定行程能否趕上仍需核對").font(.caption).foregroundStyle(.secondary)
+                            } else if case .conflict = ins.fixedCheck {
+                                Text("與固定行程衝突，安排前請核對").font(.caption).foregroundStyle(.red)
+                            }
                         } else {
                             Text("無法估算路線").font(.caption).foregroundStyle(.secondary)
                         }
@@ -577,7 +586,8 @@ struct MerchantSearchView: View {
                                        countryCode: place.draft.countryCode)
                 matches.append(await session.routes.match(RouteCandidate(point: point, dwellMinutes: 30), into: plan, mode: day.transportMode))
             }
-            computed.append(Option(place: place, best: RouteMatcher.bestDay(matches)))
+            // 無估值仍可選日核對；不能把這個備用選項稱作最佳日。
+            computed.append(Option(place: place, best: RouteMatcher.bestDay(matches) ?? matches.first { $0.best != nil }))
         }
         // 依 detour 排序；無法估算的排最後。
         options = computed.sorted { ($0.best?.best?.addedTravelMinutes ?? .max) < ($1.best?.best?.addedTravelMinutes ?? .max) }

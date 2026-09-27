@@ -15,14 +15,23 @@ struct LoginView: View {
     @State private var confirmation = ""
     @State private var errorMessage: String?
     @State private var isSubmitting = false
+    @State private var showsCapture = false
+    @State private var savedLocally = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Text("和旅伴一起規劃每天的行程、收藏想去的店、記下想買的東西。")
+                    Text("收下旅行資料，交給 AI 辨識與整理，再確認每天的安排。")
                         .font(.subheadline).foregroundStyle(.secondary)
                         .listRowBackground(Color.clear)
+                }
+                Section {
+                    Button("先收下旅行資料") { showsCapture = true }
+                    if savedLocally {
+                        Text("內容已保存在此裝置。登入後，到分享收件匣確認匯入目前帳號。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 Picker("登入或註冊", selection: $mode) {
                     ForEach(Mode.allCases, id: \.self) { Text($0.rawValue) }
@@ -66,6 +75,9 @@ struct LoginView: View {
                 }
             }
             .navigationTitle("BeaRTravel")
+            .sheet(isPresented: $showsCapture) {
+                InboxComposeView(ownerHint: nil) { savedLocally = true }
+            }
             .onChange(of: mode) { errorMessage = nil }
         }
     }

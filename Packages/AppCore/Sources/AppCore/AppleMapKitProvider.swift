@@ -43,16 +43,22 @@ public struct AppleMapKitProvider: RoutingProvider {
 }
 
 extension DayPlan {
-    /// 由時間軸與地點資料組出路線輸入；待確認 Stop 排除並計數。
+    /// 由時間軸與地點資料組出路線輸入；未定位 Stop 排除並計數，固定事項另保留作為可行性約束。
     public static func from(_ timeline: DayTimeline, places: [UUID: Place]) -> DayPlan? {
         guard let tz = TimeZone(identifier: timeline.day.timeZone), let midnight = LocalDate.midnight(timeline.day.localDate, in: tz) else {
             return nil
         }
         var planned: [PlannedStop] = []
         var excluded = 0
+        var unlocatedFixed: [UnlocatedFixedStop] = []
         for stop in timeline.stops {
             guard stop.isRoutable, let placeID = stop.placeId, let place = places[placeID] else {
                 excluded += 1
+                if stop.fixed {
+                    unlocatedFixed.append(UnlocatedFixedStop(
+                        id: stop.id, label: stop.rawLabel, startMinutes: stop.startTime.flatMap(LocalTime.minutes),
+                        dwellMinutes: stop.dwellMinutes, displayOrder: stop.sortOrder))
+                }
                 continue
             }
             planned.append(PlannedStop(
@@ -61,7 +67,7 @@ extension DayPlan {
                 startMinutes: stop.startTime.flatMap(LocalTime.minutes), dwellMinutes: stop.dwellMinutes, fixed: stop.fixed))
         }
         return DayPlan(dayID: timeline.day.id, routeRevision: timeline.day.routeRevision, localMidnight: midnight,
-                       stops: planned, excludedPendingCount: excluded, transportMode: timeline.day.transportMode)
+                       stops: planned, excludedPendingCount: excluded, transportMode: timeline.day.transportMode, unlocatedFixedStops: unlocatedFixed)
     }
 }
 

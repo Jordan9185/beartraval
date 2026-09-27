@@ -20,6 +20,23 @@ public struct PlannedStop: Identifiable, Hashable, Sendable {
     }
 }
 
+/// 尚未定位的固定事項：不參與路線，但不能因缺座標而丟掉時間與原始順序。
+public struct UnlocatedFixedStop: Equatable, Sendable {
+    public var id: UUID
+    public var label: String
+    public var startMinutes: Int?
+    public var dwellMinutes: Int?
+    public var displayOrder: Int
+
+    public init(id: UUID, label: String, startMinutes: Int?, dwellMinutes: Int?, displayOrder: Int) {
+        self.id = id
+        self.label = label
+        self.startMinutes = startMinutes
+        self.dwellMinutes = dwellMinutes
+        self.displayOrder = displayOrder
+    }
+}
+
 /// 一天的路線計算輸入。
 public struct DayPlan: Sendable {
     public var dayID: UUID
@@ -29,17 +46,19 @@ public struct DayPlan: Sendable {
     public var stops: [PlannedStop]
     /// 被排除的待確認 Stop 數，結果中註明。
     public var excludedPendingCount: Int
+    public var unlocatedFixedStops: [UnlocatedFixedStop]
     /// 這天設定的交通方式（重新計算過期的 proposal 時用最新的設定）。
     public var transportMode: TravelMode?
 
     public init(dayID: UUID, routeRevision: Int, localMidnight: Date, stops: [PlannedStop], excludedPendingCount: Int,
-                transportMode: TravelMode? = nil) {
+                transportMode: TravelMode? = nil, unlocatedFixedStops: [UnlocatedFixedStop] = []) {
         self.dayID = dayID
         self.routeRevision = routeRevision
         self.localMidnight = localMidnight
         self.stops = stops
         self.excludedPendingCount = excludedPendingCount
         self.transportMode = transportMode
+        self.unlocatedFixedStops = unlocatedFixedStops
     }
 
     /// 沒有時間資訊時，以當地 10:00 作為查詢時段。
@@ -219,7 +238,8 @@ public struct RouteMatcher: Sendable {
         // 不可當成「+0 分」而被選為最佳日（規格 §1、審查 H2）。
         guard n > 0 else {
             let only = Insertion(index: 0, previousStopID: nil, nextStopID: nil, addedTravelMinutes: nil,
-                                 addedDwellMinutes: candidate.dwellMinutes, fixedCheck: .noFixedAfter, approximate: false)
+                                 addedDwellMinutes: candidate.dwellMinutes,
+                                 fixedCheck: day.unlocatedFixedStops.isEmpty ? .noFixedAfter : .unknown, approximate: false)
             return DayMatch(dayID: day.dayID, routeRevision: day.routeRevision, mode: mode, provider: provider.id,
                             excludedPendingCount: day.excludedPendingCount, result: .matched(best: only, all: [only]))
         }
@@ -252,9 +272,9 @@ public struct RouteMatcher: Sendable {
                         excludedPendingCount: day.excludedPendingCount, result: result)
     }
 
-    /// 各日最佳結果中，可行優先、路程最少者（§4.2 第 7 點）。
+    /// 只在有可靠估值的日子間推薦；未知日仍可手動安排，不當作最佳日。
     public static func bestDay(_ matches: [DayMatch]) -> DayMatch? {
-        matches.filter { $0.best != nil }.min { Insertion.isBetter($0.best!, than: $1.best!) }
+        matches.filter { $0.best?.addedTravelMinutes != nil }.min { Insertion.isBetter($0.best!, than: $1.best!) }
     }
 
     /// 回傳插入結果，以及這次實際查詢的兩段路（算不出時用來說明原因）。
@@ -290,10 +310,14 @@ public struct RouteMatcher: Sendable {
     /// 彈性 Stop 的時間不檢查，只累加停留（§4.2 第 5 點）。
     private func fixedCheck(k: Int, day: DayPlan, base: BaseRoute, toC: LegTime, fromC: LegTime,
                             candidate: RouteCandidate) -> Insertion.FixedCheck {
+        // 尚未定位的固定事項可能位於兩個已定位站點之間，不能用過濾後的索引宣稱可趕上。
+        // 先保守提示整天的固定行程可行性未知，仍允許使用者核對後安排。
+        guard day.unlocatedFixedStops.isEmpty else { return .unknown }
         let stops = day.stops
-        guard let fixedIndex = stops.indices.first(where: { $0 >= k && stops[$0].fixed && stops[$0].startMinutes != nil }) else {
+        guard let fixedIndex = stops.indices.first(where: { $0 >= k && stops[$0].fixed }) else {
             return .noFixedAfter
         }
+        guard let fixedStart = stops[fixedIndex].startMinutes else { return .unknown }
         guard k > 0, let prevStart = stops[k - 1].startMinutes else { return .unknown }
         guard let a = toC.minutes, let b = fromC.minutes else { return .unknown }
 
@@ -304,7 +328,7 @@ public struct RouteMatcher: Sendable {
             arrival += Double(stops[j].dwellMinutes ?? 0) + legTime
             j += 1
         }
-        let slack = Double(stops[fixedIndex].startMinutes!) - arrival
+        let slack = Double(fixedStart) - arrival
         return slack >= 0
             ? .slack(stopID: stops[fixedIndex].id, minutes: Int(slack.rounded(.down)))
             : .conflict(stopID: stops[fixedIndex].id, lateMinutes: Int((-slack).rounded(.up)))

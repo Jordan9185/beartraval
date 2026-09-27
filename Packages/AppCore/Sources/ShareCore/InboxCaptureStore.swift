@@ -100,6 +100,23 @@ public struct InboxCaptureStore: Sendable {
         for capture in all() where capture.ownerHint == userID { try? remove(capture.id) }
     }
 
+    /// App 內輸入沿用外部分享的保存流程，不需要旅程或預先分類。
+    /// 圖片 URL 由呼叫端暫存，必須保留到此方法結束。
+    @MainActor
+    public func capture(text: String, imageURLs: [URL], ownerHint: UUID?) async throws -> InboxCapture {
+        let item = NSExtensionItem()
+        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            item.attributedContentText = NSAttributedString(string: text)
+        }
+        var providers: [NSItemProvider] = []
+        for url in imageURLs {
+            guard let provider = NSItemProvider(contentsOf: url) else { throw InboxCaptureError.mediaUnavailable }
+            providers.append(provider)
+        }
+        item.attachments = providers
+        return try await capture([item], ownerHint: ownerHint)
+    }
+
     /// `NSItemProvider` 的暫存 URL 只在 callback 期間有效；每個檔案都在 callback 內複製。
     @MainActor
     public func capture(_ items: [NSExtensionItem], ownerHint: UUID?) async throws -> InboxCapture {
@@ -144,8 +161,7 @@ public struct InboxCaptureStore: Sendable {
                   !(capture.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
             else { throw InboxCaptureError.emptyPayload }
             if let existing = all().first(where: { old in
-                old.ownerHint == capture.ownerHint &&
-                (old.canonicalURL != nil && old.canonicalURL == capture.canonicalURL || old.fingerprint == capture.fingerprint)
+                old.ownerHint == capture.ownerHint && old.fingerprint == capture.fingerprint
             }) {
                 try FileManager.default.removeItem(at: draft)
                 return existing

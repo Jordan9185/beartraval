@@ -17,7 +17,14 @@ select tests.ok((select count(*) = 2 from app.inbox_captures), '純圖片分享�
 select tests.ok((app.save_inbox_capture(
   '22222222-2222-2222-2222-222222222222',
   repeat('b', 64), 'https://threads.com/post/1', 'https://threads.com/post/1',
-  '另一個標題', '另一段文字') ->> 'created') = 'false', '相同網址不新增收件');
+  '另一個標題', '另一段文字') ->> 'created') = 'true', '相同網址不同內容另存，不能丟掉新的文字與圖片');
+select tests.ok((app.save_inbox_capture(
+  '55555555-5555-5555-5555-555555555555', repeat('a', 64),
+  'https://threads.com/post/1', 'https://threads.com/post/1', '首爾三日遊', 'Day 1 明洞餃子\nDay 2 聖水咖啡') ->> 'id') = :'capture_id',
+  '不同裝置重送相同內容回傳同一份收件');
+select tests.throws(
+  'select app.save_inbox_capture(''11111111-1111-1111-1111-111111111111'', ''' || repeat('f', 64) || ''')',
+  'PT409', '同 client ID 不能冒認不同內容為保存成功');
 select tests.ok((select share_count = 2 and raw_text like 'Day 1%' from app.inbox_captures where id = :'capture_id'),
   '重複分享只更新次數，原文不被覆寫');
 

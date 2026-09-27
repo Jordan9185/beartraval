@@ -19,7 +19,7 @@ public struct MatchNumbers: View {
             case .noFixedAfter: Text("之後沒有固定行程")
             case .slack(let id, let m): Text("距「\(stopName(id) ?? "固定行程")」還有 \(m) 分")
             case .conflict(let id, let m): Text("「\(stopName(id) ?? "固定行程")」會遲到 \(m) 分").foregroundStyle(.red)
-            case .unknown: Text("缺少時間，無法判斷")
+            case .unknown: Text("有固定行程，但時間或路線資料不足，無法判斷")
             }
         }
         if insertion.approximate {

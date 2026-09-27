@@ -119,6 +119,7 @@ public enum InboxSyncError: Error {
     case accountConfirmationRequired
     case wrongAccount
     case uploadUnavailable
+    case sourceMismatch
     case cloudSave(BackendError)
     case assetUpload(BackendError)
     case analysisStart(BackendError)
@@ -127,6 +128,7 @@ public enum InboxSyncError: Error {
         switch self {
         case .accountConfirmationRequired: "請先確認要將這份分享匯入目前帳號。"
         case .wrongAccount: "這份分享屬於另一個帳號，請切回原帳號。"
+        case .sourceMismatch: "這次內容與已同步版本不同，尚未合併；新內容仍保存在此裝置。"
         case .uploadUnavailable: "無法讀取手機保存的圖片，請重新分享。"
         case .cloudSave(let error): "建立雲端收件失敗：\(error.userMessage)"
         case .assetUpload(let error): "圖片上傳失敗：\(error.userMessage)"
@@ -362,6 +364,16 @@ public struct InboxRepository: Sendable {
         do {
             saved = try await client.rpc("save_inbox_capture", params: InboxSaveParams(capture)).execute().value
         } catch { throw InboxSyncError.cloudSave(BackendError.from(error)) }
+
+        // 舊版後端曾只按網址去重，會把同網址的新文字／照片當成已同步而刪除。
+        // 先核對完整內容指紋；即使伺服器尚未更新，也必須保留本機來源。
+        struct StoredSource: Decodable { let fingerprint: String }
+        let stored: StoredSource
+        do {
+            stored = try await client.from("inbox_captures").select("fingerprint")
+                .eq("id", value: saved.id).single().execute().value
+        } catch { throw InboxSyncError.cloudSave(BackendError.from(error)) }
+        guard stored.fingerprint == capture.fingerprint else { throw InboxSyncError.sourceMismatch }
 
         if saved.created || saved.same_client {
             for asset in capture.assets {

@@ -14,6 +14,8 @@ struct TripListView: View {
     @State private var showsJoin = false
     @State private var showsAccount = false
     @State private var showsInbox = false
+    @State private var showsCapture = false
+    @State private var captured = false
 
     var body: some View {
         NavigationStack {
@@ -38,10 +40,11 @@ struct TripListView: View {
                     ContentUnavailableView {
                         Label("還沒有旅程", systemImage: "calendar")
                     } description: {
-                        Text("自己建立一個，或用好友傳來的邀請連結加入。")
+                        Text("先把旅行資料交給 AI 整理，想好再建立旅程；也可以加入好友的旅程。")
                     } actions: {
-                        Button("建立旅程") { showsCreate = true }
+                        Button("交給 AI 整理") { showsCapture = true }
                             .buttonStyle(.borderedProminent)
+                        Button("建立旅程") { showsCreate = true }
                         Button("加入好友的旅程") { showsJoin = true }
                     }
                 }
@@ -55,11 +58,20 @@ struct TripListView: View {
                 .onAppear { onTripsChanged(trip.id, false) }
             }
             .toolbar {
-                Button("建立旅程", systemImage: "plus") { showsCreate = true }
+                Button("交給 AI 整理", systemImage: "tray.and.arrow.down") { showsCapture = true }
                 Menu("更多", systemImage: "ellipsis.circle") {
+                    Button("建立旅程", systemImage: "plus") { showsCreate = true }
                     Button("分享收件匣", systemImage: "tray") { showsInbox = true }
                     Button("加入好友的旅程", systemImage: "person.badge.plus") { showsJoin = true }
                     Button("帳號設定", systemImage: "person.crop.circle") { showsAccount = true }
+                }
+            }
+            .sheet(isPresented: $showsCapture, onDismiss: {
+                if captured { captured = false; showsInbox = true }
+            }) {
+                InboxComposeView(ownerHint: session.trips.currentUserID) {
+                    captured = true
+                    Task { await session.syncInboxCaptures() }
                 }
             }
             .sheet(isPresented: $showsAccount) { AccountView(session: session) }

@@ -7,6 +7,8 @@ public struct RootView: View {
     let session: SessionModel?
     @Environment(\.scenePhase) private var scenePhase
     @State private var showsDebug = false
+    @State private var showsLocalCapture = false
+    @State private var savedLocally = false
     @State private var store: TripStore?
     /// 還沒有旅程時先停在「旅程」；有旅程時停在「今天」。
     @State private var tab: Tab = .trip
@@ -58,8 +60,23 @@ public struct RootView: View {
                     }
             }
         } else {
-            ContentUnavailableView("後端設定缺漏", systemImage: "exclamationmark.triangle",
-                                   description: Text("請在 Config/Local.xcconfig.local 設定 SUPABASE_URL 與 SUPABASE_ANON_KEY。"))
+            NavigationStack {
+                Form {
+                    Section {
+                        Text("整理服務目前無法使用，仍可先把旅行資料保存在此裝置。")
+                            .foregroundStyle(.secondary)
+                        Button("先收下旅行資料") { showsLocalCapture = true }
+                        if savedLocally {
+                            Text("內容已保存在此裝置。登入後，到分享收件匣確認匯入目前帳號。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .navigationTitle("BeaRTravel")
+                .sheet(isPresented: $showsLocalCapture) {
+                    InboxComposeView(ownerHint: nil) { savedLocally = true }
+                }
+            }
         }
     }
 

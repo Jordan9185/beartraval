@@ -222,4 +222,36 @@ else
   failed=1
 fi
 
+# 同帳號兩裝置同時送相同內容，即使 client ID 不同，也只能產生一份收件。
+"$PG_BIN/createdb" -T bt_template t_inbox_race
+"${PSQL[@]}" -d t_inbox_race -At >"$WORK/ia.out" 2>&1 <<SQL &
+set role authenticated;
+select tests.login('00000000-0000-0000-0000-00000000000a');
+begin;
+select app.save_inbox_capture('11111111-1111-1111-1111-111111111111', repeat('a', 64)) ->> 'created';
+$HOLD_UNTIL_WAITER
+commit;
+SQL
+IA_PID=$!
+await_holder t_inbox_race || true
+set +e
+"${PSQL[@]}" -d t_inbox_race -At >"$WORK/ib.out" 2>&1 <<SQL
+set role authenticated;
+select tests.login('00000000-0000-0000-0000-00000000000a');
+select app.save_inbox_capture('22222222-2222-2222-2222-222222222222', repeat('a', 64)) ->> 'created';
+SQL
+IB_STATUS=$?
+wait "$IA_PID"
+IA_STATUS=$?
+set -e
+INBOX_COUNT="$("${PSQL[@]}" -d t_inbox_race -At -c "select count(*) from app.inbox_captures")"
+if [[ $IA_STATUS -eq 0 && $IB_STATUS -eq 0 && "$INBOX_COUNT" == "1" ]] \
+   && grep -qx true "$WORK/ia.out" && grep -q 'waiter blocked' "$WORK/ia.out" && grep -qx false "$WORK/ib.out"; then
+  echo "PASS inbox race (同內容並發重送只保存一次)"
+else
+  echo "FAIL inbox race (a=$IA_STATUS, b=$IB_STATUS, count=$INBOX_COUNT)"
+  cat "$WORK/ia.out" "$WORK/ib.out"
+  failed=1
+fi
+
 exit $failed
