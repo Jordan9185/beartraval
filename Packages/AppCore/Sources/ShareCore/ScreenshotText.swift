@@ -7,7 +7,7 @@ import Vision
 public enum ScreenshotText {
     /// 依畫面由上到下的文字列。
     /// 一張截圖常混著中文介面與韓文／日文店名；Vision 一次只用一種語言模型，
-    /// 所以跑「自動、韓文、日文」三次，同一位置取信心最高的那行合併。
+    /// 所以跑「自動、韓文、日文」三次；專用語言只補該語系，避免高信心誤讀蓋掉中文。
     public static func recognize(jpeg: Data) async -> [String] {
         await Task.detached(priority: .userInitiated) {
             var found: [(box: CGRect, text: String, confidence: Float)] = []
@@ -21,7 +21,10 @@ public enum ScreenshotText {
                     guard let top = observation.topCandidates(1).first else { continue }
                     let text = top.string.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { continue }
+                    if let language = languages?.first, !isLanguageSupplement(text, language: language) { continue }
                     if let index = found.firstIndex(where: { overlaps($0.box, observation.boundingBox) }) {
+                        // 語言模型的信心分數不能直接跨語系比較。長中文句不交給韓／日文結果覆蓋。
+                        if languages != nil && hanCount(found[index].text) >= 4 { continue }
                         if top.confidence > found[index].confidence { found[index] = (observation.boundingBox, text, top.confidence) }
                     } else {
                         found.append((observation.boundingBox, text, top.confidence))
@@ -30,6 +33,19 @@ public enum ScreenshotText {
             }
             return found.sorted { $0.box.maxY > $1.box.maxY }.map(\.text)
         }.value
+    }
+
+    static func hanCount(_ text: String) -> Int {
+        text.unicodeScalars.filter { (0x3400...0x9FFF).contains($0.value) }.count
+    }
+
+    static func isLanguageSupplement(_ text: String, language: String) -> Bool {
+        let letters = text.unicodeScalars.filter { CharacterSet.letters.contains($0) }
+        let relevant = letters.filter {
+            language == "ko-KR" ? (0xAC00...0xD7A3).contains($0.value) : (0x3040...0x30FF).contains($0.value)
+        }.count
+        if Set(letters).count == 1 { return false } // 瓶架等紋理容易被專用模型誤讀成重複音節。
+        return relevant >= 2 && Double(relevant) / Double(max(1, letters.count)) >= 0.5
     }
 
     /// 同一行文字：垂直方向大半重疊、水平方向有交集。
@@ -96,7 +112,7 @@ public enum ScreenshotText {
             let left = venueScore($0.element), right = venueScore($1.element)
             return left == right ? $0.offset < $1.offset : left > right
         }.map(\.element)
-        name = name ?? ranked.first(where: { venueScore($0) > 0 }) ?? candidates.first
+        name = name ?? ranked.first(where: { venueScore($0) > 0 })
         return Guess(name: name, address: address, otherLines: Array(ranked.filter { $0 != name }.prefix(8)),
                      category: category(from: lines), country: country(from: lines, address: address))
     }
@@ -136,11 +152,17 @@ public enum ScreenshotText {
         if text.range(of: #"^\d{1,2}:\d{2}(?:\s|$)"#, options: .regularExpression) != nil { return true }
         if text.hasPrefix("#") || text.hasPrefix("@") || text.lowercased().hasPrefix("http") || text.contains("www.") { return true }
         if text.range(of: #"^[\d\s:.,/%+\-()]+$"#, options: .regularExpression) != nil { return true }  // 時間、數字、電話
+        if text.range(of: #"^(?=.*\d)[GQORgqor\d\s:.,/•♥♡()+\-]+$"#, options: .regularExpression) != nil { return true }
         if text.range(of: #"^(\+?\d[\d\s\-]{6,})$"#, options: .regularExpression) != nil { return true }
         // 營業時間（10:30–21:00）、「#•」這類標籤殘字。
         if text.range(of: #"\d{1,2}:\d{2}\s*[-–~〜]\s*\d{1,2}:\d{2}"#, options: .regularExpression) != nil { return true }
         if text.hasPrefix("#") || text.hasPrefix("＃") { return true }
+        if text.range(of: #"^(?:回覆|回復|回复|Reply to)\s+|^[\d.]+\s*萬?次瀏[覽覧]$|^[\d.]+[kKmM]$"#, options: .regularExpression) != nil { return true }
+        if text.range(of: #"^(?:最相關|查[看査]動態|查看動態|査看動態)[\s<>〈〉＜＞く、]*$"#, options: .regularExpression) != nil { return true }
+        // 帳號與貼文日期不是搜尋候選；保留含空白的實際品牌名稱。
+        if text.range(of: #"^\S+\s*\d{2}/\d{1,2}/\d{1,2}$|^[A-Za-z0-9]+[._][A-Za-z0-9._]+$"#, options: .regularExpression) != nil { return true }
         let ui = ["Instagram", "Threads", "Trip.com", "追蹤", "Follow", "讚", "留言", "分享", "查看翻譯", "Like", "Reply", "Share",
+                  "串文", "作者", "最相關", "查看動態", "回覆", "回復",
                   "營業中", "Open", "Closed", "路線", "Directions", "Call", "撥打", "網站", "Website", "儲存", "Save",
                   "評論", "Reviews", "相片", "Photos", "영업 중", "길찾기", "저장", "공유", "리뷰", "営業中", "ルート", "保存"]
         return ui.contains { text.caseInsensitiveCompare($0) == .orderedSame }

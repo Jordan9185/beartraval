@@ -85,6 +85,21 @@ struct PastedLinkTests {
 }
 
 struct ScreenshotTextTests {
+    @Test func socialControlsCannotBecomePlaceNames() {
+        let lines = ["5:18", "串文", "21.2萬次瀏覽", "最相關＜", "查看動態 〉", "作者", "回覆 example0122", "example0122 26/8/9", "聖水洞 美食"]
+        let guess = ScreenshotText.guess(from: lines)
+        #expect(guess.name == nil)
+        #expect(!guess.otherLines.contains("回覆 example0122"))
+    }
+
+    @Test func languagePassesOnlySupplementTheirOwnScript() {
+        #expect(ScreenshotText.isLanguageSupplement("무구옥", language: "ko-KR"))
+        #expect(!ScreenshotText.isLanguageSupplement("핫트카 1층-#E7회 $1000...슴", language: "ja-JP"))
+        #expect(!ScreenshotText.isLanguageSupplement("CREME BRULEE", language: "ko-KR"))
+        #expect(!ScreenshotText.isLanguageSupplement("而且還可以客製化刻名字な", language: "ja-JP"))
+        #expect(ScreenshotText.hanCount("退稅後一瓶不到 $1000 台幣") >= 4)
+    }
+
     @Test func picksNameBeforeKoreanAddress() {
         let lines = ["9:41", "Instagram", "makmade_official", "MAKMADE 성수", "서울특별시 성동구 연무장길 45", "영업 중", "02-123-4567", "#성수카페"]
         let guess = ScreenshotText.guess(from: lines)

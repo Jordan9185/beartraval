@@ -45,5 +45,15 @@ struct ProductImportTests {
         let props = try #require(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
         #expect(props[kCGImagePropertyPixelWidth] as? Int == 1024)
         #expect(props[kCGImagePropertyPixelHeight] as? Int == 512)
+
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+        try (png as Data).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let inbox = try #require(ImageDownscale.inboxJPEG(fileURL: file))
+        let inboxSource = try #require(CGImageSourceCreateWithData(inbox as CFData, nil))
+        let image = try #require(CGImageSourceCreateImageAtIndex(inboxSource, 0, nil))
+        #expect(image.width == 2048 && image.height == 1024)
+        #expect(inbox.count <= 2_000_000)
+        #expect(ImageDownscale.inboxJPEG(fileURL: file, maxBytes: 1) == nil)
     }
 }

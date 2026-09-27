@@ -141,6 +141,15 @@ actor SignedURLCache {
 public enum ImageDownscale {
     public static let maxPixel = 1024
 
+    /// 收件匣常含巢狀截圖，先保留小字；仍遵守整理服務每張 2 MB 的限制。
+    /// 原始附件另存本機，不以此辨識用版本覆蓋。
+    public static func inboxJPEG(fileURL: URL, maxBytes: Int = 2_000_000) -> Data? {
+        for size in [2048, 1536, 1024] {
+            if let data = jpeg(fileURL: fileURL, maxPixel: size), data.count <= maxBytes { return data }
+        }
+        return nil
+    }
+
     public static func jpeg(from data: Data, maxPixel: Int = maxPixel) -> Data? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         return jpeg(from: source, maxPixel: maxPixel)

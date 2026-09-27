@@ -21,7 +21,7 @@ final class InboxCaptureUITests: XCTestCase {
         XCTAssertTrue(save.isEnabled)
         save.tap()
 
-        XCTAssertTrue(app.staticTexts["已保存在此裝置"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["已保存在此裝置"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.staticTexts["登入後，到分享收件匣確認匯入帳號，才會上傳與整理。"].exists)
         let receipt = XCTAttachment(screenshot: app.screenshot())
         receipt.name = "未登入收件成功"

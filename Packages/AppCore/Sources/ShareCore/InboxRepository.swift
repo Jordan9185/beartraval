@@ -391,7 +391,7 @@ public struct InboxRepository: Sendable {
                 var digest = asset.sha256
                 var mime = asset.mimeType
                 if asset.isImage {
-                    guard let jpeg = ImageDownscale.jpeg(fileURL: store.assetURL(captureID: capture.id, asset: asset), maxPixel: 1024)
+                    guard let jpeg = ImageDownscale.inboxJPEG(fileURL: store.assetURL(captureID: capture.id, asset: asset))
                     else { throw InboxSyncError.uploadUnavailable }
                     bytes = jpeg.count
                     digest = SHA256.hash(data: jpeg).map { String(format: "%02x", $0) }.joined()

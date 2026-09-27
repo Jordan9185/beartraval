@@ -33,9 +33,10 @@ jobs:
           UDID=$(xcrun simctl list devices available -j \
             | jq -r '[.devices | to_entries[] | select(.key | contains("iOS")) | .value[] | select(.name | startswith("iPhone"))][0].udid')
           echo "Simulator: $UDID"
+          # 收件流程需要 App Group entitlement；模擬器用 ad-hoc 簽章，不需開發者憑證。
           xcodebuild test \
             -project BearTravel.xcodeproj \
             -scheme BearTravel \
             -destination "platform=iOS Simulator,id=$UDID" \
             -onlyUsePackageVersionsFromResolvedFile \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=

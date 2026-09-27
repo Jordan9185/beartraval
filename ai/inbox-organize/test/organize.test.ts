@@ -2,6 +2,35 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateResult } from "../src/organize.ts";
 
+const pictureItem = (name: string, source = "image:1") => ({
+  kind: "place", display_name: name, source_span: source, origin_type: "explicit", confidence: "high",
+  day_index: null, store_hint: null, store_evidence: null,
+});
+
+test("真實截圖暴露的介面文字不能歸檔，清楚招牌仍保留", () => {
+  const result = validateResult({ title: null, rawText: "", imageBase64: ["jpeg"] }, {
+    content_kind: "recommendations", template_days: [],
+    items: ["串文", "作者", "21.2萬次瀏覽", "回覆 example0122", "5:18", "Trip.com", "무구옥"].map((name) => pictureItem(name)),
+  });
+  assert.deepEqual(result.items.map((item) => item.display_name), ["무구옥"]);
+});
+
+test("無垢屋重複原圖只留下同一項，不合併不同來源的同名店", () => {
+  const result = validateResult({ title: null, rawText: "", imageBase64: ["same", "same", "different"] }, {
+    content_kind: "recommendations", template_days: [],
+    items: [pictureItem("무구옥"), pictureItem("무구옥", "image:2"), pictureItem("무구옥", "image:3")],
+  });
+  assert.deepEqual(result.items.map((item) => item.source_span), ["image:1", "image:3"]);
+});
+
+test("只接受模型實際可見的前十圖及截斷範圍內的文字", () => {
+  const result = validateResult({ title: null, rawText: "x".repeat(20000) + "不可見店名", imageBase64: Array(11).fill("jpeg") }, {
+    content_kind: "recommendations", template_days: [],
+    items: [pictureItem("假的店", "image:11"), pictureItem("不可見店名", "不可見店名")],
+  });
+  assert.equal(result.items.length, 0);
+});
+
 test("四間明確店家各自歸檔，沒有來源錨點的項目被丟棄", () => {
   const text = "聖水洞：A咖啡、B麵包、C書店、D選物。";
   const items = ["A咖啡", "B麵包", "C書店", "D選物"].map((name) => ({

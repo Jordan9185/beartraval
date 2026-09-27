@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "eval": "node --import tsx eval/run.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts"
   },
