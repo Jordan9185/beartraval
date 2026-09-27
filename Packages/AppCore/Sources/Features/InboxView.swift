@@ -459,7 +459,7 @@ private struct InboxPlaceResolveView: View {
                                     Text("目前沒有可核對的韓文地址").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Text(suggestion.reason).font(.caption).foregroundStyle(.secondary)
-                                LocalMapSearchButtons(name: suggestion.searchQuery, countryCode: "KR")
+                                LocalMapSearchButtons(name: suggestion.searchQuery, localAddress: suggestion.addressLocal, countryCode: "KR")
                                     .buttonStyle(.borderless)
                                 if let url = URL(string: suggestion.sourceURL), url.scheme == "https" {
                                     Link("查看網路來源", destination: url).font(.caption)
@@ -909,6 +909,8 @@ struct PersonalInboxRow: View {
             if !candidate { Button("加入旅伴清單") { publishes = true }.font(.caption) }
             if let errorMessage { ErrorText(errorMessage) }
         }
+        // List 的 automatic 按鈕會把整列當點擊區；每個動作必須獨立命中。
+        .buttonStyle(.borderless)
         .sheet(isPresented: $resolves) {
             InboxPlaceResolveView(item: item, repository: repository) { updated in
                 onUpdated(updated)
@@ -944,7 +946,7 @@ private struct InboxDiscoveryCandidateRow: View {
             if let address = suggestion.addressLocal {
                 Text("韓文地址線索：\(address)").font(.caption).textSelection(.enabled)
             }
-            LocalMapSearchButtons(name: suggestion.searchQuery, countryCode: "KR")
+            LocalMapSearchButtons(name: suggestion.searchQuery, localAddress: suggestion.addressLocal, countryCode: "KR")
                 .font(.caption)
                 .buttonStyle(.borderless)
             if let url = URL(string: suggestion.sourceURL), url.scheme == "https" {

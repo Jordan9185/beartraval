@@ -2,6 +2,7 @@
 import AppCore
 import Foundation
 import ShareCore
+import Supabase
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -21,7 +22,9 @@ public struct ImportUITestRoot: View {
 
     public var body: some View {
         NavigationStack {
-            if scenario == "startup" || scenario == "startupRetry" {
+            if scenario == "savedButtons" || scenario == "personalButtons" {
+                SavedButtonsUITestScene(personal: scenario == "personalButtons")
+            } else if scenario == "startup" || scenario == "startupRetry" {
                 StartupUITestScene(failFirst: scenario == "startupRetry")
             } else if scenario == "sourceImage" {
                 Form {
@@ -205,6 +208,52 @@ private actor StartupUITestSource: TripStoreDataSource {
         try await Task.sleep(for: .seconds(3))
         if failFirst { failFirst = false; throw Failure.offline }
         return TripSnapshot(trip: trip, revision: 0, timeline: [], places: [:], saved: [], shopping: [])
+    }
+}
+
+/// 使用真正的收藏列及外開地圖元件；攔截 URL，測試不離開 App、不連網。
+private struct SavedButtonsUITestScene: View {
+    let personal: Bool
+    @State private var opened = 0
+    @State private var interested = 0
+    @State private var scheduled = 0
+    @State private var mapOpens = 0
+    @State private var mapQuery = "尚未開啟"
+    private let repository = InboxRepository(client: SupabaseClient(supabaseURL: URL(string: "https://example.invalid")!, supabaseKey: "ui-test"))
+    private let entry = SavedEntry(saved: SavedPlace(id: UUID(), tripId: UUID(), placeId: nil,
+        rawLabel: "測試收藏", category: .eat, sourceId: nil, addedBy: nil, status: .saved),
+        place: nil, source: nil, interestedUserIDs: [])
+    private var item: InboxItemRecord {
+        try! JSONDecoder().decode(InboxItemRecord.self, from: Data(#"""
+        {"id":"00000000-0000-0000-0000-000000000001","capture_id":"00000000-0000-0000-0000-000000000002",
+         "kind":"place","display_name":"測試個人收藏","source_span":"image:1","confidence":"low","origin_type":"explicit",
+         "resolution_status":"unresolved","archived":true,"revision":0,
+         "discovery_candidates":[{"name":"測試餐廳","korean_name":"테스트 식당","address_local":"서울 성동구 연무장길 12-1",
+           "search_query":"測試店名","reason":"測試來源","source_url":"https://example.invalid/source"}]}
+        """#.utf8))
+    }
+    var body: some View {
+        List {
+            Section {
+                Text("詳情 \(opened) · 想去 \(interested) · 排程 \(scheduled)").accessibilityIdentifier("actionCounts")
+                Text("地圖 \(mapOpens)").accessibilityIdentifier("mapOpenCount")
+                Text(mapQuery).accessibilityIdentifier("mapQuery")
+            }
+            if personal {
+                PersonalInboxRow(item: item, kind: "place", repository: repository) { _ in }
+            } else {
+                SavedRow(entry: entry, me: nil, canEdit: true, scheduledDay: nil,
+                         toggleInterest: { interested += 1 }, schedule: { scheduled += 1 },
+                         showDay: {}, open: { opened += 1 })
+            }
+        }
+        .environment(\.openURL, OpenURLAction { url in
+            mapOpens += 1
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            mapQuery = components?.queryItems?.first { $0.name == "q" || $0.name == "query" }?.value
+                ?? components?.path.replacingOccurrences(of: "/p/search/", with: "") ?? ""
+            return .handled
+        })
     }
 }
 #endif

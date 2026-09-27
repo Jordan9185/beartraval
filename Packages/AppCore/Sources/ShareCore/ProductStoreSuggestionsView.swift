@@ -86,7 +86,7 @@ public struct ProductStoreSuggestionsView: View {
                 Button("用這間店查行程定位") { onSelect(candidate) }
                     .buttonStyle(.bordered)
             }
-            LocalMapSearchButtons(name: candidate.searchQuery, countryCode: countryCode)
+            LocalMapSearchButtons(name: candidate.searchQuery, localAddress: candidate.addressLocal, countryCode: countryCode)
             DisclosureGroup("查找依據") {
                 Text(candidate.reason).font(.caption).foregroundStyle(.secondary)
                 if let url = URL(string: candidate.sourceURL), url.scheme == "https" {

@@ -4,19 +4,23 @@ import SwiftUI
 import UIKit
 #endif
 
-/// Apple 地圖沒收錄的地點：用當地常用的地圖以名稱搜尋（韓國 Naver／Kakao，其他 Google 地圖）。
+/// Apple 地圖沒收錄的地點：用當地常用的地圖優先以當地地址搜尋，無地址才用名稱（韓國 Naver／Kakao，其他 Google 地圖）。
 /// 只負責開啟，不讀回座標或分鐘數。
 public struct LocalMapSearchButtons: View {
     let name: String
+    let localAddress: String?
     let countryCode: String?
 
-    public init(name: String, countryCode: String?) {
+    public init(name: String, localAddress: String? = nil, countryCode: String?) {
         self.name = name
+        self.localAddress = localAddress
         self.countryCode = countryCode
     }
     @Environment(\.openURL) private var openURL
 
     private var link: LocalMapLink { LocalMapLink(appName: Bundle.main.bundleIdentifier ?? "beartravel") }
+
+    private var query: String { LocalMapLink.preferredSearchQuery(name: name, localAddress: localAddress) }
 
     public var body: some View {
         if countryCode == "KR" {
@@ -29,7 +33,7 @@ public struct LocalMapSearchButtons: View {
             .buttonStyle(.bordered)
         } else {
             Button("Google 地圖") {
-                openURL(LocalMapLink.googleSearchURL(query: name, appInstalled: installed("comgooglemaps")))
+                openURL(LocalMapLink.googleSearchURL(query: query, appInstalled: installed("comgooglemaps")))
             }
             .frame(minHeight: 44)
             .buttonStyle(.bordered)
@@ -37,7 +41,7 @@ public struct LocalMapSearchButtons: View {
     }
 
     private func open(_ app: LocalMapApp) {
-        openURL(installed(app.scheme) ? link.searchURL(app, query: name) : link.webSearchURL(app, query: name))
+        openURL(installed(app.scheme) ? link.searchURL(app, query: query) : link.webSearchURL(app, query: query))
     }
 
     private func installed(_ scheme: String) -> Bool {

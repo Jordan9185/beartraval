@@ -515,7 +515,7 @@ struct ConfirmItemView: View {
                 if let useWebCandidate {
                     Button("用此店名搜尋定位") { useWebCandidate(candidate) }
                 }
-                LocalMapSearchButtons(name: candidate.searchQuery, countryCode: "KR")
+                LocalMapSearchButtons(name: candidate.searchQuery, localAddress: candidate.addressLocal, countryCode: "KR")
                     .buttonStyle(.borderless)
             }
             .padding(.vertical, 4)

@@ -69,7 +69,13 @@ public struct LocalMapLink: Sendable {
         }
     }
 
-    /// 以店名搜尋。
+    /// 使用已取得的當地地址，避免同名店／分店搜尋歧義；空白地址才退回店名。
+    public static func preferredSearchQuery(name: String, localAddress: String?) -> String {
+        let address = localAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return address.isEmpty ? name.trimmingCharacters(in: .whitespacesAndNewlines) : address
+    }
+
+    /// 以地址或店名搜尋。
     public func searchURL(_ app: LocalMapApp, query: String) -> URL {
         switch app {
         case .naver:

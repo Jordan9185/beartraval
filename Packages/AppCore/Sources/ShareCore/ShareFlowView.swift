@@ -198,7 +198,7 @@ public struct ShareFlowView: View {
                             Task { await search() }
                         }
                         .buttonStyle(.bordered)
-                        LocalMapSearchButtons(name: suggestion.searchQuery, countryCode: "KR")
+                        LocalMapSearchButtons(name: suggestion.searchQuery, localAddress: suggestion.addressLocal, countryCode: "KR")
                         DisclosureGroup("查找依據") {
                             Text(suggestion.reason).font(.caption).foregroundStyle(.secondary)
                             if let url = URL(string: suggestion.sourceURL), url.scheme == "https" {
@@ -258,7 +258,7 @@ public struct ShareFlowView: View {
                         Text("地圖暫時找不到定位點；仍可收藏店名。")
                             .font(.caption).foregroundStyle(.secondary)
                         if !query.isEmpty {
-                            LocalMapSearchButtons(name: query, countryCode: country ?? LocalMapCountry.guess(name: query + screenshotAddress, timeZone: nil))
+                            LocalMapSearchButtons(name: query, localAddress: screenshotAddress, countryCode: country ?? LocalMapCountry.guess(name: query + screenshotAddress, timeZone: nil))
                         }
                     }
                 }

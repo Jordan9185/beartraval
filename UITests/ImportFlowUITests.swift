@@ -22,6 +22,36 @@ final class ImportFlowUITests: XCTestCase {
         XCTAssertTrue(element.exists && element.isHittable, "\(element) not reachable", file: file, line: line)
     }
 
+    func testSavedCardButtonsDoNotOpenDetails() {
+        let app = launch("savedButtons")
+        app.buttons["0 人想去"].tap()
+        XCTAssertEqual(app.staticTexts["actionCounts"].label, "詳情 0 · 想去 1 · 排程 0")
+        app.buttons["排進旅程"].tap()
+        XCTAssertEqual(app.staticTexts["actionCounts"].label, "詳情 0 · 想去 1 · 排程 1")
+        app.buttons["savedDetails"].tap()
+        XCTAssertEqual(app.staticTexts["actionCounts"].label, "詳情 1 · 想去 1 · 排程 1")
+    }
+
+    func testPersonalCardMapAndEditHaveSeparateTapTargets() {
+        let app = launch("personalButtons")
+        app.staticTexts["測試個人收藏"].tap()
+        XCTAssertEqual(app.staticTexts["mapOpenCount"].label, "地圖 0")
+        XCTAssertFalse(app.navigationBars["更正項目"].exists)
+        app.buttons["Naver 地圖"].tap()
+        XCTAssertEqual(app.staticTexts["mapOpenCount"].label, "地圖 1")
+        XCTAssertEqual(app.staticTexts["mapQuery"].label, "서울 성동구 연무장길 12-1")
+        XCTAssertFalse(app.navigationBars["更正項目"].exists)
+        XCTAssertFalse(app.navigationBars["分享給旅伴"].exists)
+        app.buttons["Kakao 地圖"].tap()
+        XCTAssertEqual(app.staticTexts["mapOpenCount"].label, "地圖 2")
+        XCTAssertEqual(app.staticTexts["mapQuery"].label, "서울 성동구 연무장길 12-1")
+        app.buttons["更正名稱或分類"].tap()
+        XCTAssertTrue(app.navigationBars["更正項目"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.navigationBars["分享給旅伴"].exists)
+        app.buttons["取消"].tap()
+        XCTAssertEqual(app.staticTexts["mapOpenCount"].label, "地圖 2")
+    }
+
     func testStartupWaitsWithoutFalseLoadFailure() {
         let app = launch("startup")
         XCTAssertTrue(app.staticTexts["載入中…"].waitForExistence(timeout: 2))

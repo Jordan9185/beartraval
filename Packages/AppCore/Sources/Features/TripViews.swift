@@ -585,9 +585,9 @@ struct StopDetailView: View {
                                        addressHint: saved?.saved.addressHint ?? shopping?.item.scheduledStoreAddressLocal)
                     }
                     Section {
-                        LocalMapSearchButtons(name: [stop.rawLabel, saved?.saved.addressHint,
-                                                      shopping?.item.scheduledStoreAddressLocal]
-                            .compactMap { $0 }.joined(separator: " "), countryCode: country)
+                        LocalMapSearchButtons(name: stop.rawLabel,
+                                              localAddress: saved?.saved.addressHint ?? shopping?.item.scheduledStoreAddressLocal,
+                                              countryCode: country)
                     } header: {
                         Text("當地地圖")
                     } footer: {

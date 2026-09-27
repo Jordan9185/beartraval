@@ -379,11 +379,19 @@ struct SavedRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(entry.title)
-            if let address = entry.addressLabel {
-                Text(address).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+            Button(action: open) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.title)
+                    if let address = entry.addressLabel {
+                        Text(address).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    Text(SavedRow.status(entry, me: me, scheduledDay: scheduledDay)).font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            Text(SavedRow.status(entry, me: me, scheduledDay: scheduledDay)).font(.caption).foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("savedDetails")
             HStack(spacing: 16) {
                 Button {
                     toggleInterest()
@@ -403,8 +411,6 @@ struct SavedRow: View {
             .font(.caption)
             .buttonStyle(.borderless)
         }
-        .contentShape(Rectangle())
-        .onTapGesture(perform: open)
     }
 
     static func status(_ entry: SavedEntry, me: UUID?, scheduledDay: TripDay? = nil) -> String {
@@ -499,7 +505,7 @@ struct SavedDetailView: View {
                                     Button("帶入這個地址") { Task { await accept(candidate) } }
                                         .buttonStyle(.bordered)
                                 }
-                                LocalMapSearchButtons(name: candidate.searchQuery, countryCode: "KR")
+                                LocalMapSearchButtons(name: candidate.searchQuery, localAddress: candidate.addressLocal, countryCode: "KR")
                                 if let url = URL(string: candidate.sourceURL), url.scheme == "https" {
                                     Link("查看網頁來源", destination: url).font(.caption)
                                 }
@@ -522,7 +528,7 @@ struct SavedDetailView: View {
                         let country = tripCountry ?? LocalMapCountry.guess(name: entry.saved.rawLabel, timeZone: nil)
                         TaxiCardButton(unlocatedName: entry.saved.rawLabel, countryCode: country,
                                        addressHint: addressHint ?? entry.saved.addressHint)
-                        LocalMapSearchButtons(name: [entry.saved.rawLabel, addressHint ?? entry.saved.addressHint].compactMap { $0 }.joined(separator: " "), countryCode: country)
+                        LocalMapSearchButtons(name: entry.saved.rawLabel, localAddress: addressHint ?? entry.saved.addressHint, countryCode: country)
                     }
                 }
                 if let place = entry.place, place.isInKorea {

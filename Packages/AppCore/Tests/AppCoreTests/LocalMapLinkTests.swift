@@ -55,6 +55,29 @@ struct LocalMapLinkTests {
         #expect(kakao.absoluteString.hasPrefix("kakaomap://search?q=%EC%98%AC"))
     }
 
+    @Test func addressSearchPreservesLocalTextAcrossAppsAndWeb() throws {
+        let address = "서울 성동구 연무장길 12-1, 2층"
+        let query = LocalMapLink.preferredSearchQuery(name: "同名店", localAddress: "  \(address)\n")
+        #expect(query == address)
+        for app in LocalMapApp.allCases {
+            let url = link.searchURL(app, query: query)
+            let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+            #expect(components.queryItems?.first { $0.name == (app == .naver ? "query" : "q") }?.value == address)
+            let web = try #require(URLComponents(url: link.webSearchURL(app, query: query), resolvingAgainstBaseURL: false))
+            if app == .naver { #expect(web.path == "/p/search/" + address) }
+            else { #expect(web.queryItems?.first { $0.name == "q" }?.value == address) }
+        }
+        for installed in [true, false] {
+            let google = try #require(URLComponents(url: LocalMapLink.googleSearchURL(query: query, appInstalled: installed), resolvingAgainstBaseURL: false))
+            #expect(google.queryItems?.first { $0.name == (installed ? "q" : "query") }?.value == address)
+        }
+    }
+
+    @Test(arguments: [nil, "", "  \n\t"] as [String?])
+    func missingAddressFallsBackToName(address: String?) {
+        #expect(LocalMapLink.preferredSearchQuery(name: "  무구옥 성수점  ", localAddress: address) == "무구옥 성수점")
+    }
+
     @Test func kakaoWebFallbackStripsCommasFromName() {
         let point = MapPoint(name: "Cafe, Seoul", latitude: 37.5, longitude: 127.0)
         let url = link.webFallbackURL(.kakao, destination: point)
