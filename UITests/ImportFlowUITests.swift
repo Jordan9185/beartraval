@@ -22,6 +22,11 @@ final class ImportFlowUITests: XCTestCase {
         XCTAssertTrue(element.exists && element.isHittable, "\(element) not reachable", file: file, line: line)
     }
 
+    private func requestRemoval(in app: XCUIApplication) {
+        app.buttons["collectionMore"].tap()
+        app.buttons["removeCollection"].tap()
+    }
+
     func testSavedCardButtonsDoNotOpenDetails() {
         let app = launch("savedButtons")
         app.buttons["0 人想去"].tap()
@@ -46,7 +51,7 @@ final class ImportFlowUITests: XCTestCase {
         app.buttons["Kakao 地圖"].tap()
         XCTAssertEqual(app.staticTexts["mapOpenCount"].label, "地圖 2")
         XCTAssertEqual(app.staticTexts["mapQuery"].label, "서울 성동구 연무장길 12-1")
-        reveal(app.buttons["更正名稱或分類"], in: app)
+        app.buttons["collectionMore"].tap()
         app.buttons["更正名稱或分類"].tap()
         XCTAssertTrue(app.navigationBars["更正項目"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.navigationBars["分享給旅伴"].exists)
@@ -56,14 +61,13 @@ final class ImportFlowUITests: XCTestCase {
 
     func testRemoveCollectionCanCancelThenConfirm() {
         let app = launch("savedButtons")
-        let remove = app.buttons["removeCollection"]
-        XCTAssertGreaterThanOrEqual(remove.frame.height, 44)
-        remove.tap()
+        XCTAssertGreaterThanOrEqual(app.buttons["collectionMore"].frame.height, 44)
+        requestRemoval(in: app)
         XCTAssertTrue(app.staticTexts["將從這趟旅程的共同收藏移除，旅伴也會看到變更。已排進行程的站點會保留。"].exists)
         app.buttons["取消"].tap()
         XCTAssertTrue(app.buttons["savedDetails"].exists)
         XCTAssertEqual(app.staticTexts["actionCounts"].label, "詳情 0 · 想去 0 · 排程 0")
-        remove.tap()
+        requestRemoval(in: app)
         app.buttons["確認移除"].tap()
         XCTAssertTrue(app.staticTexts["collectionRemoved"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.buttons["savedDetails"].exists)
@@ -71,11 +75,11 @@ final class ImportFlowUITests: XCTestCase {
 
     func testRemovalFailureKeepsCardAndAllowsRetry() {
         let app = launch("removeFailure")
-        app.buttons["removeCollection"].tap()
+        requestRemoval(in: app)
         app.buttons["確認移除"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "移除失敗：")).firstMatch.waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["savedDetails"].exists)
-        app.buttons["removeCollection"].tap()
+        requestRemoval(in: app)
         app.buttons["確認移除"].tap()
         XCTAssertTrue(app.staticTexts["collectionRemoved"].waitForExistence(timeout: 3))
     }
@@ -83,18 +87,15 @@ final class ImportFlowUITests: XCTestCase {
     func testViewerCannotRemoveSharedCollection() {
         let app = launch("savedViewer")
         XCTAssertTrue(app.buttons["savedDetails"].exists)
-        XCTAssertFalse(app.buttons["removeCollection"].exists)
+        XCTAssertFalse(app.buttons["collectionMore"].exists)
     }
 
     func testPersonalRemovalExplainsScopeAndCanCancel() {
         let app = launch("personalButtons")
-        let remove = app.buttons["removeCollection"]
-        reveal(remove, in: app)
-        XCTAssertGreaterThanOrEqual(remove.frame.height, 44)
-        remove.tap()
+        requestRemoval(in: app)
         XCTAssertTrue(app.staticTexts["只從你的個人清單移除。原始分享、已分享給旅伴的項目及已排進行程的站點會保留，可從分享收件匣重新加入。"].exists)
         app.buttons["取消"].tap()
-        XCTAssertTrue(remove.exists)
+        XCTAssertTrue(app.buttons["collectionMore"].exists)
         XCTAssertFalse(app.navigationBars["更正項目"].exists)
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "收藏操作按鈕"

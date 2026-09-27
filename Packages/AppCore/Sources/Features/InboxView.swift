@@ -871,7 +871,14 @@ struct PersonalInboxRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(item.displayName)
+            HStack(alignment: .top, spacing: 8) {
+                Text(item.displayName).frame(maxWidth: .infinity, alignment: .leading)
+                CollectionRemoveButton(name: item.displayName,
+                    scope: candidate ? .candidate : (kind == "product" ? .personalProduct : .personalPlace),
+                    showsMenu: true, edit: { editing = true }) {
+                    onUpdated(try await repository.updateItem(item, archived: false))
+                }
+            }
             Text("來源：\(item.sourceSpan)").font(.caption).foregroundStyle(.secondary)
             if kind == "place" {
                 ForEach(item.discoveryCandidates ?? []) { suggestion in
@@ -894,27 +901,13 @@ struct PersonalInboxRow: View {
             if candidate {
                 Text(kind == "product" ? "AI 辨識候選，請核對商品名稱" : "AI 辨識候選，尚未確認是哪間店")
                     .font(.caption).foregroundStyle(.secondary)
-                Button { Task { await archive() } } label: {
-                    CollectionActionLabel(title: kind == "product" ? "加入個人想買" : "加入個人收藏", icon: "bookmark")
-                }.buttonStyle(.bordered)
             }
-            if kind == "place", item.resolutionStatus != "verified" {
-                Button { resolves = true } label: {
-                    CollectionActionLabel(title: "確認地點", icon: "mappin.and.ellipse")
-                }.buttonStyle(.bordered)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { primaryActions }
+                VStack(spacing: 8) { primaryActions }
             }
-            Button { editing = true } label: {
-                CollectionActionLabel(title: "更正名稱或分類", icon: "pencil")
-            }.buttonStyle(.bordered)
-            if !candidate {
-                Button { publishes = true } label: {
-                    CollectionActionLabel(title: "加入旅伴清單", icon: "person.2")
-                }.buttonStyle(.bordered)
-            }
-            CollectionRemoveButton(name: item.displayName,
-                scope: candidate ? .candidate : (kind == "product" ? .personalProduct : .personalPlace)) {
-                onUpdated(try await repository.updateItem(item, archived: false))
-            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
             if let errorMessage { ErrorText(errorMessage) }
         }
         // List 的 automatic 按鈕會把整列當點擊區；每個動作必須獨立命中。
@@ -935,6 +928,24 @@ struct PersonalInboxRow: View {
         }
         .sheet(isPresented: $publishes) {
             InboxPublishView(item: item, repository: repository) { publishes = false }
+        }
+    }
+
+    @ViewBuilder private var primaryActions: some View {
+        if candidate {
+            Button { Task { await archive() } } label: {
+                CollectionActionLabel(title: kind == "product" ? "加入想買" : "加入收藏", icon: "bookmark")
+            }
+        }
+        if kind == "place", item.resolutionStatus != "verified" {
+            Button { resolves = true } label: {
+                CollectionActionLabel(title: "確認地點", icon: "mappin.and.ellipse")
+            }
+        }
+        if !candidate {
+            Button { publishes = true } label: {
+                CollectionActionLabel(title: "加入旅伴清單", icon: "person.2")
+            }
         }
     }
 

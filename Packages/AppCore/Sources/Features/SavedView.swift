@@ -395,11 +395,12 @@ struct SavedRow: View {
                         CollectionActionLabel(title: "查看第 \((scheduledDay?.displayOrder ?? 0) + 1) 天", icon: "calendar")
                     }
                 }
+                if canEdit, let remove {
+                    CollectionRemoveButton(name: entry.title, scope: .shared, showsMenu: true, action: remove)
+                }
             }
             .buttonStyle(.bordered)
-            if canEdit, let remove {
-                CollectionRemoveButton(name: entry.title, scope: .shared, action: remove)
-            }
+            .controlSize(.mini)
         }
     }
 
@@ -782,10 +783,15 @@ struct CollectionActionLabel: View {
     let icon: String
 
     var body: some View {
-        Label(title, systemImage: icon)
-            .font(.subheadline)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .contentShape(Rectangle())
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+            Text(title)
+        }
+        .font(.subheadline)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
     }
 }
 
@@ -811,6 +817,8 @@ struct CollectionRemoveButton: View {
     }
     let name: String
     let scope: Scope
+    var showsMenu = false
+    var edit: (() -> Void)? = nil
     let action: () async throws -> Void
     @State private var confirming = false
     @State private var removing = false
@@ -818,12 +826,32 @@ struct CollectionRemoveButton: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Button(role: .destructive) { confirming = true } label: {
-                CollectionActionLabel(title: removing ? "移除中…" : scope.title, icon: "trash")
+            Group {
+                if showsMenu {
+                    Menu {
+                        if let edit { Button("更正名稱或分類", systemImage: "pencil", action: edit) }
+                        Button(scope.title, systemImage: "trash", role: .destructive) { confirming = true }
+                            .accessibilityIdentifier("removeCollection")
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "ellipsis")
+                            Text(removing ? "移除中…" : "更多")
+                        }
+                        .font(.subheadline)
+                        .frame(minWidth: 60, minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .accessibilityIdentifier("collectionMore")
+                } else {
+                    Button(role: .destructive) { confirming = true } label: {
+                        CollectionActionLabel(title: removing ? "移除中…" : scope.title, icon: "trash")
+                    }
+                    .accessibilityIdentifier("removeCollection")
+                }
             }
             .buttonStyle(.bordered)
+            .controlSize(.mini)
             .disabled(removing)
-            .accessibilityIdentifier("removeCollection")
             .alert("移除「\(name)」？", isPresented: $confirming) {
                 Button("確認移除", role: .destructive) { Task { await remove() } }
                 Button("取消", role: .cancel) { }
