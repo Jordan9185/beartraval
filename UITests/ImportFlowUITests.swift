@@ -37,7 +37,8 @@ final class ImportFlowUITests: XCTestCase {
         app.staticTexts["測試個人收藏"].tap()
         XCTAssertEqual(app.staticTexts["mapOpenCount"].label, "地圖 0")
         XCTAssertFalse(app.navigationBars["更正項目"].exists)
-        app.buttons["Naver 地圖"].tap()
+        XCTAssertGreaterThanOrEqual(app.buttons["Naver 地圖"].frame.height, 44)
+        app.buttons["Naver 地圖"].coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5)).tap()
         XCTAssertEqual(app.staticTexts["mapOpenCount"].label, "地圖 1")
         XCTAssertEqual(app.staticTexts["mapQuery"].label, "서울 성동구 연무장길 12-1")
         XCTAssertFalse(app.navigationBars["更正項目"].exists)
@@ -45,11 +46,60 @@ final class ImportFlowUITests: XCTestCase {
         app.buttons["Kakao 地圖"].tap()
         XCTAssertEqual(app.staticTexts["mapOpenCount"].label, "地圖 2")
         XCTAssertEqual(app.staticTexts["mapQuery"].label, "서울 성동구 연무장길 12-1")
+        reveal(app.buttons["更正名稱或分類"], in: app)
         app.buttons["更正名稱或分類"].tap()
         XCTAssertTrue(app.navigationBars["更正項目"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.navigationBars["分享給旅伴"].exists)
         app.buttons["取消"].tap()
         XCTAssertEqual(app.staticTexts["mapOpenCount"].label, "地圖 2")
+    }
+
+    func testRemoveCollectionCanCancelThenConfirm() {
+        let app = launch("savedButtons")
+        let remove = app.buttons["removeCollection"]
+        XCTAssertGreaterThanOrEqual(remove.frame.height, 44)
+        remove.tap()
+        XCTAssertTrue(app.staticTexts["將從這趟旅程的共同收藏移除，旅伴也會看到變更。已排進行程的站點會保留。"].exists)
+        app.buttons["取消"].tap()
+        XCTAssertTrue(app.buttons["savedDetails"].exists)
+        XCTAssertEqual(app.staticTexts["actionCounts"].label, "詳情 0 · 想去 0 · 排程 0")
+        remove.tap()
+        app.buttons["確認移除"].tap()
+        XCTAssertTrue(app.staticTexts["collectionRemoved"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["savedDetails"].exists)
+    }
+
+    func testRemovalFailureKeepsCardAndAllowsRetry() {
+        let app = launch("removeFailure")
+        app.buttons["removeCollection"].tap()
+        app.buttons["確認移除"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "移除失敗：")).firstMatch.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["savedDetails"].exists)
+        app.buttons["removeCollection"].tap()
+        app.buttons["確認移除"].tap()
+        XCTAssertTrue(app.staticTexts["collectionRemoved"].waitForExistence(timeout: 3))
+    }
+
+    func testViewerCannotRemoveSharedCollection() {
+        let app = launch("savedViewer")
+        XCTAssertTrue(app.buttons["savedDetails"].exists)
+        XCTAssertFalse(app.buttons["removeCollection"].exists)
+    }
+
+    func testPersonalRemovalExplainsScopeAndCanCancel() {
+        let app = launch("personalButtons")
+        let remove = app.buttons["removeCollection"]
+        reveal(remove, in: app)
+        XCTAssertGreaterThanOrEqual(remove.frame.height, 44)
+        remove.tap()
+        XCTAssertTrue(app.staticTexts["只從你的個人清單移除。原始分享、已分享給旅伴的項目及已排進行程的站點會保留，可從分享收件匣重新加入。"].exists)
+        app.buttons["取消"].tap()
+        XCTAssertTrue(remove.exists)
+        XCTAssertFalse(app.navigationBars["更正項目"].exists)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "收藏操作按鈕"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     func testStartupWaitsWithoutFalseLoadFailure() {

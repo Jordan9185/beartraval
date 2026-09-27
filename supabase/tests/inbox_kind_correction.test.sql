@@ -19,3 +19,11 @@ select tests.ok((select archived and user_corrected and revision = 1 and store_h
 select tests.throws('select app.update_inbox_item(''' || :'item_id' || ''',0,null,null,''product'')', 'PT409', '舊版本不能改回');
 select tests.ok((app.update_inbox_item(:'item_id',1,'冷麵餐廳',true)).kind = 'place', '舊版四參數仍可呼叫');
 select tests.ok((select count(*)=0 from app.shopping_items), '不產生共同購物項目');
+
+-- 移除只撤銷個人清單，不丟原始來源，也不重新出現在待確認候選。
+select tests.ok(not (app.update_inbox_item(:'item_id',2,null,false)).archived, '可移除個人收藏');
+select tests.ok((select user_corrected and revision = 3 and display_name = '冷麵餐廳'
+  and source_span = 'image:1' from app.inbox_items where id = :'item_id'), '移除保留名稱來源並排除自動候選');
+select tests.ok(exists(select 1 from app.inbox_captures where id = :'capture_id'), '原始分享仍可查看');
+select tests.throws('select app.update_inbox_item(''' || :'item_id' || ''',2,null,false)', 'PT409', '過期移除不得覆蓋新版本');
+select tests.ok((app.update_inbox_item(:'item_id',3,null,true)).archived, '可從收件匣重新加入');

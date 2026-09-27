@@ -820,9 +820,6 @@ struct PersonalInboxItemsView: View {
                 Section("我的清單") {
                     ForEach(items) { item in
                         PersonalInboxRow(item: item, kind: kind, repository: repository) { _ in Task { await reload() } }
-                            .swipeActions {
-                                Button("撤銷", role: .destructive) { Task { await undo(item) } }
-                            }
                     }
                 }
             }
@@ -856,10 +853,7 @@ struct PersonalInboxItemsView: View {
         catch { errorMessage = "讀取失敗：\(error.localizedDescription)" }
     }
 
-    private func undo(_ item: InboxItemRecord) async {
-        do { _ = try await repository.updateItem(item, archived: false); items.removeAll { $0.id == item.id } }
-        catch { errorMessage = "撤銷失敗：\(error.localizedDescription)" }
-    }
+
 }
 
 struct PersonalInboxRow: View {
@@ -900,13 +894,27 @@ struct PersonalInboxRow: View {
             if candidate {
                 Text(kind == "product" ? "AI 辨識候選，請核對商品名稱" : "AI 辨識候選，尚未確認是哪間店")
                     .font(.caption).foregroundStyle(.secondary)
-                Button(kind == "product" ? "加入個人想買" : "加入個人收藏") { Task { await archive() } }.font(.caption)
+                Button { Task { await archive() } } label: {
+                    CollectionActionLabel(title: kind == "product" ? "加入個人想買" : "加入個人收藏", icon: "bookmark")
+                }.buttonStyle(.bordered)
             }
             if kind == "place", item.resolutionStatus != "verified" {
-                Button("確認地點") { resolves = true }.font(.caption)
+                Button { resolves = true } label: {
+                    CollectionActionLabel(title: "確認地點", icon: "mappin.and.ellipse")
+                }.buttonStyle(.bordered)
             }
-            Button("更正名稱或分類") { editing = true }.font(.caption)
-            if !candidate { Button("加入旅伴清單") { publishes = true }.font(.caption) }
+            Button { editing = true } label: {
+                CollectionActionLabel(title: "更正名稱或分類", icon: "pencil")
+            }.buttonStyle(.bordered)
+            if !candidate {
+                Button { publishes = true } label: {
+                    CollectionActionLabel(title: "加入旅伴清單", icon: "person.2")
+                }.buttonStyle(.bordered)
+            }
+            CollectionRemoveButton(name: item.displayName,
+                scope: candidate ? .candidate : (kind == "product" ? .personalProduct : .personalPlace)) {
+                onUpdated(try await repository.updateItem(item, archived: false))
+            }
             if let errorMessage { ErrorText(errorMessage) }
         }
         // List 的 automatic 按鈕會把整列當點擊區；每個動作必須獨立命中。

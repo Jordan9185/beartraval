@@ -25,19 +25,22 @@ public struct LocalMapSearchButtons: View {
     public var body: some View {
         if countryCode == "KR" {
             HStack(spacing: 8) {
-                Button("Naver 地圖") { open(.naver) }
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                Button("Kakao 地圖") { open(.kakao) }
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                Button { open(.naver) } label: { searchLabel("Naver 地圖") }
+                Button { open(.kakao) } label: { searchLabel("Kakao 地圖") }
             }
             .buttonStyle(.bordered)
         } else {
-            Button("Google 地圖") {
+            Button {
                 openURL(LocalMapLink.googleSearchURL(query: query, appInstalled: installed("comgooglemaps")))
-            }
-            .frame(minHeight: 44)
+            } label: { searchLabel("Google 地圖") }
             .buttonStyle(.bordered)
         }
+    }
+
+    private func searchLabel(_ title: String) -> some View {
+        Text(title).font(.subheadline)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(Rectangle())
     }
 
     private func open(_ app: LocalMapApp) {

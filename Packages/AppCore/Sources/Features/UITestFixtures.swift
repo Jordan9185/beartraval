@@ -22,8 +22,8 @@ public struct ImportUITestRoot: View {
 
     public var body: some View {
         NavigationStack {
-            if scenario == "savedButtons" || scenario == "personalButtons" {
-                SavedButtonsUITestScene(personal: scenario == "personalButtons")
+            if ["savedButtons", "personalButtons", "removeFailure", "savedViewer"].contains(scenario) {
+                SavedButtonsUITestScene(personal: scenario == "personalButtons", failFirst: scenario == "removeFailure", viewer: scenario == "savedViewer")
             } else if scenario == "startup" || scenario == "startupRetry" {
                 StartupUITestScene(failFirst: scenario == "startupRetry")
             } else if scenario == "sourceImage" {
@@ -214,6 +214,10 @@ private actor StartupUITestSource: TripStoreDataSource {
 /// 使用真正的收藏列及外開地圖元件；攔截 URL，測試不離開 App、不連網。
 private struct SavedButtonsUITestScene: View {
     let personal: Bool
+    var failFirst = false
+    var viewer = false
+    @State private var removed = false
+    @State private var attempts = 0
     @State private var opened = 0
     @State private var interested = 0
     @State private var scheduled = 0
@@ -241,10 +245,16 @@ private struct SavedButtonsUITestScene: View {
             }
             if personal {
                 PersonalInboxRow(item: item, kind: "place", repository: repository) { _ in }
-            } else {
-                SavedRow(entry: entry, me: nil, canEdit: true, scheduledDay: nil,
+            } else if !removed {
+                SavedRow(entry: entry, me: nil, canEdit: !viewer, scheduledDay: nil,
                          toggleInterest: { interested += 1 }, schedule: { scheduled += 1 },
-                         showDay: {}, open: { opened += 1 })
+                         showDay: {}, open: { opened += 1 }, remove: {
+                             attempts += 1
+                             if failFirst && attempts == 1 { throw BackendError.staleRevision }
+                             removed = true
+                         })
+            } else {
+                Text("已移除收藏").accessibilityIdentifier("collectionRemoved")
             }
         }
         .environment(\.openURL, OpenURLAction { url in

@@ -101,3 +101,14 @@ select tests.ok((:'relocated'::jsonb ->> 'id') = :'unlocated' and (:'relocated':
                 and (select place_id = :'noodle' and status = 'saved' from app.saved_places where id = :'unlocated'),
                 'located re-share confirms the place on the earlier entry');
 select tests.ok((select count(*) from app.saved_places where trip_id = :'trip_id' and place_id = :'noodle') = 1, 'no second entry for the place');
+
+-- 從收藏移除已排地點，不可動到正式站點或當日版本。
+select jsonb_agg(to_jsonb(s) order by s.id)::text as stops_before
+  from app.stops s where trip_id = :'trip_id' \gset
+select route_revision as revision_before from app.trip_days where id = :'day_id' \gset
+select app.dismiss_saved(:'bbq_saved');
+select tests.ok((select status = 'dismissed' from app.saved_places where id = :'bbq_saved'), '已排地點可從共同收藏移除');
+select tests.ok((select jsonb_agg(to_jsonb(s) order by s.id) from app.stops s where trip_id = :'trip_id') = :'stops_before'::jsonb,
+  '移除收藏保留所有正式站點欄位');
+select tests.ok((select route_revision from app.trip_days where id = :'day_id') = :'revision_before'::bigint,
+  '移除收藏不變更當日行程版本');

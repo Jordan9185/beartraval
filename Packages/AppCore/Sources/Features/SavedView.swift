@@ -79,9 +79,6 @@ struct SavedView: View {
                             PersonalInboxRow(item: item, kind: "place", repository: inbox) { _ in
                                 Task { await loadInbox() }
                             }
-                            .swipeActions {
-                                Button("撤銷", role: .destructive) { Task { await undoPersonal(item) } }
-                            }
                         }
                     }
                 }
@@ -127,12 +124,8 @@ struct SavedView: View {
                                      toggleInterest: { Task { await toggleInterest(entry) } },
                                      schedule: { scheduling = entry },
                                      showDay: { if let day = scheduledDays[entry.id] { onOpenDay(entry.saved.tripId, day.id) } },
-                                     open: { detail = entry })
-                            .swipeActions {
-                                if myRole?.canEdit == true {
-                                    Button("移除", role: .destructive) { Task { await dismiss(entry) } }
-                                }
-                            }
+                                     open: { detail = entry },
+                                     remove: { try await remove(entry) })
                         }
                     }
                 }
@@ -333,11 +326,6 @@ struct SavedView: View {
         }
     }
 
-    private func undoPersonal(_ item: InboxItemRecord) async {
-        do { _ = try await inbox.updateItem(item, archived: false); await loadInbox() }
-        catch { inboxError = "撤銷失敗：\(userMessage(for: error))" }
-    }
-
     /// 想去可離線（決策 D6）：連不上時先更新畫面並排入佇列。
     private func toggleInterest(_ entry: SavedEntry) async {
         guard let me = session.trips.currentUserID else { return }
@@ -356,14 +344,12 @@ struct SavedView: View {
         }
     }
 
-    private func dismiss(_ entry: SavedEntry) async {
-        do {
-            try await session.trips.dismissSaved(savedID: entry.id)
-            await reload()
-        } catch {
-            errorMessage = "移除失敗：\(userMessage(for: error))"
-        }
+    private func remove(_ entry: SavedEntry) async throws {
+        try await session.trips.dismissSaved(savedID: entry.id)
+        entries.removeAll { $0.id == entry.id }
+        await reload()
     }
+
 }
 
 /// 收藏列：標題、一行狀態、想去與一個主要動作；其餘（來源、司機卡、當地地圖）點列進詳情。
@@ -376,6 +362,7 @@ struct SavedRow: View {
     let schedule: () -> Void
     let showDay: () -> Void
     let open: () -> Void
+    var remove: (() async throws -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -396,20 +383,23 @@ struct SavedRow: View {
                 Button {
                     toggleInterest()
                 } label: {
-                    Label("\(entry.interestedUserIDs.count) 人想去",
-                          systemImage: me.map(entry.interestedUserIDs.contains) == true ? "heart.fill" : "heart")
+                    CollectionActionLabel(title: "\(entry.interestedUserIDs.count) 人想去",
+                          icon: me.map(entry.interestedUserIDs.contains) == true ? "heart.fill" : "heart")
                         .monospacedDigit()
                 }
                 .disabled(!canEdit)
-                Spacer()
                 if entry.saved.status == .saved && canEdit {
-                    Button("排進旅程", action: schedule)
+                    Button(action: schedule) { CollectionActionLabel(title: "排進旅程", icon: "calendar.badge.plus") }
                 } else if entry.saved.status == .addedToItinerary, scheduledDay != nil {
-                    Button("查看第 \((scheduledDay?.displayOrder ?? 0) + 1) 天", action: showDay)
+                    Button(action: showDay) {
+                        CollectionActionLabel(title: "查看第 \((scheduledDay?.displayOrder ?? 0) + 1) 天", icon: "calendar")
+                    }
                 }
             }
-            .font(.caption)
-            .buttonStyle(.borderless)
+            .buttonStyle(.bordered)
+            if canEdit, let remove {
+                CollectionRemoveButton(name: entry.title, scope: .shared, action: remove)
+            }
         }
     }
 
@@ -535,6 +525,16 @@ struct SavedDetailView: View {
                     Section("在地地圖") {
                         LocalMapButtons(destination: place.mapPoint, origin: nil, mode: .walking, address: place.localAddress)
                     }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if canEdit {
+                    CollectionRemoveButton(name: entry.title, scope: .shared) {
+                        try await repository.dismissSaved(savedID: entry.id)
+                        onChanged()
+                        dismiss()
+                    }
+                    .padding().background(.bar)
                 }
             }
             .navigationTitle("收藏")
@@ -773,5 +773,71 @@ struct AddSavedPlaceView: View {
         } catch {
             errorMessage = "收藏失敗：\(userMessage(for: error))"
         }
+    }
+}
+
+/// 卡片操作的點擊範圍放在按鈕標籤內，邊框與可點區一致。
+struct CollectionActionLabel: View {
+    let title: String
+    let icon: String
+
+    var body: some View {
+        Label(title, systemImage: icon)
+            .font(.subheadline)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(Rectangle())
+    }
+}
+
+/// 個人與共同清單共用移除流程；成功才通知父畫面，失敗保留項目與重試入口。
+struct CollectionRemoveButton: View {
+    enum Scope {
+        case personalPlace, personalProduct, candidate, shared
+
+        var title: String {
+            switch self {
+            case .personalPlace, .shared: "移除收藏"
+            case .personalProduct: "移除想買"
+            case .candidate: "移除候選"
+            }
+        }
+        var message: String {
+            switch self {
+            case .shared: "將從這趟旅程的共同收藏移除，旅伴也會看到變更。已排進行程的站點會保留。"
+            case .personalPlace, .personalProduct, .candidate:
+                "只從你的個人清單移除。原始分享、已分享給旅伴的項目及已排進行程的站點會保留，可從分享收件匣重新加入。"
+            }
+        }
+    }
+    let name: String
+    let scope: Scope
+    let action: () async throws -> Void
+    @State private var confirming = false
+    @State private var removing = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button(role: .destructive) { confirming = true } label: {
+                CollectionActionLabel(title: removing ? "移除中…" : scope.title, icon: "trash")
+            }
+            .buttonStyle(.bordered)
+            .disabled(removing)
+            .accessibilityIdentifier("removeCollection")
+            .alert("移除「\(name)」？", isPresented: $confirming) {
+                Button("確認移除", role: .destructive) { Task { await remove() } }
+                Button("取消", role: .cancel) { }
+            } message: { Text(scope.message) }
+            if let errorMessage { ErrorText(errorMessage) }
+        }
+    }
+
+    @MainActor private func remove() async {
+        guard !removing else { return }
+        removing = true
+        errorMessage = nil
+        defer { removing = false }
+        do { try await action() }
+        catch { errorMessage = "移除失敗：\(userMessage(for: error))" }
     }
 }
