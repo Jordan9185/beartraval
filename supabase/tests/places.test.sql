@@ -79,3 +79,19 @@ select app.upsert_place('apple_mapkit', 'kyoja2', 'Myeongdong Kyoja', 37.5625, 1
 reset role;
 select tests.ok((select address = '南韓首爾特別市明洞명동10길' and address_local = '서울특별시 중구 명동10길 29'
                    from app.places where provider_place_id = 'kyoja2'), 'local address filled once, not overwritten');
+
+-- 資安：替代 key 不能由用戶端預先建立；被植入的遠方替代列不會回給其他人。
+reset role;
+set role authenticated;
+select tests.login(:'owner');
+select tests.throws($$select app.upsert_place('apple_mapkit', 'poi-x~abc', '假店', 37.5, 127.0)$$, 'PT422', '用戶端不能使用保留字元 ~');
+select (app.upsert_place('apple_mapkit', 'poi-guard', '搶註名稱', 35.0, 129.0)).id as far_id \gset
+reset role;
+-- 模擬修正前已被植入、座標在遠方的替代列。
+insert into app.places(provider, provider_place_id, name, latitude, longitude)
+values ('apple_mapkit', 'poi-guard~' || left(md5(format('%s|%s|%s', '真店', round(37.5::numeric, 4), round(127.0::numeric, 4))), 12), '植入替代列', 10.0, 10.0);
+set role authenticated;
+select tests.login('00000000-0000-0000-0000-00000000000a');
+select app.upsert_place('apple_mapkit', 'poi-guard', '真店', 37.5, 127.0) as real_place \gset
+select tests.ok((:'real_place'::app.places).name = '真店' and app.distance_km((:'real_place'::app.places).latitude, (:'real_place'::app.places).longitude, 37.5, 127.0) < 1,
+  '遠方植入的替代列不沿用，取得座標正確的列');

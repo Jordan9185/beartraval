@@ -142,6 +142,7 @@ public struct MapKitPlaceSearch: PlaceSearching {
         if #available(iOS 18, macOS 15, *), let id = item.identifier?.rawValue {
             return id
         }
-        return String(format: "%@@%.5f,%.5f", name, coordinate.latitude, coordinate.longitude)
+        // `~` 保留給服務端產生的替代列（migration 64），店名中的 `~` 換成 `-`。
+        return String(format: "%@@%.5f,%.5f", name.replacingOccurrences(of: "~", with: "-"), coordinate.latitude, coordinate.longitude)
     }
 }
