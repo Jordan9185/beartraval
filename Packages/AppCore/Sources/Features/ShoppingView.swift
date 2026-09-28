@@ -337,6 +337,7 @@ public struct ShoppingListView: View {
             let item = try await service.addShoppingItem(tripID: tripID, name: name, note: nil, url: nil, clientOpID: UUID())
             if let newImage { try await service.setShoppingImage(tripID: tripID, itemID: item.id, jpeg: newImage) }
             newName = ""
+            nameFocused = false
             newImage = nil
             newPhoto = nil
             await reload()
@@ -406,21 +407,31 @@ struct ShoppingEntryLink: View {
     let context: ShoppingRowContext
 
     var body: some View {
-        NavigationLink {
-            ShoppingItemDetailView(service: context.service, tripID: context.tripID, entry: entry, canEdit: context.canEdit,
-                                   merchantScreen: context.canEdit && entry.status == .unscheduled ? context.merchantScreen(entry) : nil,
-                                   discoveryRepository: context.discoveryRepository, regionName: context.regionName,
-                                   regionCountry: context.regionCountry,
-                                   itineraryMatches: context.itineraryMatches[entry.id] ?? [],
-                                   itineraryMatchesLoaded: context.itineraryMatchesLoaded,
-                                   onOpenDay: context.onOpenDay,
-                                   onChanged: context.changed)
-        } label: {
-            ShoppingRow(entry: entry, me: context.service.currentUserID, canEdit: context.canEdit, service: context.service,
-                        quantityPending: context.pendingQuantityIDs.contains(entry.id),
-                        itineraryMatches: context.itineraryMatches[entry.id] ?? [],
-                        itineraryMatchesLoaded: context.itineraryMatchesLoaded,
-                        toggle: { context.toggle(entry) })
+        HStack(alignment: .top) {
+            Button { context.toggle(entry) } label: {
+                Image(systemName: entry.isPurchased ? "checkmark.circle.fill" : "circle")
+                    .font(.title3).foregroundStyle(entry.isPurchased ? Color.green : Color.secondary)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .disabled(!context.canEdit || context.pendingQuantityIDs.contains(entry.id))
+            .accessibilityIdentifier("purchase-\(entry.item.name)")
+            .accessibilityLabel(entry.isPurchased ? "撤銷已購買" : "標記已購買")
+            NavigationLink {
+                ShoppingItemDetailView(service: context.service, tripID: context.tripID, entry: entry, canEdit: context.canEdit,
+                                       merchantScreen: context.canEdit && entry.status == .unscheduled ? context.merchantScreen(entry) : nil,
+                                       discoveryRepository: context.discoveryRepository, regionName: context.regionName,
+                                       regionCountry: context.regionCountry,
+                                       itineraryMatches: context.itineraryMatches[entry.id] ?? [],
+                                       itineraryMatchesLoaded: context.itineraryMatchesLoaded,
+                                       onOpenDay: context.onOpenDay,
+                                       onChanged: context.changed)
+            } label: {
+                ShoppingRow(entry: entry, me: context.service.currentUserID, canEdit: context.canEdit, service: context.service,
+                            quantityPending: context.pendingQuantityIDs.contains(entry.id),
+                            itineraryMatches: context.itineraryMatches[entry.id] ?? [],
+                            itineraryMatchesLoaded: context.itineraryMatchesLoaded)
+            }
         }
     }
 }
@@ -433,22 +444,12 @@ struct ShoppingRow: View {
     var quantityPending = false
     let itineraryMatches: [ShoppingItineraryMatch]
     let itineraryMatchesLoaded: Bool
-    let toggle: () -> Void
 
     var body: some View {
         HStack(alignment: .top) {
             if let path = entry.item.imagePath {
                 ShoppingImage(path: path, service: service).frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
             }
-            Button(action: toggle) {
-                Image(systemName: entry.isPurchased ? "checkmark.circle.fill" : "circle").font(.title3)
-                    .foregroundStyle(entry.isPurchased ? Color.green : Color.secondary)
-            }
-            .buttonStyle(.borderless)
-            .disabled(!canEdit || quantityPending)
-            .accessibilityIdentifier("purchase-\(entry.item.name)")
-            .accessibilityLabel(entry.isPurchased ? "撤銷已購買" : "標記已購買")
-
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.item.name).strikethrough(entry.isPurchased)
                 if entry.item.purchaseTiming == "before_trip" {

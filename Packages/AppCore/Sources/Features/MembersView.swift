@@ -11,6 +11,9 @@ struct MembersView: View {
     @State private var currentRole: TripRole?
     @State private var offer: OwnershipOffer?
     @State private var confirmingLeave = false
+    @State private var departure: TripDeparturePreview?
+    @State private var loadingDeparture = false
+    @State private var leaving = false
     @State private var ownershipTarget: TripMember?
     @State private var members: [TripMember] = []
     @State private var inviteRole: TripRole = .editor
@@ -76,7 +79,7 @@ struct MembersView: View {
             Section {
                 if (currentRole ?? myRole) == .owner {
                     Text("退出前，請先在成員選單邀請接任；對方接受後才能退出。")
-                } else { Button("退出這趟旅程", role: .destructive) { confirmingLeave = true } }
+                } else { Button(loadingDeparture ? "正在核對分工…" : "退出這趟旅程", role: .destructive) { Task { await prepareDeparture() } }.disabled(loadingDeparture) }
             } footer: {
                 Text("共同內容與已完成紀錄留給旅伴；未完成分工回待認領。私人來源及用品不轉公開，退出後無法修改該旅程。")
             }
@@ -84,8 +87,35 @@ struct MembersView: View {
         }
         .navigationTitle("成員")
         .task { await reload() }
-        .confirmationDialog("退出後將無法同步修改這趟旅程。", isPresented: $confirmingLeave, titleVisibility: .visible) {
-            Button("確認退出", role: .destructive) { Task { await leave() } }
+        .sheet(isPresented: $confirmingLeave) {
+            NavigationStack {
+                List {
+                    Section {
+                        Text("退出後無法同步修改這趟旅程。共同內容與已完成紀錄會保留，以下未完成分工回待認領。")
+                    }
+                    if let departure {
+                        Section("需要旅伴重新認領") {
+                            if departure.items.isEmpty { Text("目前沒有分配給你的未完成共同物品。") }
+                            ForEach(departure.items) { item in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(item.name)
+                                    Text("\(item.kind == "packing" ? "用品" : "待買")・\(item.quantity) 份・\(item.carrying == true ? (item.buying ? "攜帶及採買" : "攜帶") : "採買")")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        Section {
+                            Text("私人用品不會轉為共同物品；退出後無法從這趟旅程存取。")
+                            Button(leaving ? "退出中…" : "確認退出", role: .destructive) { Task { await leave() } }
+                                .disabled(leaving)
+                        }
+                    }
+                    if let errorMessage { ErrorText(errorMessage) }
+                }
+                .navigationTitle("退出前確認")
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { confirmingLeave = false }.disabled(leaving) } }
+                .interactiveDismissDisabled(leaving)
+            }
         }
         .confirmationDialog("邀請這位旅伴接任擁有者？對方接受後，你會改為可編輯旅伴。", isPresented: Binding(get: { ownershipTarget != nil }, set: { if !$0 { ownershipTarget = nil } }), titleVisibility: .visible) {
             if let target = ownershipTarget { Button("邀請 \(target.displayName) 接任") { Task { await transfer(to: target.userID) } } }
@@ -100,9 +130,28 @@ struct MembersView: View {
         do { try await session.trips.respondOwnership(tripID: trip.id, from: offer.from_user, accept: accept); await reload() }
         catch { errorMessage = userMessage(for: error) }
     }
-    private func leave() async {
-        do { try await session.trips.leaveTrip(tripID: trip.id); dismiss() }
+    private func prepareDeparture() async {
+        loadingDeparture = true
+        errorMessage = nil
+        defer { loadingDeparture = false }
+        do { departure = try await session.trips.previewDeparture(tripID: trip.id); confirmingLeave = true }
         catch { errorMessage = userMessage(for: error) }
+    }
+    private func leave() async {
+        guard let departure else { return }
+        leaving = true
+        defer { leaving = false }
+        do {
+            try await session.trips.leaveTrip(tripID: trip.id, expectedRevision: departure.revision)
+            confirmingLeave = false
+            dismiss()
+        } catch BackendError.conflict("STALE_REVISION") {
+            self.departure = nil
+            do {
+                self.departure = try await session.trips.previewDeparture(tripID: trip.id)
+                errorMessage = "旅伴剛剛修改了資料，已更新影響清單，請重新確認。"
+            } catch { errorMessage = userMessage(for: error) }
+        } catch { errorMessage = userMessage(for: error) }
     }
     private func reload() async {
         do {

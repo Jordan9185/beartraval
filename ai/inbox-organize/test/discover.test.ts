@@ -34,3 +34,15 @@ test("商品店家候選必須由引用文字支持具名店面", () => {
   ] };
   assert.deepEqual(verifiedSuggestions(input, sources, "product_store").map((item) => item.name), ["Aesop Seongsu"]);
 });
+
+test("中文譯名保留，日文原名必須有引用依據", () => {
+  const sources = [{ url: "https://example.com/japan", title: "喫茶テスト", citedText: "東京都渋谷区測試地址" }];
+  const candidate = { name: "測試咖啡", korean_name: "喫茶テスト", address_local: "東京都渋谷区測試地址",
+    search_query: "喫茶テスト", reason: "日本店家", source_url: sources[0]!.url };
+  const found = verifiedSuggestions({ candidates: [candidate] }, sources);
+  assert.equal(found[0]?.name, "測試咖啡");
+  assert.equal(found[0]?.korean_name, "喫茶テスト");
+  const unsupported = verifiedSuggestions({ candidates: [{ ...candidate, korean_name: "捏造した支店" }] }, sources);
+  assert.equal(unsupported[0]?.korean_name, null);
+  assert.equal(unsupported[0]?.address_local, candidate.address_local);
+});

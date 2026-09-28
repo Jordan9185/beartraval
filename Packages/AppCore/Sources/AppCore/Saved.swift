@@ -44,6 +44,8 @@ public struct SavedPlace: Codable, Identifiable, Hashable, Sendable {
     /// 截圖或有來源的網頁查得的地址線索；不代表已確認座標。
     public var addressHint: String?
     public var addressSourceURL: String?
+    /// 來源確認的當地店名，保留原始輸入 rawLabel。
+    public var nativeName: String? = nil
     /// 使用者選日期後的行程點；沒有定位時仍可指向 pending_text Stop。
     public var arrangementDetached: Bool?
     public var plannedStopId: UUID?
@@ -73,6 +75,7 @@ public struct SavedPlace: Codable, Identifiable, Hashable, Sendable {
         case addedBy = "added_by"
         case addressHint = "address_hint"
         case addressSourceURL = "address_source_url"
+        case nativeName = "native_name"
         case arrangementDetached = "arrangement_detached"
         case plannedStopId = "planned_stop_id"
         case aiSuppressed = "ai_suppressed"
@@ -259,11 +262,11 @@ extension TripRepository {
         catch { throw BackendError.from(error) }
     }
 
-    public func setSavedAddressHint(savedID: UUID, address: String, sourceURL: String?) async throws {
-        struct Params: Encodable { let p_saved_id: UUID, p_address_hint: String, p_source_url: String? }
+    public func setSavedAddressHint(savedID: UUID, address: String, sourceURL: String?, nativeName: String? = nil) async throws {
+        struct Params: Encodable { let p_saved_id: UUID, p_address_hint: String, p_source_url: String?, p_native_name: String? }
         do {
             try await client.rpc("set_saved_address_hint", params: Params(
-                p_saved_id: savedID, p_address_hint: address, p_source_url: sourceURL
+                p_saved_id: savedID, p_address_hint: address, p_source_url: sourceURL, p_native_name: nativeName
             )).execute()
         } catch { throw BackendError.from(error) }
     }

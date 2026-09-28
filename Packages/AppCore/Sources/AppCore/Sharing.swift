@@ -230,9 +230,31 @@ extension TripRepository {
         do { try await client.rpc("respond_trip_ownership", params: Params(p_trip_id: tripID, p_from: from, p_accept: accept)).execute() }
         catch { throw BackendError.from(error) }
     }
-    public func leaveTrip(tripID: UUID) async throws {
+    public func leaveTrip(tripID: UUID, expectedRevision: Int? = nil) async throws {
+        struct Params: Encodable { let p_trip_id: UUID; let p_expected_revision: Int? }
+        do { try await client.rpc("leave_trip", params: Params(p_trip_id: tripID, p_expected_revision: expectedRevision)).execute() }
+        catch { throw BackendError.from(error) }
+    }
+}
+
+
+public struct TripDeparturePreview: Decodable, Sendable {
+    public struct Item: Decodable, Identifiable, Sendable {
+        public let id: UUID
+        public let kind: String
+        public let name: String
+        public let quantity: Int
+        public let carrying: Bool?
+        public let buying: Bool
+    }
+    public let revision: Int
+    public let items: [Item]
+}
+
+extension TripRepository {
+    public func previewDeparture(tripID: UUID) async throws -> TripDeparturePreview {
         struct Params: Encodable { let p_trip_id: UUID }
-        do { try await client.rpc("leave_trip", params: Params(p_trip_id: tripID)).execute() }
+        do { return try await client.rpc("preview_trip_departure", params: Params(p_trip_id: tripID)).execute().value }
         catch { throw BackendError.from(error) }
     }
 }

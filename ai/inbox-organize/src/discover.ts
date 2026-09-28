@@ -41,7 +41,8 @@ export function verifiedSuggestions(raw: unknown, sources: SearchCitation[], pur
     const cited = sources.find((source) => source.url === new URL(candidate.source_url).href);
     const normalizedSource = `${cited?.title ?? ""} ${cited?.citedText ?? ""}`.replace(/\s+/g, "").toLocaleLowerCase();
     const address = candidate.address_local?.trim() ?? null;
-    return { ...candidate, address_local: address && normalizedSource.includes(address.replace(/\s+/g, "").toLocaleLowerCase())
+    const nativeName = candidate.korean_name?.trim() ?? null;
+    return { ...candidate, korean_name: nativeName && normalizedSource.includes(nativeName.replace(/\s+/g, "").toLocaleLowerCase()) ? nativeName : null, address_local: address && normalizedSource.includes(address.replace(/\s+/g, "").toLocaleLowerCase())
       ? address : null };
   });
 }

@@ -433,6 +433,7 @@ struct SavedDetailView: View {
     let onOpenDay: (UUID) -> Void
     @State private var addressHint: String?
     @State private var addressSourceURL: String?
+    @State private var nativeName: String?
     @State private var candidates: [DiscoveredPlace] = []
     @State private var searchingAddress = false
     @State private var addressMessage: String?
@@ -445,7 +446,10 @@ struct SavedDetailView: View {
         NavigationStack {
             Form {
                 Section {
-                    Text(entry.title).font(.title3.weight(.semibold))
+                    Text(entry.title).font(.title3.weight(.semibold)).textSelection(.enabled)
+                    if let localName = nativeName ?? entry.saved.nativeName {
+                        Text(localName).font(.subheadline).textSelection(.enabled)
+                    }
                     if canEdit {
                         Button(entry.saved.aiSuppressed == true ? "恢復 AI 安排建議" : "這趟不安排") {
                             Task {
@@ -465,7 +469,7 @@ struct SavedDetailView: View {
                     if !entry.isConfirmed {
                         Label("未定位，不計入路線", systemImage: "mappin.slash").font(.caption).foregroundStyle(.secondary)
                     }
-                    if searchingAddress { ProgressView("正在補查韓文地址…") }
+                    if searchingAddress { ProgressView("正在補查當地店名與地址…") }
                     if let addressMessage { Text(addressMessage).font(.caption).foregroundStyle(.secondary) }
                 }
                 if canEdit && entry.saved.status == .saved {
@@ -512,7 +516,7 @@ struct SavedDetailView: View {
                                     Button("帶入這個地址") { Task { await accept(candidate) } }
                                         .buttonStyle(.bordered)
                                 }
-                                LocalMapSearchButtons(name: candidate.searchQuery, localAddress: candidate.addressLocal, countryCode: "KR")
+                                LocalMapSearchButtons(name: candidate.searchQuery, localAddress: candidate.addressLocal, countryCode: tripCountry)
                                 if let url = URL(string: candidate.sourceURL), url.scheme == "https" {
                                     Link("查看網頁來源", destination: url).font(.caption)
                                 }
@@ -533,9 +537,9 @@ struct SavedDetailView: View {
                                        fallbackAddress: addressHint ?? entry.saved.addressHint)
                     } else {
                         let country = tripCountry ?? LocalMapCountry.guess(name: entry.saved.rawLabel, timeZone: nil)
-                        TaxiCardButton(unlocatedName: entry.saved.rawLabel, countryCode: country,
+                        TaxiCardButton(unlocatedName: nativeName ?? entry.saved.nativeName ?? entry.saved.rawLabel, countryCode: country,
                                        addressHint: addressHint ?? entry.saved.addressHint)
-                        LocalMapSearchButtons(name: entry.saved.rawLabel, localAddress: addressHint ?? entry.saved.addressHint, countryCode: country)
+                        LocalMapSearchButtons(name: nativeName ?? entry.saved.nativeName ?? entry.saved.rawLabel, localAddress: addressHint ?? entry.saved.addressHint, countryCode: country)
                     }
                 }
                 if let place = entry.place, place.isInKorea {
@@ -585,14 +589,13 @@ struct SavedDetailView: View {
     }
 
     private func discoverMissingAddress() async {
-        guard !didSearchAddress, canEdit, !entry.isConfirmed, entry.addressLabel == nil,
-              (tripCountry ?? LocalMapCountry.guess(name: entry.saved.rawLabel, timeZone: nil)) == "KR" else { return }
+        guard !didSearchAddress, canEdit, !entry.isConfirmed, entry.addressLabel == nil else { return }
         didSearchAddress = true
         searchingAddress = true
         defer { searchingAddress = false }
         do {
             let found = try await discoveryRepository.discoverPlaces(query: entry.saved.rawLabel,
-                context: "韓國旅程。\(entry.source?.summary ?? "")")
+                context: "旅程國家：\(tripCountry ?? "未知，不猜國家或分店")。\(entry.source?.summary ?? "")")
             let addressed = found.filter { $0.addressLocal != nil }
             if addressed.count == 1, let only = addressed.first {
                 await accept(only)
@@ -613,8 +616,9 @@ struct SavedDetailView: View {
         guard let address = candidate.addressLocal else { return }
         do {
             let source = URL(string: candidate.sourceURL)?.scheme == "https" ? candidate.sourceURL : nil
-            try await repository.setSavedAddressHint(savedID: entry.id, address: address, sourceURL: source)
+            try await repository.setSavedAddressHint(savedID: entry.id, address: address, sourceURL: source, nativeName: candidate.koreanName)
             addressHint = address
+            nativeName = candidate.koreanName
             addressSourceURL = source
             candidates = []
             addressMessage = "已保存地址線索；地圖定位仍待確認。"

@@ -118,7 +118,7 @@ Deno.serve(async (req) => {
     })),
     saved: (saved.data ?? []).map((s) => ({
       id: s.id,
-      label: s.destination_name ?? placeName(s.place_id) ?? s.raw_label,
+      label: s.native_name ?? placeName(s.place_id) ?? s.raw_label,
       category: s.category,
       place_confirmed: s.place_id !== null,
       address: s.address_hint ?? null,
