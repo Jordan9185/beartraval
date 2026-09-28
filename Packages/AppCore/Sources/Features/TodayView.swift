@@ -94,6 +94,7 @@ struct TodayView: View {
                 NavigationLink("檢視整趟旅程的安排建議") {
                     TripAIPlanView(session: session, trip: snapshot.trip) { Task { await store.reload() } }
                 }
+                TripPreparationSummary(session: session, tripID: snapshot.trip.id, revision: snapshot.revision)
                 NavigationLink("旅行必備用品") {
                     PackingView(session: session, trip: snapshot.trip, canEdit: store.myRole?.canEdit == true)
                 }

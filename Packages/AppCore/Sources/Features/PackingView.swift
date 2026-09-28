@@ -265,3 +265,50 @@ private struct PackingEditView: View {
         catch { errorMessage = "未儲存：\(userMessage(for: error))。你的輸入仍保留。" }
     }
 }
+
+/// 旅程與 Today 共用的準備摘要；只讀資料，不觸發 AI 或自動送出修改。
+struct TripPreparationSummary: View {
+    let session: SessionModel
+    let tripID: UUID
+    let revision: Int
+    @State private var items: [PackingItem]?
+    @State private var pending = 0
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let items {
+                let personal = items.filter { !$0.shared }
+                let shared = items.filter(\.shared)
+                Text("我的用品：已裝好 \(personal.filter(\.packed).count)／\(personal.count) 項")
+                Text("共同用品：已裝好 \(shared.filter(\.packed).count)／\(shared.count) 項")
+                if items.isEmpty { Text("還沒有用品，進入清單可新增或選用 AI 建議。") }
+                if pending > 0 { Text("含 \(pending) 項此裝置待同步修改").foregroundStyle(.orange) }
+            } else if errorMessage == nil { ProgressView("讀取準備進度…") }
+            if let errorMessage { Text(errorMessage) }
+        }
+        .font(.caption).foregroundStyle(.secondary)
+        .task(id: "\(tripID)-\(revision)") { await load() }
+    }
+
+    private func load() async {
+        items = nil
+        pending = 0
+        errorMessage = nil
+        guard let owner = session.trips.currentUserID else { errorMessage = "登入後查看準備進度。"; return }
+        do {
+            let latest = try await session.trips.packingItems(tripID: tripID)
+            guard !Task.isCancelled, session.trips.currentUserID == owner else { return }
+            try await PackingJournal.shared.cache(latest, tripID: tripID, owner: owner)
+            let visible = await PackingJournal.shared.items(tripID: tripID, owner: owner)
+            let waiting = await PackingJournal.shared.pendingCount(tripID: tripID, owner: owner)
+            guard !Task.isCancelled, session.trips.currentUserID == owner else { return }
+            items = visible
+            pending = waiting
+        } catch {
+            guard !Task.isCancelled, session.trips.currentUserID == owner else { return }
+            // 未取得資料不能把未知顯示成零項／全部完成。
+            errorMessage = "準備進度暫時無法更新，可進用品清單查看此裝置已保存的內容。"
+        }
+    }
+}

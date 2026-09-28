@@ -405,6 +405,7 @@ struct TripDetailView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("出發準備") {
+                TripPreparationSummary(session: session, tripID: trip.id, revision: revision ?? trip.revision)
                 NavigationLink("旅行必備用品") {
                     PackingView(session: session, trip: trip, canEdit: myRole?.canEdit == true)
                 }
