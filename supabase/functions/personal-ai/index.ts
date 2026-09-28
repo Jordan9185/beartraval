@@ -1,6 +1,7 @@
 // App 查自己的工作；Mac 以專用憑證領取限定帳號的工作，不持有資料庫或 ChatGPT 雲端憑證。
 import { activitySummary } from "../_shared/personal-ai-activity.ts";
-import { adminClient, reply } from "../_shared/personal-ai.ts";
+import { personalAIClaimOrder } from "../_shared/personal-ai-access.ts";
+import { adminClient, allowedPersonalAIUsers, reply } from "../_shared/personal-ai.ts";
 
 const UUID = /^[0-9a-f-]{36}$/i;
 async function sameSecret(a: string, b: string): Promise<boolean> {
@@ -40,14 +41,24 @@ Deno.serve(async (req) => {
     if (!job) return reply({ error: "NOT_FOUND" }, 404);
     return reply(job.result ?? { status: job.status, job_id: body.job_id, reason: job.reason ?? (job.status === "running" ? "personal_ai_running" : "personal_ai_waiting") });
   }
-  const owner = Deno.env.get("PERSONAL_AI_OWNER_ID");
-  if (!owner || !await sameSecret(req.headers.get("X-Personal-AI-Token") ?? "",
+  const owners = allowedPersonalAIUsers();
+  if (!owners.length || !await sameSecret(req.headers.get("X-Personal-AI-Token") ?? "",
     Deno.env.get("PERSONAL_AI_WORKER_TOKEN") ?? "")) return reply({ error: "UNAUTHENTICATED" }, 401);
 
   if (body.action === "claim") {
-    const { data, error } = await admin.rpc("claim_personal_ai", { p_owner: owner });
-    if (error) return reply({ error: "QUEUE_ERROR" }, 503);
-    return reply({ job: data?.id ? data : null });
+    const now = new Date().toISOString();
+    const { data: candidates, error: readError } = await admin.from("personal_ai_jobs").select("owner_id")
+      .in("owner_id", owners).lte("available_at", now)
+      .or(`status.eq.queued,and(status.eq.running,lease_until.lt.${now})`)
+      .order("created_at").order("id");
+    if (readError) return reply({ error: "QUEUE_ERROR" }, 503);
+    for (const owner of personalAIClaimOrder(owners, candidates ?? [])) {
+      // 沿用資料庫的原子領取、過期工作清理與租約，不讓兩個工作程式領到同一筆。
+      const { data, error } = await admin.rpc("claim_personal_ai", { p_owner: owner });
+      if (error) return reply({ error: "QUEUE_ERROR" }, 503);
+      if (data?.id) return reply({ job: data });
+    }
+    return reply({ job: null });
   }
   if (!UUID.test(body.job_id ?? "") || !UUID.test(body.lease ?? "")) return reply({ error: "INVALID_REQUEST" }, 400);
   if (body.action === "complete") {
@@ -55,6 +66,12 @@ Deno.serve(async (req) => {
       || JSON.stringify(body.result).length > 500_000 || !/^codex\/gpt-[a-z0-9.-]+$/.test(body.model ?? "")) {
       return reply({ error: "INVALID_RESULT" }, 422);
     }
+    // 由資料庫決定結果歸屬，不採信 Mac 或 App 傳入的帳號。
+    const { data: job, error: readError } = await admin.from("personal_ai_jobs").select("owner_id")
+      .eq("id", body.job_id).in("owner_id", owners).maybeSingle();
+    if (readError) return reply({ error: "READ_ERROR" }, 503);
+    if (!job) return reply({ accepted: false, terminal: true });
+    const owner = job.owner_id;
     const { data, error } = await admin.rpc("finish_personal_ai", {
       p_owner: owner, p_id: body.job_id, p_lease: body.lease, p_result: body.result, p_model: body.model,
     });
@@ -72,7 +89,7 @@ Deno.serve(async (req) => {
         available_at: new Date(now.getTime() + 15 * 60_000).toISOString(), updated_at: now.toISOString() }
       : { lease_until: new Date(now.getTime() + 3 * 60_000).toISOString(), updated_at: now.toISOString() };
     const { data, error } = await admin.from("personal_ai_jobs").update(change).eq("id", body.job_id)
-      .eq("owner_id", owner).eq("lease", body.lease).eq("status", "running").gt("lease_until", now.toISOString())
+      .in("owner_id", owners).eq("lease", body.lease).eq("status", "running").gt("lease_until", now.toISOString())
       .select("kind,context").maybeSingle();
     if (error) return reply({ error: "QUEUE_ERROR" }, 503);
     if (data?.kind === "parse" && deferred) await admin.rpc("record_parse_progress", {

@@ -1,10 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
+import { personalAIUsers } from "./personal-ai-access.ts";
 
 export const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { "Content-Type": "application/json" },
 });
 export const adminClient = () => createClient(Deno.env.get("SUPABASE_URL")!,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { db: { schema: "app" } });
+export const allowedPersonalAIUsers = () => personalAIUsers(Deno.env.get("PERSONAL_AI_ALLOWED_USER_IDS"),
+  Deno.env.get("PERSONAL_AI_OWNER_ID"));
 
 // 每個入口先完成原有的 RLS／角色檢查，再把當下資料交給個人 Mac。
 export async function enqueuePersonalAI(authorization: string, kind: string, input: unknown,
@@ -13,7 +16,7 @@ export async function enqueuePersonalAI(authorization: string, kind: string, inp
   const { data: auth, error } = await admin.auth.getUser(authorization.replace(/^Bearer\s+/i, ""));
   const owner = auth.user?.id;
   if (error || !owner) return reply({ error: "UNAUTHENTICATED" }, 401);
-  if (owner !== Deno.env.get("PERSONAL_AI_OWNER_ID")) {
+  if (!allowedPersonalAIUsers().includes(owner)) {
     return reply({ status: "failed", reason: "personal_ai_unavailable" });
   }
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([kind, input, context])));

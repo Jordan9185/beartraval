@@ -13,6 +13,7 @@ struct TripListView: View {
     @State private var showsCreate = false
     @State private var showsJoin = false
     @State private var showsAccount = false
+    @State private var showsAIActivity = false
     @State private var showsInbox = false
     @State private var showsCapture = false
     @State private var captured = false
@@ -61,6 +62,7 @@ struct TripListView: View {
             .toolbar {
                 Button("交給 AI 整理", systemImage: "tray.and.arrow.down") { showsCapture = true }
                 Menu("更多", systemImage: "ellipsis.circle") {
+                    Button("AI 進度", systemImage: "clock") { showsAIActivity = true }
                     Button("建立旅程", systemImage: "plus") { showsCreate = true }
                     Button("分享收件匣", systemImage: "tray") { showsInbox = true }
                     Button("加入好友的旅程", systemImage: "person.badge.plus") { showsJoin = true }
@@ -76,6 +78,7 @@ struct TripListView: View {
                 }
             }
             .sheet(isPresented: $showsAccount) { AccountView(session: session) }
+            .sheet(isPresented: $showsAIActivity) { AIActivityView(monitor: session.aiActivity) }
             .sheet(isPresented: $showsInbox) { InboxView(session: session) }
             .onChange(of: showsInbox) { _, open in
                 if !open { Task { await reload(); onTripsChanged(nil, false) } }

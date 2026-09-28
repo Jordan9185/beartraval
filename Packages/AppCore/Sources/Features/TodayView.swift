@@ -16,6 +16,7 @@ struct TodayView: View {
     @State private var adding: SavedEntry?
     @State private var showsAssistant = false
     @State private var showsAccount = false
+    @State private var showsAIActivity = false
     @State private var selectedStop: Stop?
     @State private var todayBase: BaseRoute?
     @State private var legToCompare: LegComparison?
@@ -40,6 +41,7 @@ struct TodayView: View {
                     Button("AI 助手", systemImage: "sparkles") { showsAssistant = true }
                 }
                 Menu("更多", systemImage: "ellipsis.circle") {
+                    Button("AI 進度", systemImage: "clock") { showsAIActivity = true }
                     if store.trips.count > 1 {
                         Picker("旅程", selection: Binding(get: { store.selectedTripID }, set: { store.selectedTripID = $0 })) {
                             ForEach(store.trips) { Text($0.name).tag(Optional($0.id)) }
@@ -55,6 +57,7 @@ struct TodayView: View {
             .onChange(of: store.snapshot?.revision) { openRequestedDay() }
             .task { openRequestedDay() }
             .sheet(isPresented: $showsAccount) { AccountView(session: session) }
+            .sheet(isPresented: $showsAIActivity) { AIActivityView(monitor: session.aiActivity) }
             .sheet(isPresented: $showsAssistant) {
                 if let snapshot = store.snapshot {
                     AssistantView(session: session, snapshot: snapshot, canApply: store.myRole?.canEdit == true) {

@@ -32,7 +32,7 @@ public struct AIJobActivity: Decodable, Identifiable, Equatable, Sendable {
         if isActive && reason == "personal_ai_limit" { return "等待訂閱額度恢復" }
         if isActive && reason == "personal_ai_login" { return "需要在 Mac 重新登入 ChatGPT" }
         switch status {
-        case "queued": return "排隊中 · 第 \(queuePosition ?? 1) 筆"
+        case "queued": return "排隊中 · 我的第 \(queuePosition ?? 1) 筆"
         case "running": return "正在\(title)"
         case "completed": return "已完成 · 結果已保存"
         case "failed": return reason == "superseded" ? "內容已更新，舊工作已停止" : "處理未完成，可回原項目重試"

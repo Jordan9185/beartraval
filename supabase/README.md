@@ -193,7 +193,7 @@ swift test --package-path Packages/AppCore
 
 ## 個人 GPT 工作佇列
 
-`personal-ai` 自行驗證 App JWT（查本人工作狀態）或 `X-Personal-AI-Token`（只處理設定 owner 的工作），所以 Gateway `verify_jwt=false`。其他五個入口仍驗證 JWT 與原有 RLS／角色。
+`personal-ai` 自行驗證 App JWT（查本人工作狀態）或 `X-Personal-AI-Token`（只處理允許名單內帳號的工作），所以 Gateway `verify_jwt=false`。其他五個入口仍驗證 JWT 與原有 RLS／角色。
 
 `enqueue_personal_ai`、`claim_personal_ai`、`finish_personal_ai` 僅授予 service_role；一般 App 無法直接讀取工作輸入或租約。Mac 沒有 service_role key。完成以租約鎖定，同一交易寫回原草稿與工作結果；原文 attempt、項目 revision、旅程成員權限仍核對。關機重啟後重新領取過期工作，已生成的本機結果優先寫回。
 

@@ -11,7 +11,7 @@ struct AIActivityTests {
         return try JSONDecoder().decode(AIJobActivity.self, from: JSONSerialization.data(withJSONObject: raw))
     }
     @Test func queuedAndRunningHaveDifferentProgress() throws {
-        #expect(try job(status: "queued").statusText == "排隊中 · 第 3 筆")
+        #expect(try job(status: "queued").statusText == "排隊中 · 我的第 3 筆")
         #expect(try job(status: "running").statusText == "正在查找店家")
         #expect(try job(status: "queued", reason: "personal_ai_limit").statusText == "等待訂閱額度恢復")
         #expect(try job(status: "queued", reason: "personal_ai_login").statusText.contains("重新登入"))
