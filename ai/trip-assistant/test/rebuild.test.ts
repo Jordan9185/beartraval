@@ -96,3 +96,12 @@ test("原行程變更只接受非固定站，移除須對應原日且不接受�
   assert.equal(validateAnswer(context, { ...base, arrangements: [action, { ...action, kind: "stop_remove" }] }).answer.arrangements?.length, 0);
   assert.equal(validateAnswer(context, { ...base, arrangements: [{ ...action, kind: "stop_remove", day_id: "other-day" }] }).answer.arrangements?.length, 0);
 });
+
+test("安排時間必須是合法當地時刻，移除操作不能夾帶時間變更", () => {
+  const context = structuredClone(SEOUL); const day = context.days[0]!; const stop = day.stops[0]!;
+  stop.fixed = false;
+  const action = { kind: "stop_move" as const, item_id: stop.id, day_id: day.id, start_time: "09:30", source_url: null, anchor_stop_id: null, reason: "使用者指定" };
+  assert.equal(validateAnswer(context, { ...base, arrangements: [action] }).answer.arrangements?.length, 1);
+  assert.equal(validateAnswer(context, { ...base, arrangements: [{ ...action, start_time: "24:30" }] }).answer.arrangements?.length, 0);
+  assert.equal(validateAnswer(context, { ...base, arrangements: [{ ...action, kind: "stop_remove" }] }).answer.arrangements?.length, 0);
+});

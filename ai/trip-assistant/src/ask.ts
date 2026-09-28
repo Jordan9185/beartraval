@@ -1,4 +1,4 @@
-import { citedSources, type SearchCitation } from "../../inbox-organize/src/discover.ts";
+import { citedSources, type SearchCitation } from "../../shared/citations.ts";
 // Calls Claude for a trip-scoped answer, then validates it against the trip
 // data. Shared by the ask-trip Edge Function and the eval harness.
 

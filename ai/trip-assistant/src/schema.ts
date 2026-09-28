@@ -95,7 +95,7 @@ export const AssistantAnswer = z.object({
   citations: z.array(Citation),
   recommendations: z.array(NearbyRecommendation).max(6).optional(),
   arrangements: z.array(z.object({ kind: z.enum(["saved", "shopping", "stop_move", "stop_remove"]), item_id: z.string(), day_id: z.string(),
-    source_url: z.string().nullable(), anchor_stop_id: z.string().nullable(), matched_area: z.string().nullable().optional(), reason: z.string() })).max(30).optional(),
+    start_time: z.string().nullable().optional(), source_url: z.string().nullable(), anchor_stop_id: z.string().nullable(), matched_area: z.string().nullable().optional(), reason: z.string() })).max(30).optional(),
   packing_suggestions: z.array(z.object({ name: z.string().min(1).max(120), quantity: z.number().int().min(1).max(999), reason: z.string() })).max(30).optional(),
   checked_at: z.string().optional(),
   shopping_proposal: z.object({ item_id: z.string(), day_id: z.string(), source_url: z.string(),

@@ -44,6 +44,7 @@ export function validateAnswer(context: TripContext, answer: AssistantAnswer): {
   }
 
   result.arrangements = (result.arrangements ?? []).filter((action, index, actions) => {
+    if (action.start_time && (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(action.start_time) || action.kind === "stop_remove")) return false;
     if (result.cannot_determine || !context.days.some((day) => day.id === action.day_id)
       || actions.findIndex((a) => a.kind === action.kind && a.item_id === action.item_id) !== index) return false;
     if (action.kind === "stop_move" || action.kind === "stop_remove") {

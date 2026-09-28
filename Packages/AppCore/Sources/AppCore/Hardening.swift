@@ -11,7 +11,7 @@ extension BackendError {
         case .unauthenticated: "登入已失效，請重新登入。"
         case .forbidden: "你的權限不足（僅檢視）。如需修改，請請擁有者調整權限。"
         case .notFound: "找不到這筆資料，可能已被刪除。"
-        case .staleRevision: "行程剛被其他人修改，已載入最新版本，請重新確認。"
+        case .staleRevision: "資料剛被修改，請重新載入最新版本後確認。"
         case .conflict(let code):
             switch code {
             case "AMBIGUOUS_DUPLICATE": "已有同名來源的未確認收藏，請先到收藏清單核對分店，不會自動合併。"
@@ -26,6 +26,10 @@ extension BackendError {
         case .invalid(let code):
             switch code {
             case "PLACE_UNRESOLVED": "地點尚未確認，無法加入行程或計算路線。"
+            case "INVALID_TIME": "請輸入有效的當地時間，例如 09:30。"
+            case "EXISTING_STOP_TIME": "這家店已在行程內，新增安排不會改動原時間；請另提出修改原站時間。"
+            case "FIXED_STOP": "固定行程不能由 AI 移動、移除或改時間，請先核對原訂位或固定事項。"
+            case "STOP_NOT_IN_DAY": "所選位置已不在這一天，請重新載入並確認安排。"
             case "INVALID_DATES": "結束日期不能早於開始日期。"
             case "EMPTY_TEXT": "請先貼上行程文字。"
             case "RATE_LIMITED": "使用次數已達上限，請稍後再試。"

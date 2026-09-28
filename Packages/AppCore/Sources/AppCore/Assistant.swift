@@ -56,6 +56,7 @@ public struct AssistantAnswer: Codable, Equatable, Sendable {
     }
     public struct Arrangement: Codable, Equatable, Sendable {
         public var kind: String
+        public var start_time: String?
         public var item_id: String
         public var day_id: String
         public var source_url: String?
@@ -154,6 +155,7 @@ public struct ArrangementAction: Encodable, Sendable {
     public var kind: String
     public var item_id: UUID
     public var day_id: UUID
+    public var start_time: String?
     public var source_day_id: UUID?
     public var before_stop_id: UUID?
     public var operation_id = UUID()
@@ -161,14 +163,38 @@ public struct ArrangementAction: Encodable, Sendable {
     public var source_url: String?
     public var store_name: String?
     public var address_local: String?
-    public init(kind: String, itemID: UUID, dayID: UUID, candidateIndex: Int? = nil, candidate: ShoppingStoreSuggestion? = nil, beforeStopID: UUID? = nil, sourceDayID: UUID? = nil) {
+    public init(kind: String, itemID: UUID, dayID: UUID, candidateIndex: Int? = nil, candidate: ShoppingStoreSuggestion? = nil, beforeStopID: UUID? = nil, sourceDayID: UUID? = nil, startTime: String? = nil) {
+        start_time = startTime
         source_day_id = sourceDayID
         before_stop_id = beforeStopID
         self.kind = kind; item_id = itemID; day_id = dayID; candidate_index = candidateIndex
         source_url = candidate?.sourceURL; store_name = candidate?.displayName; address_local = candidate?.addressLocal
     }
 }
+public struct ArrangementPreview: Decodable, Sendable {
+    public struct Outcome: Decodable, Sendable {
+        public var status: String
+        public var stop_id: UUID
+        public var day_id: UUID
+    }
+    public var before: [DayTimeline]
+    public var after: [DayTimeline]
+    public var outcomes: [Outcome]?
+    public var reusesExistingStop: Bool {
+        let existing = Set(before.flatMap(\.stops).map(\.id))
+        return (outcomes ?? []).contains { $0.status == "already_scheduled" || ($0.status == "scheduled" && existing.contains($0.stop_id)) }
+    }
+}
+
 extension TripRepository {
+    public func previewArrangements(tripID: UUID, actions: [ArrangementAction], revisions: [String: Int], operationID: UUID) async throws -> ArrangementPreview {
+        struct Params: Encodable {
+            let p_trip_id: UUID, p_actions: [ArrangementAction], p_day_revisions: [String: Int], p_operation_id: UUID
+        }
+        do { return try await client.rpc("preview_ai_arrangements", params: Params(p_trip_id: tripID, p_actions: actions,
+            p_day_revisions: revisions, p_operation_id: operationID)).execute().value }
+        catch { throw BackendError.from(error) }
+    }
     public func confirmArrangements(tripID: UUID, actions: [ArrangementAction], revisions: [String: Int], operationID: UUID) async throws {
         struct Params: Encodable {
             let p_trip_id: UUID, p_actions: [ArrangementAction], p_day_revisions: [String: Int], p_operation_id: UUID

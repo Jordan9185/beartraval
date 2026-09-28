@@ -186,7 +186,14 @@ final class FakeShoppingService: ShoppingService, @unchecked Sendable {
     }
 
     func recordPurchase(itemID: UUID, purchased: Bool, clientOpID: UUID?) async throws {
-        lock.withLock { events.append(PurchaseEvent(id: events.count, itemId: itemID, actorId: me, type: purchased ? .purchased : .undone, createdAt: Date())) }
+        lock.withLock {
+            // 與正式購買事件觸發器一致：舊勾選入口同步新版數量欄位。
+            if let index = items.firstIndex(where: { $0.id == itemID }) {
+                items[index].boughtQuantity = purchased ? max(items[index].boughtQuantity ?? 0, items[index].desiredQuantity ?? 1) : 0
+                items[index].quantityRevision = (items[index].quantityRevision ?? 0) + 1
+            }
+            events.append(PurchaseEvent(id: events.count, itemId: itemID, actorId: me, type: purchased ? .purchased : .undone, createdAt: Date()))
+        }
     }
 
     func setShoppingInterest(itemID: UUID, interested: Bool) async throws {}

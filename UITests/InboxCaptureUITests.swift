@@ -5,6 +5,7 @@ final class InboxCaptureUITests: XCTestCase {
     func testCaptureNeedsNeitherLoginNorTrip() {
         continueAfterFailure = false
         let app = XCUIApplication()
+        app.launchArguments = ["-UITestLocalCapture", "1"]
         app.launch()
 
         let collect = app.buttons["先收下旅行資料"]
