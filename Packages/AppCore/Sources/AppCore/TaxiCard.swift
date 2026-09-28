@@ -138,14 +138,15 @@ public struct TaxiCard: Equatable, Sendable {
     }
 
     /// 還沒在 Apple 地圖定位的地點：可附上查得的地址線索，但不當成已確認座標。
-    public init(unlocatedName name: String, countryCode: String?, addressHint: String? = nil) {
+    public init(unlocatedName name: String, countryCode: String?, addressHint: String? = nil, fallbackChineseLabel: String? = nil) {
         let lang = Self.language(for: countryCode)
         let (request, requestZh, extras) = Self.phrases(lang)
         self.language = lang
         self.request = request
         self.requestZh = requestZh
         self.name = name
-        self.nameZh = nil
+        let zh = fallbackChineseLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.nameZh = zh.flatMap { !$0.isEmpty && $0 != name && PlaceNaming.looksChinese($0) ? $0 : nil }
         let trimmedAddress = addressHint?.trimmingCharacters(in: .whitespacesAndNewlines)
         let address = trimmedAddress?.isEmpty == false ? trimmedAddress : nil
         self.address = address

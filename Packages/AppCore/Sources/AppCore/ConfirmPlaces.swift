@@ -38,6 +38,9 @@ public struct ConfirmItem: Codable, Identifiable, Equatable, Sendable {
     /// 解析出的日期超出旅程或不明確時為 nil，需使用者指定。
     public var date: String?
     public var candidates: [PlaceOption] = []
+    /// AI 查得的候選隨確認草稿保存，不因離開畫面遺失。
+    public var researchCandidates: [ShoppingStoreSuggestion]? = nil
+    public var researchMessage: String? = nil
     public var searched = false
     /// 地圖搜尋失敗（離線、被節流）：不自動決定，等使用者重新搜尋。
     public var searchFailed = false
@@ -58,6 +61,11 @@ public struct ConfirmItem: Codable, Identifiable, Equatable, Sendable {
     public var needsSearch: Bool {
         guard stop.placeName != nil else { return false }
         return !(stop.category == "transport" && stop.searchQuery == nil)
+    }
+
+    /// 恢復草稿只接續未完成查找；已取得結果、失敗訊息或人工決定不自動重跑。
+    public var needsInitialAIResearch: Bool {
+        needsSearch && decision == nil && (!searched || (researchCandidates == nil && researchMessage == nil))
     }
 
     public var blockers: [Blocker] {

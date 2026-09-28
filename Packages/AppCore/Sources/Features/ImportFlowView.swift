@@ -222,9 +222,7 @@ struct ConfirmPlacesView: View {
     let isCommitting: Bool
     let errorMessage: String?
     let onSubmit: () -> Void
-    @State private var webCandidates: [Int: [DiscoveredPlace]] = [:]
     @State private var webSearching: Set<Int> = []
-    @State private var webMessages: [Int: String] = [:]
 
     var body: some View {
         Form {
@@ -349,8 +347,8 @@ struct ConfirmPlacesView: View {
 
     private func confirmItem(at index: Int) -> some View {
         ConfirmItemView(item: $state.items[index], tripDates: state.tripDates, timeZone: timeZone,
-                        webCandidates: webCandidates[index] ?? [], webSearching: webSearching.contains(index),
-                        webMessage: webMessages[index], discoverWeb: discoveryRepository == nil ? nil : {
+                        webCandidates: (state.items[index].researchCandidates ?? []).map(DiscoveredPlace.init(saved:)), webSearching: webSearching.contains(index),
+                        webMessage: state.items[index].researchMessage, discoverWeb: discoveryRepository == nil ? nil : {
                             Task { await discoverWeb(at: index) }
                         }, useWebCandidate: { candidate in
                             state.items[index].destinationName = candidate.koreanName ?? candidate.name
@@ -365,24 +363,35 @@ struct ConfirmPlacesView: View {
         guard let discoveryRepository, state.items.indices.contains(index), !webSearching.contains(index) else { return }
         let item = state.items[index]
         webSearching.insert(index)
-        webMessages[index] = nil
+        state.items[index].researchMessage = nil
         defer { webSearching.remove(index) }
         do {
             let context = [item.stop.city ?? city, item.stop.sourceExcerpt, item.stop.searchQuery]
                 .compactMap { $0 }.joined(separator: "\n")
             let candidates = try await discoveryRepository.discoverPlaces(query: item.label, context: context)
-            webCandidates[index] = candidates
-            if candidates.isEmpty { webMessages[index] = "目前找不到可核對來源的店家，這項仍只保留名稱。" }
+            state.items[index].researchCandidates = candidates.map(ShoppingStoreSuggestion.init(discovered:))
+            state.items[index].searched = true
+            if candidates.isEmpty { state.items[index].researchMessage = "目前找不到可核對來源的店家，這項仍只保留名稱。" }
         } catch let error as PlaceDiscoveryError {
-            webMessages[index] = error.userMessage
+            guard !Task.isCancelled else { return }
+            state.items[index].searched = true
+            state.items[index].researchMessage = error.userMessage
         } catch {
-            webMessages[index] = "店家查找失敗：\(userMessage(for: error))"
+            guard !Task.isCancelled else { return }
+            state.items[index].searched = true
+            state.items[index].researchMessage = "店家查找失敗：\(userMessage(for: error))"
         }
     }
 
     /// AI 先依各站城市查具來源的候選；座標只在使用者另外查地圖時補上。
     private func searchAll() async {
-        for index in state.items.indices where !state.items[index].searched {
+        for index in state.items.indices {
+            let item = state.items[index]
+            guard item.needsInitialAIResearch else {
+                state.items[index].searched = true
+                continue
+            }
+            if Task.isCancelled { return }
             if state.items[index].needsSearch { await discoverWeb(at: index) }
             if Task.isCancelled { return }
             state.items[index].searched = true

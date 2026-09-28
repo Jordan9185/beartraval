@@ -248,3 +248,26 @@ struct SearchAreasTests {
         #expect(SearchAreas(places: [], timeZones: ["Asia/Tokyo"]).centers.isEmpty)
     }
 }
+
+
+extension ConfirmPlacesTests {
+    @Test func researchCandidatesSurviveReviewDraftAndDoNotRunAgain() throws {
+        var state = ConfirmPlacesState(session: session, draft: draft)
+        state.items[0].searched = true
+        state.items[0].researchCandidates = [ShoppingStoreSuggestion(name: "中文譯名", koreanName: "原文店名", addressLocal: "當地地址", searchQuery: "原文店名", reason: "來源依據", sourceURL: "https://example.test/shop")]
+        let restored = try JSONDecoder().decode(ConfirmPlacesState.self, from: JSONEncoder().encode(state))
+        #expect(restored.items[0].researchCandidates?.first?.koreanName == "原文店名")
+        #expect(!restored.items[0].needsInitialAIResearch)
+    }
+    @Test func failureAndManualDecisionAreNotAutomaticallyResubmitted() {
+        var state = ConfirmPlacesState(session: session, draft: draft)
+        state.items[0].searched = true
+        state.items[0].researchMessage = "目前離線"
+        #expect(!state.items[0].needsInitialAIResearch)
+        state.items[0].researchMessage = nil
+        #expect(state.items[0].needsInitialAIResearch)
+        state.items[0].decision = .pendingText
+        state.items[0].searched = false
+        #expect(!state.items[0].needsInitialAIResearch)
+    }
+}

@@ -262,12 +262,13 @@ extension TripRepository {
         catch { throw BackendError.from(error) }
     }
 
-    public func setSavedAddressHint(savedID: UUID, address: String, sourceURL: String?, nativeName: String? = nil) async throws {
-        struct Params: Encodable { let p_saved_id: UUID, p_address_hint: String, p_source_url: String?, p_native_name: String? }
+    @discardableResult
+    public func setSavedAddressHint(savedID: UUID, address: String, sourceURL: String?, nativeName: String? = nil, onlyIfMissing: Bool = false) async throws -> SavedPlace {
+        struct Params: Encodable { let p_saved_id: UUID, p_address_hint: String, p_source_url: String?, p_native_name: String?; let p_only_if_missing: Bool }
         do {
-            try await client.rpc("set_saved_address_hint", params: Params(
-                p_saved_id: savedID, p_address_hint: address, p_source_url: sourceURL, p_native_name: nativeName
-            )).execute()
+            return try await client.rpc("set_saved_address_hint", params: Params(
+                p_saved_id: savedID, p_address_hint: address, p_source_url: sourceURL, p_native_name: nativeName, p_only_if_missing: onlyIfMissing
+            )).execute().value
         } catch { throw BackendError.from(error) }
     }
 

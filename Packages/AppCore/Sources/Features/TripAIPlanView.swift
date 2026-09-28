@@ -198,6 +198,15 @@ private struct ArrangementDayPreview: View {
             Text("確認後").font(.subheadline.weight(.semibold))
             if after.stops.isEmpty { Text("這一天將沒有安排").foregroundStyle(.secondary) }
             ForEach(after.stops) { ArrangementPreviewStopRow(stop: $0) }
+            ForEach(ScheduleTimeReview.issues(in: after.stops)) { issue in
+                Label(issue.message, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            let unknown = ScheduleTimeReview.unknownTimeCount(in: after.stops)
+            if unknown > 0 {
+                Text("\(unknown) 個站點的時間或停留尚未確定，無法確認是否趕得上；沒有警示不代表交通可行。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 }

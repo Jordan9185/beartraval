@@ -715,7 +715,7 @@ struct StopDetailView: View {
                     let country = LocalMapCountry.guess(name: stop.rawLabel, timeZone: timeZone)
                     Section {
                         TaxiCardButton(unlocatedName: stop.destinationName ?? stop.rawLabel, countryCode: country,
-                                       addressHint: stop.destinationAddress ?? saved?.saved.addressHint ?? shopping?.item.scheduledStoreAddressLocal)
+                                       addressHint: stop.destinationAddress ?? saved?.saved.addressHint ?? shopping?.item.scheduledStoreAddressLocal, fallbackChineseLabel: stop.rawLabel)
                     }
                     Section {
                         LocalMapSearchButtons(name: stop.rawLabel,

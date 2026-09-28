@@ -98,8 +98,8 @@ struct TaxiCardButton: View {
     }
 
     /// 未定位的地點可顯示地址線索，卡片上保留待核對提醒。
-    init(unlocatedName name: String, countryCode: String?, addressHint: String? = nil) {
-        card = TaxiCard(unlocatedName: name, countryCode: countryCode, addressHint: addressHint)
+    init(unlocatedName name: String, countryCode: String?, addressHint: String? = nil, fallbackChineseLabel: String? = nil) {
+        card = TaxiCard(unlocatedName: name, countryCode: countryCode, addressHint: addressHint, fallbackChineseLabel: fallbackChineseLabel)
     }
 
     var body: some View {

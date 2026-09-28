@@ -13,3 +13,10 @@ select app.set_saved_address_hint(:'saved','東京都新地址','https://example
 select tests.ok((select destination_name='原文店名' and destination_address='東京都測試地址' from app.stops where id=:'stop'),'補查收藏不偷偷改正式行程');
 select app.set_saved_address_hint(:'saved','舊版更新地址');
 select tests.ok((select native_name is null from app.saved_places where id=:'saved'),'舊版參數仍可呼叫且不留下不同來源的店名');
+
+select app.set_saved_address_hint(:'saved','旅伴手動地址','https://example.test/manual','手動店名');
+select app.set_saved_address_hint(:'saved','AI 晚回地址','https://example.test/ai','AI 店名',true) as retained \gset
+select tests.ok((select address_hint='旅伴手動地址' and native_name='手動店名' and address_source_url='https://example.test/manual' from app.saved_places where id=:'saved'),'晚回的自動補查不覆蓋旅伴內容');
+select tests.ok((:'retained'::app.saved_places).address_hint='旅伴手動地址','回傳實際保存的地址讓畫面一致');
+select app.set_saved_address_hint(:'saved','使用者明確選擇地址','https://example.test/chosen','選定店名',false);
+select tests.ok((select address_hint='使用者明確選擇地址' from app.saved_places where id=:'saved'),'明確手動選擇仍可以修改地址');

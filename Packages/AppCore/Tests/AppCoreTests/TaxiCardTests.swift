@@ -114,3 +114,11 @@ struct TaxiCardTests {
         #expect(LocalAddress.stripCountry("대한민국 서울특별시 명동 명동10길") == "서울특별시 명동 명동10길")
     }
 }
+
+
+@Test func unlocatedTaxiCardKeepsVerifiedNameAndOriginalChineseLabel() {
+    let card = TaxiCard(unlocatedName: "무구옥", countryCode: "KR", addressHint: "서울 성동구", fallbackChineseLabel: "無垢屋")
+    #expect(card.name == "무구옥")
+    #expect(card.nameZh == "無垢屋")
+    #expect(card.latitude == nil)
+}

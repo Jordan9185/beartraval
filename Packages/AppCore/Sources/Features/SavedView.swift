@@ -538,7 +538,7 @@ struct SavedDetailView: View {
                     } else {
                         let country = tripCountry ?? LocalMapCountry.guess(name: entry.saved.rawLabel, timeZone: nil)
                         TaxiCardButton(unlocatedName: nativeName ?? entry.saved.nativeName ?? entry.saved.rawLabel, countryCode: country,
-                                       addressHint: addressHint ?? entry.saved.addressHint)
+                                       addressHint: addressHint ?? entry.saved.addressHint, fallbackChineseLabel: entry.saved.rawLabel)
                         LocalMapSearchButtons(name: nativeName ?? entry.saved.nativeName ?? entry.saved.rawLabel, localAddress: addressHint ?? entry.saved.addressHint, countryCode: country)
                     }
                 }
@@ -598,7 +598,7 @@ struct SavedDetailView: View {
                 context: "旅程國家：\(tripCountry ?? "未知，不猜國家或分店")。\(entry.source?.summary ?? "")")
             let addressed = found.filter { $0.addressLocal != nil }
             if addressed.count == 1, let only = addressed.first {
-                await accept(only)
+                await accept(only, automatic: true)
             } else if addressed.isEmpty {
                 addressMessage = "目前沒有可核對的地址線索，可稍後再補定位。"
             } else {
@@ -612,16 +612,16 @@ struct SavedDetailView: View {
         }
     }
 
-    private func accept(_ candidate: DiscoveredPlace) async {
+    private func accept(_ candidate: DiscoveredPlace, automatic: Bool = false) async {
         guard let address = candidate.addressLocal else { return }
         do {
             let source = URL(string: candidate.sourceURL)?.scheme == "https" ? candidate.sourceURL : nil
-            try await repository.setSavedAddressHint(savedID: entry.id, address: address, sourceURL: source, nativeName: candidate.koreanName)
-            addressHint = address
-            nativeName = candidate.koreanName
-            addressSourceURL = source
+            let saved = try await repository.setSavedAddressHint(savedID: entry.id, address: address, sourceURL: source, nativeName: candidate.koreanName, onlyIfMissing: automatic)
+            addressHint = saved.addressHint
+            nativeName = saved.nativeName
+            addressSourceURL = saved.addressSourceURL
             candidates = []
-            addressMessage = "已保存地址線索；地圖定位仍待確認。"
+            addressMessage = automatic && saved.addressHint != address ? "旅伴已先補上地址，保留旅伴保存的內容。" : "地址線索已保存；地圖定位仍待確認。"
             onChanged()
         } catch {
             addressMessage = "地址暫時無法保存：\(userMessage(for: error))"
