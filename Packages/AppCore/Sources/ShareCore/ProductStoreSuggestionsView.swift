@@ -46,15 +46,15 @@ public struct ProductStoreSuggestionsView: View {
                 Text("可在主畫面的 AI 進度查看排隊與處理狀態。").font(.caption).foregroundStyle(.secondary)
             }
             if !loading && !finished && candidates.isEmpty {
-                Button("用 AI 查找店家") { Task { await search() } }
+                Button("用 AI 查找店家") { Task { await search() } }.buttonStyle(.borderless)
             }
             if let errorMessage {
                 ErrorText(errorMessage)
-                Button("重新查店家") { Task { await search() } }
+                Button("重新查店家") { Task { await search() } }.buttonStyle(.borderless)
             } else if finished && candidates.isEmpty {
                 Text("目前查不到可核對的實體店；商品已辨識，店家仍可稍後再查。")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("重新查店家") { Task { await search() } }
+                Button("重新查店家") { Task { await search() } }.buttonStyle(.borderless)
             }
             if let first = candidates.first {
                 candidateRow(first)
@@ -65,7 +65,8 @@ public struct ProductStoreSuggestionsView: View {
                 }
             }
             if finished && !candidates.isEmpty {
-                Button("重新查店家") { Task { await search() } }.font(.caption)
+                // Form 列內多個按鈕需各自限定點擊範圍，否則點列上任一處都會觸發重新查詢。
+                Button("重新查店家") { Task { await search() } }.font(.caption).buttonStyle(.borderless)
             }
         }
         .task(id: "\(productName)|\(storeHint ?? "")|\(region)") {
@@ -106,6 +107,7 @@ public struct ProductStoreSuggestionsView: View {
         loading = true
         finished = false
         errorMessage = nil
+        let previous = candidates
         candidates = []
         defer { loading = false; finished = true }
         do {
@@ -115,10 +117,13 @@ public struct ProductStoreSuggestionsView: View {
             candidates = found
         } catch let error as PlaceDiscoveryError {
             errorMessage = error.userMessage
+            candidates = previous
         } catch let error as BackendError {
             errorMessage = candidates.isEmpty ? error.userMessage : "已找到店家，但暫時無法儲存；請重試。"
+            if candidates.isEmpty { candidates = previous }
         } catch {
             errorMessage = "店家查找失敗：\(userMessage(for: error))"
+            candidates = previous
         }
     }
 }

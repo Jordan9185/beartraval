@@ -51,8 +51,8 @@ struct ShoppingScheduleView: View {
                 if asking { ProgressView("AI 正在比較原有行程區域…") }
                 if let recommendation { Text(recommendation) }
                 if !asking && selectedDayID == nil {
-                    Text("目前保留待買，不為商品新增跨區行程。")
-                    Button("我仍要安排這間店，查看日期") { manualOverride = true }
+                    Text(isSwap ? "目前維持原安排，不為換店新增跨區行程。" : "目前保留待買，不為商品新增跨區行程。")
+                    Button(isSwap ? "我仍要換到這間店，查看日期" : "我仍要安排這間店，查看日期") { manualOverride = true }
                 }
             }
             if isSwap { currentSection }
@@ -148,9 +148,9 @@ struct ShoppingScheduleView: View {
                     selectedDayID = id
                     recommendation = proposal.reason
                 }
-            case .failed(let reason): recommendation = PersonalAI.waitingMessage(reason) ?? "AI 暫時無法判斷，商品保留待買。"
+            case .failed(let reason): recommendation = PersonalAI.waitingMessage(reason) ?? undecided
             }
-        } catch { recommendation = "AI 暫時無法判斷，商品保留待買。" }
+        } catch { recommendation = undecided }
     }
 
     @ViewBuilder private var currentSection: some View {
@@ -240,6 +240,8 @@ struct ShoppingScheduleView: View {
             errorMessage = "換店未完成，原安排保留：\(userMessage(for: error))"
         }
     }
+
+    private var undecided: String { isSwap ? "AI 暫時無法判斷，維持原安排。" : "AI 暫時無法判斷，商品保留待買。" }
 
     private func submit() async {
         guard let day = selectedDay, let suggestionIndex else { return }
