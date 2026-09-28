@@ -44,16 +44,41 @@ public enum ScheduleTimeReview {
             guard let start = clockSeconds(first.startTime) else { continue }
             let end = endSecond(first, start: start)
             if let end, end > 86400 {
-                result.append(Issue(id: "overnight:\(first.id)", message: "「\(first.rawLabel)」跨至隔日；請核對隔天行程，尚未計入交通。"))
+                result.append(Issue(id: "overnight:\(first.id)", message: "「\(first.rawLabel)」（\(clock(start))–\(clock(end))）跨至隔日；請核對隔天行程，尚未計入交通。"))
             }
             for second in ordered.dropFirst(index + 1) {
                 guard let next = clockSeconds(second.startTime) else { continue }
                 let fixed = first.fixed || second.fixed ? "（包含固定行程）" : ""
                 if start > next {
-                    result.append(Issue(id: "order:\(first.id):\(second.id)", message: "「\(first.rawLabel)」排在「\(second.rawLabel)」之前，開始時間卻較晚\(fixed)。"))
+                    result.append(Issue(id: "order:\(first.id):\(second.id)", message: "「\(first.rawLabel)」（\(clock(start)) 開始）排在「\(second.rawLabel)」（\(clock(next)) 開始）之前，開始時間卻較晚\(fixed)。"))
                 } else if let end, end > next {
-                    result.append(Issue(id: "overlap:\(first.id):\(second.id)", message: "「\(first.rawLabel)」的結束時間或停留範圍，與「\(second.rawLabel)」重疊\(fixed)。"))
+                    result.append(Issue(id: "overlap:\(first.id):\(second.id)", message: "「\(first.rawLabel)」（\(clock(start))–\(clock(end))）與「\(second.rawLabel)」（\(clock(next)) 開始）重疊\(fixed)。"))
                 }
+            }
+        }
+        return result
+    }
+
+    /// 相鄰兩站都有已知時間時核對路程。只有兩站都已定位、且這一段確實算出分鐘，才判斷是否晚到；
+    /// 算不出或有未定位站時不當成零分鐘，涉及固定行程就明示無法確認趕得上。
+    public static func travelIssues(in stops: [Stop], legs: [BaseRoute.Leg]) -> [Issue] {
+        let ordered = stops.sorted { $0.sortOrder < $1.sortOrder }
+        var result: [Issue] = []
+        for (first, second) in zip(ordered, ordered.dropFirst()) {
+            guard let start = clockSeconds(first.startTime), let end = endSecond(first, start: start), end <= 86400,
+                  let next = clockSeconds(second.startTime), next >= end else { continue }
+            let gap = next - end
+            let fixed = first.fixed || second.fixed
+            let route = "「\(first.rawLabel)」（\(clock(end)) 結束）到\(second.fixed ? "固定行程" : "")「\(second.rawLabel)」（\(clock(next)) 開始）"
+            if let minutes = legs.first(where: { $0.from == first.id && $0.to == second.id })?.time.minutes {
+                let need = Int((minutes * 60).rounded(.up))
+                guard need > gap else { continue }
+                let late = (need - gap + 59) / 60
+                result.append(Issue(id: "late:\(first.id):\(second.id)",
+                    message: "\(route)：Apple 地圖估算路程約 \(Int(minutes.rounded(.up))) 分鐘，間隔只有 \(gap / 60) 分鐘，預計晚到約 \(late) 分鐘\(fixed ? "（包含固定行程，不會自動移動）" : "")。"))
+            } else if fixed {
+                result.append(Issue(id: "travel_unknown:\(first.id):\(second.id)",
+                    message: "\(route)：路程無法估算，不能確認趕得上。"))
             }
         }
         return result
@@ -69,6 +94,10 @@ public enum ScheduleTimeReview {
         if let end = clockSeconds(stop.endTime) { return end < start ? end + 86400 : end }
         if let dwell = stop.dwellMinutes, dwell > 0 { return start + dwell * 60 }
         return nil
+    }
+    private static func clock(_ seconds: Int) -> String {
+        let value = seconds % 86400
+        return String(format: "%02d:%02d", value / 3600, value % 3600 / 60)
     }
     private static func clockSeconds(_ text: String?) -> Int? {
         guard let text else { return nil }

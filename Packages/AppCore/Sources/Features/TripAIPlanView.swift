@@ -18,6 +18,7 @@ struct TripAIPlanView: View {
     @State private var loading = false
     @State private var applying = false
     @State private var preview: ArrangementPreview?
+    @State private var previewLegs: [UUID: [BaseRoute.Leg]] = [:]
     @State private var confirmationAttempted = false
     @State private var submitted: [ArrangementAction]?
     @State private var operationID = UUID()
@@ -62,7 +63,8 @@ struct TripAIPlanView: View {
                         .font(.caption).foregroundStyle(.orange)
                 }
                 ForEach(preview.after) { day in
-                    ArrangementDayPreview(before: preview.before.first { $0.id == day.id }, after: day)
+                    ArrangementDayPreview(before: preview.before.first { $0.id == day.id }, after: day,
+                                          legs: previewLegs[day.id] ?? [])
                 }
                 Section {
                     Button(applying ? "確認中…" : "確認寫入這批變更") { Task { await apply() } }
@@ -163,6 +165,7 @@ struct TripAIPlanView: View {
             preview = try await session.trips.previewArrangements(tripID: trip.id, actions: submitted ?? [],
                 revisions: Dictionary(uniqueKeysWithValues: snapshot.timeline.map { ($0.id.uuidString.lowercased(), $0.day.routeRevision) }), operationID: operationID)
             message = "預覽已產生，尚未保存。請核對下方整日行程，再確認寫入。"
+            await estimatePreviewLegs(places: snapshot.places)
         } catch BackendError.staleRevision {
             submitted = nil; operationID = UUID(); suggestions = []; selected = []
             message = "旅伴已修改行程。這批沒有寫入；請重新取得建議並確認。"
@@ -175,6 +178,14 @@ struct TripAIPlanView: View {
             }
         } catch {
             message = "尚未確認結果：\(userMessage(for: error))。請重試預覽；預覽不會保存安排。"
+        }
+    }
+    /// 只用已定位站點向 Apple 地圖試算路段；未定位或算不出的段落保持未知。
+    private func estimatePreviewLegs(places: [UUID: Place]) async {
+        previewLegs = [:]
+        for day in preview?.after ?? [] {
+            guard let plan = DayPlan.from(day, places: places) else { continue }
+            previewLegs[day.id] = await session.routes.baseRoute(for: plan, mode: day.day.transportMode).legs
         }
     }
     private func apply() async {
@@ -200,6 +211,7 @@ struct TripAIPlanView: View {
 struct ArrangementDayPreview: View {
     let before: DayTimeline?
     let after: DayTimeline
+    var legs: [BaseRoute.Leg] = []
     var body: some View {
         Section("第 \(after.day.displayOrder + 1) 天 · \(after.day.localDate)") {
             Text("原行程").font(.subheadline.weight(.semibold))
@@ -209,15 +221,7 @@ struct ArrangementDayPreview: View {
             Text("確認後").font(.subheadline.weight(.semibold))
             if after.stops.isEmpty { Text("這一天將沒有安排").foregroundStyle(.secondary) }
             ForEach(after.stops) { ArrangementPreviewStopRow(stop: $0) }
-            ForEach(ScheduleTimeReview.issues(in: after.stops)) { issue in
-                Label(issue.message, systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-            let unknown = ScheduleTimeReview.unknownTimeCount(in: after.stops)
-            if unknown > 0 {
-                Text("\(unknown) 個站點的時間或停留尚未確定，無法確認是否趕得上；沒有警示不代表交通可行。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            ScheduleReviewNotes(stops: after.stops, legs: legs)
         }
     }
 }

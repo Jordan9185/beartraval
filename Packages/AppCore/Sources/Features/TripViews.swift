@@ -442,6 +442,8 @@ struct TripDetailView: View {
                     } else {
                         RouteStatusRow(day: day, base: baseRoutes[day.id])
                     }
+                    ScheduleReviewNotes(stops: day.stops,
+                                        legs: baseRoutes[day.id].flatMap { $0.routeRevision == day.day.routeRevision ? $0.legs : nil } ?? [])
                     if let suggestion = TripTimeZones.mismatch(for: day, places: places) {
                         Label("這天的地點在\(TripTimeZones.displayName(suggestion))一帶，時區仍是\(TripTimeZones.displayName(day.day.timeZone))。",
                               systemImage: "exclamationmark.triangle")

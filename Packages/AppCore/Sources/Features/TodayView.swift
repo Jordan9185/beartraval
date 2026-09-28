@@ -136,6 +136,8 @@ struct TodayView: View {
                         .buttonStyle(.plain)
                     }
                 }
+                ScheduleReviewNotes(stops: day.stops,
+                                    legs: todayBase.flatMap { $0.dayID == day.id && $0.routeRevision == day.day.routeRevision ? $0.legs : nil } ?? [])
                 NavigationLink("完整行程") { TripDetailView(session: session, trip: snapshot.trip) }
             } header: {
                 Text("今日行程")
