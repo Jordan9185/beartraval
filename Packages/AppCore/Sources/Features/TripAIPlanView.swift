@@ -196,7 +196,8 @@ struct TripAIPlanView: View {
     }
 }
 
-private struct ArrangementDayPreview: View {
+/// 整日變更前後；AI 安排與換店共用同一元件。
+struct ArrangementDayPreview: View {
     let before: DayTimeline?
     let after: DayTimeline
     var body: some View {

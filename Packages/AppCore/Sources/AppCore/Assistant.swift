@@ -163,6 +163,8 @@ public struct ArrangementAction: Encodable, Sendable {
     public var source_url: String?
     public var store_name: String?
     public var address_local: String?
+    public var source_stop_id: UUID?
+    public var remove_empty_source: Bool?
     public init(kind: String, itemID: UUID, dayID: UUID, candidateIndex: Int? = nil, candidate: ShoppingStoreSuggestion? = nil, beforeStopID: UUID? = nil, sourceDayID: UUID? = nil, startTime: String? = nil) {
         start_time = startTime
         source_day_id = sourceDayID
@@ -170,12 +172,27 @@ public struct ArrangementAction: Encodable, Sendable {
         self.kind = kind; item_id = itemID; day_id = dayID; candidate_index = candidateIndex
         source_url = candidate?.sourceURL; store_name = candidate?.displayName; address_local = candidate?.addressLocal
     }
+    /// 一件已安排商品改到另一間有來源的店；原站是否移除由使用者明確選擇，後端仍保護仍有用途的站。
+    public static func shoppingSwap(itemID: UUID, fromStopID: UUID, fromDayID: UUID, toDayID: UUID, candidateIndex: Int,
+                                    candidate: ShoppingStoreSuggestion, removeEmptySource: Bool) -> ArrangementAction {
+        var action = ArrangementAction(kind: "shopping_swap", itemID: itemID, dayID: toDayID, candidateIndex: candidateIndex,
+                                       candidate: candidate, sourceDayID: fromDayID)
+        action.source_stop_id = fromStopID
+        action.remove_empty_source = removeEmptySource
+        return action
+    }
 }
 public struct ArrangementPreview: Decodable, Sendable {
     public struct Outcome: Decodable, Sendable {
+        public struct SwappedFrom: Decodable, Sendable {
+            public var stop_id: UUID
+            public var day_id: UUID
+            public var removed: Bool
+        }
         public var status: String
         public var stop_id: UUID
         public var day_id: UUID
+        public var swapped_from: SwappedFrom?
     }
     public var before: [DayTimeline]
     public var after: [DayTimeline]

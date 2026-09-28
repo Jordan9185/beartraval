@@ -10,6 +10,7 @@ public struct ProductStoreSuggestionsView: View {
     let countryCode: String?
     let onSelect: ((DiscoveredPlace) -> Void)?
     let onSchedule: ((ShoppingStoreSuggestion) -> Void)?
+    let scheduleLabel: String
     let searchOnAppear: Bool
     let onResults: (([ShoppingStoreSuggestion]) async throws -> Void)?
 
@@ -22,6 +23,7 @@ public struct ProductStoreSuggestionsView: View {
                 region: String, countryCode: String?, initialSuggestions: [ShoppingStoreSuggestion] = [],
                 searchOnAppear: Bool = false, onSelect: ((DiscoveredPlace) -> Void)? = nil,
                 onSchedule: ((ShoppingStoreSuggestion) -> Void)? = nil,
+                scheduleLabel: String = "安排購買",
                 onResults: (([ShoppingStoreSuggestion]) async throws -> Void)? = nil) {
         self.repository = repository
         self.productName = productName
@@ -30,6 +32,7 @@ public struct ProductStoreSuggestionsView: View {
         self.countryCode = countryCode
         self.onSelect = onSelect
         self.onSchedule = onSchedule
+        self.scheduleLabel = scheduleLabel
         self.searchOnAppear = searchOnAppear
         self.onResults = onResults
         _candidates = State(initialValue: initialSuggestions.map(DiscoveredPlace.init(saved:)))
@@ -79,7 +82,7 @@ public struct ProductStoreSuggestionsView: View {
             }
             Text("是否販售與庫存待確認").font(.caption).foregroundStyle(.secondary)
             if let onSchedule {
-                Button("安排購買") { onSchedule(ShoppingStoreSuggestion(discovered: candidate)) }
+                Button(scheduleLabel) { onSchedule(ShoppingStoreSuggestion(discovered: candidate)) }
                     .buttonStyle(.borderedProminent)
             }
             if let onSelect {

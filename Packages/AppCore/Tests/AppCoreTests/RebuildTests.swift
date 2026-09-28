@@ -90,3 +90,33 @@ import Testing
         #expect(await reopened.items(tripID: trip, owner: UUID()).isEmpty)
     }
 }
+
+@Suite struct ShoppingSwapTests {
+    @Test func swapActionCarriesOriginalStopAndVerifiedCandidate() throws {
+        let item = UUID(), stop = UUID(), fromDay = UUID(), toDay = UUID()
+        let candidate = ShoppingStoreSuggestion(name: "中文譯名", koreanName: "원문점", addressLocal: "當地地址",
+                                                searchQuery: "원문점", reason: "來源", sourceURL: "https://example.test/b")
+        let action = ArrangementAction.shoppingSwap(itemID: item, fromStopID: stop, fromDayID: fromDay, toDayID: toDay,
+                                                    candidateIndex: 1, candidate: candidate, removeEmptySource: false)
+        let json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(action)) as? [String: Any])
+        #expect(json["kind"] as? String == "shopping_swap")
+        #expect(json["source_stop_id"] as? String == stop.uuidString)
+        #expect(json["source_day_id"] as? String == fromDay.uuidString)
+        #expect(json["day_id"] as? String == toDay.uuidString)
+        // 後端以原文店名核對候選，譯名不會被當成另一間分店。
+        #expect(json["store_name"] as? String == candidate.displayName)
+        #expect(json["address_local"] as? String == "當地地址")
+        #expect(json["remove_empty_source"] as? Bool == false)
+    }
+
+    @Test func previewDecodesSwappedOrigin() throws {
+        let stop = UUID(), day = UUID(), old = UUID()
+        let data = Data("""
+        {"before":[],"after":[],"outcomes":[{"status":"scheduled","stop_id":"\(stop)","day_id":"\(day)",
+        "swapped_from":{"stop_id":"\(old)","day_id":"\(day)","removed":true}}]}
+        """.utf8)
+        let preview = try JSONDecoder().decode(ArrangementPreview.self, from: data)
+        #expect(preview.outcomes?.first?.swapped_from?.stop_id == old)
+        #expect(preview.outcomes?.first?.swapped_from?.removed == true)
+    }
+}

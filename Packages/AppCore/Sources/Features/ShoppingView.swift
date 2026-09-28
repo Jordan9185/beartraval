@@ -747,9 +747,11 @@ struct ShoppingItemDetailView: View {
                                                 region: regionName, countryCode: regionCountry,
                                                 initialSuggestions: entry.item.savedStoreSuggestions,
                                                 searchOnAppear: canEdit && entry.item.storeSuggestionsChecked != true,
-                                                onSchedule: canEdit && entry.item.purchaseTiming != "before_trip" && entry.status == .unscheduled ? { candidate in
+                                                onSchedule: canEdit && entry.item.purchaseTiming != "before_trip" && !entry.isPurchased
+                                                    && (entry.status == .unscheduled || entry.item.plannedStopId != nil) ? { candidate in
                                                     scheduleRequest = ShoppingScheduleRequest(candidate: candidate)
                                                 } : nil,
+                                                scheduleLabel: entry.item.plannedStopId == nil ? "安排購買" : "改到這間店",
                                                 onResults: canEdit ? { suggestions in
                                                     guard let repository = service as? TripRepository else { return }
                                                     try await repository.setShoppingStoreSuggestions(itemID: entry.id,
