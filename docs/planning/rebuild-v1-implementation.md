@@ -29,4 +29,4 @@
 
 結果及待辦順序以[本輪交接](../handoff/2026-09-28-rebuild-v1-implementation-handoff.md)為準。新的 migrations 37 起、Edge Functions 及新版 Mac worker **均未部署／重啟**。不能把新版 App 安裝到仍只有 migration 36 的雲端後宣稱交付。
 
-工作額度低於 15% 時停止開發，只整理交接與安全收尾；不為耗盡額度增加工作。
+工作額度低於 10% 時停止開發，只整理交接與安全收尾；不為耗盡額度增加工作。
