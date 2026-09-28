@@ -87,6 +87,10 @@ public struct RootView: View {
                 if scenePhase == .active { await session.aiActivity.watch() }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
+                if session.aiActivity.active.contains(where: { $0.provider?.rawValue == "claude_api" }) {
+                    Text("Claude API・正在使用共用 API 額度")
+                        .font(.caption).foregroundStyle(.secondary).padding(4)
+                }
                 if !session.network.isOnline {
                     Label("離線中：顯示最近一次的資料", systemImage: "wifi.slash")
                         .font(.caption)
@@ -143,7 +147,7 @@ public struct RootView: View {
         .onChange(of: store?.loaded) {
             guard !choseInitialTab, let store, store.loaded else { return }
             choseInitialTab = true
-            tab = store.trips.isEmpty ? .trip : .today
+            tab = .trip
         }
         .sheet(isPresented: $showsDebug) { DebugMenuView(session: session) }
         .task {

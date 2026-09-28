@@ -22,12 +22,14 @@ public struct TripSnapshot: Codable, Equatable, Sendable {
         self.merchants = merchants
     }
 
-    /// 旅程中的今天：每一天用各自的時區判斷（跨國旅程）；不在旅程期間時為第一天。
+    /// 旅程中的今天：每一天用各自的時區判斷（跨國旅程）；出發前為第一天，結束後為最後一天。
     public func todayIndex(now: Date = Date()) -> Int {
-        timeline.firstIndex { day in
+        if let current = timeline.firstIndex(where: { day in
             guard let tz = TimeZone(identifier: day.day.timeZone) else { return false }
             return LocalDate.string(from: now, timeZone: tz) == day.day.localDate
-        } ?? 0
+        }) { return current }
+        guard let last = timeline.last, let tz = TimeZone(identifier: last.day.timeZone) else { return 0 }
+        return LocalDate.string(from: now, timeZone: tz) > last.day.localDate ? max(0, timeline.count - 1) : 0
     }
 
     /// 可以試算順路的 Saved：地點已確認、尚未加入行程。
@@ -46,13 +48,13 @@ public struct TripSnapshot: Codable, Equatable, Sendable {
     public func saved(for stop: Stop) -> SavedEntry? {
         saved.first {
             $0.saved.plannedStopId == stop.id ||
-                ($0.saved.plannedStopId == nil && $0.saved.placeId != nil && $0.saved.placeId == stop.placeId)
+                ($0.saved.arrangementDetached != true && $0.saved.plannedStopId == nil && $0.saved.placeId != nil && $0.saved.placeId == stop.placeId)
         }
     }
 
     /// 已安排購買的商品與其店家線索；待定位時旅程與今天仍可顯示地址。
     public func shopping(for stop: Stop) -> ShoppingEntry? {
-        shopping.first { $0.item.plannedStopId == stop.id }
+        shopping.first { $0.item.plannedStopId == stop.id || ($0.extraVisits ?? []).contains { $0.id == stop.id } }
     }
 }
 

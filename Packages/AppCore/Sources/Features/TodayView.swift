@@ -29,7 +29,7 @@ struct TodayView: View {
             Group {
                 // 換旅程後原本的第 N 天可能不存在：夾在範圍內，不會一直轉圈。
                 if let snapshot = store.snapshot, !snapshot.timeline.isEmpty {
-                    content(snapshot, min(max(dayIndex ?? snapshot.todayIndex(), 0), snapshot.timeline.count - 1))
+                    content(snapshot, min(max(dayIndex ?? snapshot.timeline.firstIndex(where: { $0.id == store.selectedDayID }) ?? snapshot.todayIndex(), 0), snapshot.timeline.count - 1))
                 } else {
                     TripUnavailableView(store: store, systemImage: "sun.max", goToTrips: goToTrips)
                 }
@@ -50,6 +50,14 @@ struct TodayView: View {
                     Button("帳號設定", systemImage: "person.crop.circle") { showsAccount = true }
                     if let onDebug { Button("除錯", systemImage: "ladybug", action: onDebug) }
                 }
+            }
+            .onChange(of: dayIndex) { _, index in
+                if let index, let snapshot = store.snapshot, snapshot.timeline.indices.contains(index) {
+                    store.selectedDayID = snapshot.timeline[index].id
+                }
+            }
+            .onChange(of: store.selectedDayID) { _, id in
+                if let index = store.snapshot?.timeline.firstIndex(where: { $0.id == id }) { dayIndex = index }
             }
             .onChange(of: store.selectedTripID) { dayIndex = nil }
             .onChange(of: store.requestedDayID) { openRequestedDay() }
@@ -80,6 +88,16 @@ struct TodayView: View {
     private func content(_ snapshot: TripSnapshot, _ index: Int) -> some View {
         let day = snapshot.timeline[index]
         List {
+            Section("旅程 AI 助手") {
+                Text("待安排收藏 \(snapshot.saved.filter { $0.saved.status == .saved }.count) · 未買齊商品 \(snapshot.shopping.filter { !$0.isPurchased }.count)")
+                    .font(.caption).foregroundStyle(.secondary)
+                NavigationLink("檢視整趟旅程的安排建議") {
+                    TripAIPlanView(session: session, trip: snapshot.trip) { Task { await store.reload() } }
+                }
+                NavigationLink("旅行必備用品") {
+                    PackingView(session: session, trip: snapshot.trip, canEdit: store.myRole?.canEdit == true)
+                }
+            }
             Section {
                 HStack {
                     Button { dayIndex = index - 1 } label: { Image(systemName: "chevron.left") }.disabled(index == 0)
@@ -97,12 +115,6 @@ struct TodayView: View {
                 .buttonStyle(.borderless)
             }
 
-            // 打開 App 就看得到附近的景點與店家（依目前位置）。
-            NearbySection(session: session, tripID: snapshot.trip.id, canEdit: store.myRole?.canEdit == true,
-                          mode: day.day.transportMode,
-                          planning: StopPlanning(tripID: snapshot.trip.id, dayID: day.day.id, dayTitle: "第 \(index + 1) 天") {
-                              Task { await store.reload() }
-                          })
 
             Section {
                 if day.stops.isEmpty {

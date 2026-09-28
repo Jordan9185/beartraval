@@ -47,6 +47,7 @@ struct AccountView: View {
                 } footer: {
                     Text(savedName ? "已儲存。" : "旅伴在成員列表和收藏裡看到的名字。")
                 }
+                AIModeSection(session: session)
                 Section {
                     Picker("導航用的地圖", selection: $navigationApp) {
                         ForEach(NavigationApp.allCases, id: \.self) { Text($0.displayName).tag($0.rawValue) }
@@ -126,5 +127,43 @@ struct TelemetryView: View {
         .navigationTitle("呼叫統計")
         .toolbar { Button("清除") { Task { await Telemetry.shared.reset(); stats = [:] } } }
         .task { stats = await Telemetry.shared.stats }
+    }
+}
+
+struct AIModeSection: View {
+    let session: SessionModel
+    @State private var provider: AIProvider?
+    @State private var confirming = false
+    @State private var saving = false
+    @State private var errorMessage: String?
+    var body: some View {
+        Section("AI 模式") {
+            if let provider {
+                Text(provider.title)
+                Button(provider == .localGPT ? "切換 Claude API" : "切換本機 GPT") {
+                    if provider == .localGPT { confirming = true }
+                    else { Task { await set(.localGPT) } }
+                }.disabled(saving)
+            } else { ProgressView("讀取 AI 模式…") }
+            Text("Claude 額度由旅程服務提供者統一提供。啟用後的新工作會使用 API 額度；不需旅伴填金鑰。")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("本機 GPT 需要電腦開機連網；手機不必在旁邊。電腦不可用時不會自動改用付費 API。切換不重跑既有工作。")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("剩餘額度：未取得") .font(.caption).foregroundStyle(.secondary)
+            if let errorMessage { ErrorText(errorMessage) }
+        }
+        .task {
+            do { provider = try await session.trips.aiProvider() }
+            catch { errorMessage = userMessage(for: error) }
+        }
+        .confirmationDialog("啟用 Claude API？新 AI 工作將使用共用 API 額度。", isPresented: $confirming, titleVisibility: .visible) {
+            Button("啟用並使用共用 API 額度") { Task { await set(.claudeAPI) } }
+        }
+    }
+    private func set(_ value: AIProvider) async {
+        saving = true
+        defer { saving = false }
+        do { try await session.trips.setAIProvider(value); provider = value; errorMessage = nil }
+        catch { errorMessage = userMessage(for: error) }
     }
 }

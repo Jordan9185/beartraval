@@ -15,6 +15,8 @@ public struct AIActivityView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(job.label.isEmpty ? job.title : job.label).font(.headline)
                         Text(job.statusText).font(.subheadline)
+                        Text((job.provider ?? .localGPT).title).font(.caption).foregroundStyle(.secondary)
+                        Text(job.usageText).font(.caption).foregroundStyle(.secondary)
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             if let seconds = job.elapsed(at: context.date) {
                                 Text("\(job.isActive ? "已等候" : "總耗時") \(seconds / 60) 分 \(seconds % 60) 秒")
@@ -26,7 +28,7 @@ public struct AIActivityView: View {
                 }
                 Section {
                     Text("你可以先做其他事，完成後會更新清單。查看進度與已保存的結果不會再次呼叫 AI。")
-                    Text("使用共用 Mac 的 GPT 服務，Mac 需保持開機連網。這裡只顯示你的工作；其他獲准帳號可能也在排隊，處理時間會變動。")
+                    Text("本機 GPT 需要 Mac 開機連網；Claude API 使用共用 API 額度且不需要 Mac。這裡只顯示你的工作，模式切換只影響新工作，不會自動重跑或轉用付費 API。")
                 }.font(.caption).foregroundStyle(.secondary)
             }
             .navigationTitle("AI 處理進度")

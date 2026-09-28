@@ -40,6 +40,7 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
     /// nil = 新增者已刪除帳號（匿名化）。
     public var addedBy: UUID?
     public var plannedStopId: UUID?
+    public var aiSuppressed: Bool? = nil
     /// 私有 bucket `shopping-images` 內的路徑（`<trip_id>/<檔名>`）；顯示時換成簽名網址。
     public var imagePath: String?
     /// 分享內容提到的店名；只是搜尋線索，不能當販售或庫存事實。
@@ -51,6 +52,12 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
     public var scheduledStoreName: String?
     public var scheduledStoreAddressLocal: String?
     public var scheduledStoreSourceURL: String?
+
+    public var purchaseTiming: String? = nil
+    public var desiredQuantity: Int? = nil
+    public var boughtQuantity: Int? = nil
+    public var quantityRevision: Int? = nil
+    public var buyerID: UUID? = nil
 
     public var savedStoreSuggestions: [ShoppingStoreSuggestion] { storeSuggestions ?? [] }
 
@@ -78,9 +85,13 @@ public struct ShoppingItem: Codable, Identifiable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, note, url
+        case purchaseTiming = "purchase_timing"
+        case desiredQuantity = "desired_quantity", boughtQuantity = "bought_quantity"
+        case quantityRevision = "quantity_revision", buyerID = "buyer_id"
         case tripId = "trip_id"
         case addedBy = "added_by"
         case plannedStopId = "planned_stop_id"
+        case aiSuppressed = "ai_suppressed"
         case imagePath = "image_path"
         case storeHint = "store_hint"
         case storeEvidence = "store_evidence"
@@ -231,6 +242,12 @@ public struct PurchaseEvent: Codable, Hashable, Sendable {
 }
 
 /// 一個商品與顯示所需的資料；狀態由事件推導（§3.4）。
+public struct ShoppingVisit: Codable, Hashable, Sendable, Identifiable {
+    public var stop: Stop
+    public var day: TripDay
+    public var id: UUID { stop.id }
+}
+
 public struct ShoppingEntry: Identifiable, Codable, Hashable, Sendable {
     public var item: ShoppingItem
     public var interestedUserIDs: Set<UUID>
@@ -242,6 +259,7 @@ public struct ShoppingEntry: Identifiable, Codable, Hashable, Sendable {
     public var plannedDayNumber: Int?
     public var plannedDayID: UUID?
     public var plannedStoreLocated: Bool?
+    public var extraVisits: [ShoppingVisit]?
 
     public var id: UUID { item.id }
 
@@ -252,10 +270,10 @@ public struct ShoppingEntry: Identifiable, Codable, Hashable, Sendable {
     }
 
     public var status: Status {
-        if let last = events.max(by: { $0.id < $1.id }), last.type == .purchased {
+        if let last = events.max(by: { $0.id < $1.id }), last.type == .purchased, item.boughtQuantity == nil || item.boughtQuantity! >= (item.desiredQuantity ?? 1) {
             return .purchased(by: last.actorId, at: last.createdAt)
         }
-        return item.plannedStopId == nil ? .unscheduled : .scheduled
+        return item.plannedStopId == nil && (extraVisits ?? []).isEmpty ? .unscheduled : .scheduled
     }
 
     public var isPurchased: Bool {
@@ -284,7 +302,17 @@ public struct ShoppingProgress: Equatable, Sendable {
 /// 今日可買（Today）：只算已安排在當日且未購買的（AC-09）。
 public enum TodayShopping {
     public static func items(_ entries: [ShoppingEntry], on date: String) -> [ShoppingEntry] {
-        entries.filter { $0.status == .scheduled && $0.plannedDate == date }
+        entries.compactMap { entry in
+            guard entry.status == .scheduled else { return nil }
+            if entry.plannedDate == date { return entry }
+            guard let visit = entry.extraVisits?.first(where: { $0.day.localDate == date }) else { return nil }
+            var today = entry
+            today.plannedDate = visit.day.localDate; today.plannedDayID = visit.day.id
+            today.plannedDayNumber = visit.day.displayOrder + 1
+            today.plannedStore = visit.stop.destinationName ?? visit.stop.rawLabel
+            today.plannedStoreLocated = visit.stop.isRoutable
+            return today
+        }
     }
 }
 
@@ -368,6 +396,7 @@ extension TripRepository: ShoppingService {
 
     public func shoppingEntries(of tripID: UUID) async throws -> [ShoppingEntry] {
         struct Interest: Decodable { let item_id: UUID, user_id: UUID }
+        struct VisitLink: Decodable { let item_id: UUID, stop_id: UUID }
         do {
             let items: [ShoppingItem] = try await client.from("shopping_items").select()
                 .eq("trip_id", value: tripID).is("deleted_at", value: nil).order("created_at").execute().value
@@ -377,6 +406,8 @@ extension TripRepository: ShoppingService {
             async let eventsReq: [PurchaseEvent] = client.from("purchase_events").select().in("item_id", values: ids).order("id").execute().value
             async let daysReq = days(of: tripID)
             async let stopsReq = stops(of: tripID)
+            async let visitsReq: [VisitLink] = client.from("shopping_extra_visits").select().eq("trip_id", value: tripID).is("removed_at", value: nil).execute().value
+            let visits = try await visitsReq
             let (interests, events, days, stops) = try await (interestsReq, eventsReq, daysReq, stopsReq)
             let placeList = try await places(ids: stops.compactMap(\.placeId))
             let placeByID = Dictionary(uniqueKeysWithValues: placeList.map { ($0.id, $0) })
@@ -385,11 +416,16 @@ extension TripRepository: ShoppingService {
             let interestByItem = Dictionary(grouping: interests, by: \.item_id).mapValues { Set($0.map(\.user_id)) }
             let eventsByItem = Dictionary(grouping: events, by: \.itemId)
             return items.map { item in
-                let stop = item.plannedStopId.flatMap { stopByID[$0] }
+                let extraVisits = visits.filter { $0.item_id == item.id }.compactMap { link -> ShoppingVisit? in
+                    guard let stop = stopByID[link.stop_id], let day = dayByID[stop.dayId] else { return nil }
+                    return ShoppingVisit(stop: stop, day: day)
+                }.sorted { $0.day.displayOrder == $1.day.displayOrder ? $0.stop.sortOrder < $1.stop.sortOrder : $0.day.displayOrder < $1.day.displayOrder }
+                let stop = item.plannedStopId.flatMap { stopByID[$0] } ?? extraVisits.first?.stop
                 let place = stop?.placeId.flatMap { placeByID[$0] }
                 var entry = ShoppingEntry(item: item, interestedUserIDs: interestByItem[item.id] ?? [], events: eventsByItem[item.id] ?? [],
                                           plannedDate: stop.flatMap { dayByID[$0.dayId]?.localDate },
                                           plannedStore: place.map { $0.displayTitle } ?? item.scheduledStoreName ?? stop?.rawLabel)
+                entry.extraVisits = extraVisits
                 entry.plannedDayNumber = stop.flatMap { dayByID[$0.dayId] }.map { $0.displayOrder + 1 }
                 entry.plannedDayID = stop?.dayId
                 entry.plannedStoreLocated = stop?.isRoutable == true
@@ -432,5 +468,55 @@ extension TripRepository: ShoppingService {
             try await client.rpc("add_merchant_candidate", params: Params(p_item_id: itemID, p_place_id: placeID, p_evidence_type: evidence,
                                                                           p_evidence_url: url, p_evidence_note: note)).execute()
         } catch { throw BackendError.from(error) }
+    }
+}
+
+public struct ShoppingDemand: Codable, Equatable, Sendable {
+    public var user_id: UUID
+    public var quantity: Int
+    public init(userID: UUID, quantity: Int) { user_id = userID; self.quantity = quantity }
+}
+
+extension TripRepository {
+    public func shoppingDemands(itemID: UUID) async throws -> [ShoppingDemand] {
+        do { return try await client.from("shopping_demands").select("user_id,quantity").eq("item_id", value: itemID).execute().value }
+        catch { throw BackendError.from(error) }
+    }
+    public func setShoppingQuantities(item: ShoppingItem, desired: Int, bought: Int, buyerID: UUID?, demands: [ShoppingDemand], operationID: UUID) async throws {
+        struct Params: Encodable {
+            let p_item_id: UUID, p_expected_revision: Int, p_desired: Int, p_bought: Int
+            let p_buyer_id: UUID?, p_demands: [ShoppingDemand], p_client_op_id: UUID
+        }
+        do { try await client.rpc("set_shopping_quantities", params: Params(p_item_id: item.id,
+            p_expected_revision: item.quantityRevision ?? 0, p_desired: desired, p_bought: bought,
+            p_buyer_id: buyerID, p_demands: demands, p_client_op_id: operationID)).execute() }
+        catch { throw BackendError.from(error) }
+    }
+}
+
+extension TripRepository {
+    public func unschedulePurchase(itemID: UUID, stopID: UUID, revision: Int, removeEmpty: Bool = false) async throws {
+        struct Params: Encodable { let p_item_id: UUID; let p_stop_id: UUID; let p_route_revision: Int; let p_remove_empty: Bool }
+        do {
+            try await client.rpc("unschedule_purchase", params: Params(p_item_id: itemID, p_stop_id: stopID, p_route_revision: revision, p_remove_empty: removeEmpty)).execute()
+        } catch { throw BackendError.from(error) }
+    }
+}
+
+extension TripRepository {
+    public func addShoppingVisit(itemID: UUID, sourceStopID: UUID, day: TripDay, beforeStopID: UUID?, operationID: UUID) async throws {
+        struct Params: Encodable {
+            let p_item_id: UUID, p_source_stop: UUID, p_day_id: UUID, p_route_revision: Int, p_operation_id: UUID
+            let p_before_stop: UUID?
+        }
+        do { try await client.rpc("add_shopping_visit", params: Params(p_item_id: itemID, p_source_stop: sourceStopID,
+            p_day_id: day.id, p_route_revision: day.routeRevision, p_operation_id: operationID, p_before_stop: beforeStopID)).execute() }
+        catch { throw BackendError.from(error) }
+    }
+    public func removeShoppingVisit(itemID: UUID, visit: ShoppingVisit, removeEmpty: Bool) async throws {
+        struct Params: Encodable { let p_item_id: UUID, p_stop_id: UUID, p_route_revision: Int, p_remove_empty: Bool }
+        do { try await client.rpc("remove_shopping_visit", params: Params(p_item_id: itemID, p_stop_id: visit.id,
+            p_route_revision: visit.day.routeRevision, p_remove_empty: removeEmpty)).execute() }
+        catch { throw BackendError.from(error) }
     }
 }

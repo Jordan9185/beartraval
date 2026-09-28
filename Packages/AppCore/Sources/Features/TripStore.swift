@@ -26,6 +26,14 @@ public final class TripStore {
     }
     /// 從收藏安排完後，今天分頁要打開的日期。
     public var requestedDayID: UUID?
+    public var selectedDayID: UUID? {
+        didSet {
+            if usesCache, let id = selection, let day = selectedDayID, let owner = cacheOwner {
+                UserDefaults.standard.set(day.uuidString, forKey: "selected-day-\(owner)-\(id)")
+            }
+        }
+    }
+    private let cacheOwner: UUID?
     public private(set) var snapshot: TripSnapshot?
     public private(set) var myRole: TripRole?
     public private(set) var errorMessage: String?
@@ -54,11 +62,13 @@ public final class TripStore {
     public init(repository: TripRepository) {
         self.repository = repository
         usesCache = true
+        cacheOwner = repository.currentUserID
     }
 
     init(dataSource: any TripStoreDataSource) {
         repository = dataSource
         usesCache = false
+        cacheOwner = nil
     }
 
     public func start() async {
@@ -67,6 +77,10 @@ public final class TripStore {
 
     private func select(_ id: UUID?) {
         selection = id
+        selectedDayID = id.flatMap { trip in cacheOwner.flatMap { owner in
+            UserDefaults.standard.string(forKey: "selected-day-\(owner)-\(trip)").flatMap(UUID.init(uuidString:))
+        } }
+        requestedDayID = nil
         subscriptionID = UUID()
         loadID = UUID()
         snapshot = nil

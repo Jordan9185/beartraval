@@ -24,8 +24,10 @@ Deno.serve(async (req) => {
     if (!token) return reply({ error: "UNAUTHENTICATED" }, 401);
     const { data: auth } = await admin.auth.getUser(token);
     if (!auth.user) return reply({ error: "UNAUTHENTICATED" }, 401);
+    const { error: expiryError } = await admin.rpc("expire_claude_ai", { p_owner: auth.user.id });
+    if (expiryError) return reply({ error: "QUEUE_ERROR" }, 503);
     if (body.action === "activity") {
-      const columns = "id,kind,status,reason,created_at,updated_at,context,query:input->>query,trip_name:input->>tripName,model:result->>model";
+      const columns = "id,kind,status,reason,created_at,updated_at,context,query:input->>query,trip_name:input->>tripName,model:result->>model,usage:result->usage";
       const [active, recent] = await Promise.all([
         admin.from("personal_ai_jobs").select(columns).eq("owner_id", auth.user.id)
           .in("status", ["queued", "running"]).order("created_at"),
@@ -36,10 +38,10 @@ Deno.serve(async (req) => {
       return reply({ jobs: activitySummary([...(active.data ?? []), ...(recent.data ?? [])]) });
     }
     if (!UUID.test(body.job_id ?? "")) return reply({ error: "INVALID_REQUEST" }, 400);
-    const { data: job } = await admin.from("personal_ai_jobs").select("status,result,reason")
+    const { data: job } = await admin.from("personal_ai_jobs").select("status,result,reason,context")
       .eq("id", body.job_id).eq("owner_id", auth.user.id).maybeSingle();
     if (!job) return reply({ error: "NOT_FOUND" }, 404);
-    return reply(job.result ?? { status: job.status, job_id: body.job_id, reason: job.reason ?? (job.status === "running" ? "personal_ai_running" : "personal_ai_waiting") });
+    return reply(job.result ?? { status: job.status, job_id: body.job_id, reason: job.reason ?? (job.context?.ai_provider === "claude_api" ? "claude_api_running" : job.status === "running" ? "personal_ai_running" : "personal_ai_waiting") });
   }
   const owners = allowedPersonalAIUsers();
   if (!owners.length || !await sameSecret(req.headers.get("X-Personal-AI-Token") ?? "",
@@ -62,7 +64,7 @@ Deno.serve(async (req) => {
   }
   if (!UUID.test(body.job_id ?? "") || !UUID.test(body.lease ?? "")) return reply({ error: "INVALID_REQUEST" }, 400);
   if (body.action === "complete") {
-    if (!body.result || !["parsed", "answered", "extracted", "ready", "found", "none", "failed"].includes(body.result.status)
+    if (!body.result || !["prepared", "parsed", "answered", "extracted", "ready", "found", "none", "failed"].includes(body.result.status)
       || JSON.stringify(body.result).length > 500_000 || !/^codex\/gpt-[a-z0-9.-]+$/.test(body.model ?? "")) {
       return reply({ error: "INVALID_RESULT" }, 422);
     }

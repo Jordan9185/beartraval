@@ -62,6 +62,9 @@ public struct Stop: Codable, Identifiable, Hashable, Sendable {
     public var dayId: UUID
     public var placeId: UUID?
     public var rawLabel: String
+    public var destinationName: String? = nil
+    public var destinationAddress: String? = nil
+    public var destinationSource: String? = nil
     public var resolutionStatus: ResolutionStatus
     /// 旅行地當地時間 `HH:MM:SS`（時區見 TripDay.timeZone）。
     public var startTime: String?
@@ -81,6 +84,9 @@ public struct Stop: Codable, Identifiable, Hashable, Sendable {
         case dayId = "day_id"
         case placeId = "place_id"
         case rawLabel = "raw_label"
+        case destinationName = "destination_name"
+        case destinationAddress = "destination_address"
+        case destinationSource = "destination_source"
         case resolutionStatus = "resolution_status"
         case startTime = "start_time"
         case endTime = "end_time"
@@ -95,6 +101,9 @@ public struct StopDraft: Encodable, Equatable, Sendable {
     public var id: UUID?
     public var placeId: UUID?
     public var rawLabel: String
+    public var destinationName: String? = nil
+    public var destinationAddress: String? = nil
+    public var destinationSource: String? = nil
     /// `HH:MM`，旅行地當地時間。
     public var startTime: String?
     public var endTime: String?
@@ -119,12 +128,18 @@ public struct StopDraft: Encodable, Equatable, Sendable {
         self.init(id: stop.id, placeId: stop.placeId, rawLabel: stop.rawLabel,
                   startTime: stop.startTime.map(LocalTime.hourMinute), endTime: stop.endTime.map(LocalTime.hourMinute),
                   dwellMinutes: stop.dwellMinutes, fixed: stop.fixed, kind: stop.kind)
+        destinationName = stop.destinationName
+        destinationAddress = stop.destinationAddress
+        destinationSource = stop.destinationSource
     }
 
     enum CodingKeys: String, CodingKey {
         case id, fixed, kind
         case placeId = "place_id"
         case rawLabel = "raw_label"
+        case destinationName = "destination_name"
+        case destinationAddress = "destination_address"
+        case destinationSource = "destination_source"
         case startTime = "start_time"
         case endTime = "end_time"
         case dwellMinutes = "dwell_minutes"
@@ -132,7 +147,7 @@ public struct StopDraft: Encodable, Equatable, Sendable {
 }
 
 /// 註冊 POI 用（`upsert_place`）。同一 provider id 已存在時回傳既有資料，不覆寫。
-public struct PlaceDraft: Equatable, Sendable {
+public struct PlaceDraft: Codable, Equatable, Sendable {
     public var provider: RouteProvider
     public var providerPlaceId: String
     public var name: String

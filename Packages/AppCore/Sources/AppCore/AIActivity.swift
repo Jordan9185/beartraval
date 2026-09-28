@@ -12,14 +12,28 @@ public struct AIJobActivity: Decodable, Identifiable, Equatable, Sendable {
     public let updatedAt: String
     public let queuePosition: Int?
     public let model: String?
+    public var provider: AIProvider? = nil
+    public struct Usage: Decodable, Equatable, Sendable {
+        public var input_tokens: Int?
+        public var output_tokens: Int?
+    }
+    public var usage: [Usage]? = nil
+    public var usageText: String {
+        guard provider == .claudeAPI else { return "訂閱剩餘額度：未取得" }
+        guard let usage, !usage.isEmpty, usage.allSatisfy({ $0.input_tokens != nil && $0.output_tokens != nil }) else {
+            return "API 用量尚未取得；失敗也可能已使用額度"
+        }
+        return "API 回報：輸入 \(usage.reduce(0) { $0 + ($1.input_tokens ?? 0) })／輸出 \(usage.reduce(0) { $0 + ($1.output_tokens ?? 0) }) tokens；費用未取得"
+    }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, status, reason, label, model
+        case id, kind, status, reason, label, model, provider, usage
         case createdAt = "created_at", updatedAt = "updated_at", queuePosition = "queue_position"
     }
     public var isActive: Bool { status == "queued" || status == "running" }
     public var title: String {
         switch kind {
+        case "prepare": "讀取行程資料"
         case "parse": "整理行程"
         case "inbox": "辨識分享內容"
         case "discover": "查找店家"
@@ -29,6 +43,7 @@ public struct AIJobActivity: Decodable, Identifiable, Equatable, Sendable {
         }
     }
     public var statusText: String {
+        if isActive && provider == .claudeAPI { return "Claude API・正在使用共用 API 額度" }
         if isActive && reason == "personal_ai_limit" { return "等待訂閱額度恢復" }
         if isActive && reason == "personal_ai_login" { return "需要在 Mac 重新登入 ChatGPT" }
         switch status {

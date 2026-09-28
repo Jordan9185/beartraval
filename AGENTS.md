@@ -74,7 +74,7 @@ supabase functions deploy <name> --use-api   # parse-import、ask-trip、extract
 ```
 
 - Migration 要向後相容：已安裝的舊版 App 會繼續呼叫舊參數。新增 RPC 參數一律給預設值，並 `drop function` 舊簽名、重新 `grant`（範例見 `20260925000018_place_local_address.sql`）。
-- 現行 AI 全部使用個人 ChatGPT／Codex 訂閱：見 `ai/personal-worker/README.md`。五個 Edge Functions 只排隊，Mac 執行 GPT；不得自動退回 Claude 或 OpenAI 付費 API。共用模組中的歷史 Claude 接頭僅供舊評測，正式入口不建立該 client。文字先用帳號可用的 `gpt-5.6-luna`，圖片用 `gpt-5.6-sol`；更換模型先查官方帳號清單。
+- AI 雙模式以 2026-09-28 使用者新規格為準：預設本機 ChatGPT／Codex 訂閱，可明確啟用擁有者統一提供的 Claude API；不得因 Mac 離線或額度不足自動轉用付費 API。工作模式固定，啟用／使用 Claude 必須提示共用額度。見 `docs/spec/rebuild-v1-spec-draft.md` §12 與 `docs/planning/rebuild-v1-implementation.md`。現行部署仍須依最新交接核對，程式採用不表示已部署。Mac 文字 `gpt-5.6-luna`、圖片 `gpt-5.6-sol` 保持，換模型先查官方帳號清單。
 
 ## 踩過的坑（改相關程式前請先看）
 

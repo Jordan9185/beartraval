@@ -10,6 +10,7 @@ import * as z from "zod/v4";
 export const TripContext = z.object({
   trip: z.object({ name: z.string(), start_date: z.string(), end_date: z.string(), time_zone: z.string() }),
   today: z.string().nullable(),
+  focus_stop_id: z.string().nullable().optional(),
   days: z.array(
     z.object({
       id: z.string(),
@@ -19,6 +20,7 @@ export const TripContext = z.object({
         z.object({
           id: z.string(),
           label: z.string(),
+          address: z.string().nullable().optional(),
           start_time: z.string().nullable(),
           fixed: z.boolean(),
           kind: z.enum(["standard", "purchase"]),
@@ -33,6 +35,8 @@ export const TripContext = z.object({
       label: z.string(),
       category: z.enum(["eat", "cafe", "shop", "place", "other"]),
       place_confirmed: z.boolean(),
+      address: z.string().nullable().optional(),
+      ai_suppressed: z.boolean().optional(),
       added_by: z.string(),
       interested: z.array(z.string()),
     }),
@@ -42,10 +46,13 @@ export const TripContext = z.object({
       id: z.string(),
       name: z.string(),
       status: z.enum(["unscheduled", "scheduled", "purchased"]),
+      purchase_timing: z.string().optional(),
+      ai_suppressed: z.boolean().optional(),
       planned_date: z.string().nullable(),
       planned_store: z.string().nullable(),
       // "Possible merchants" only; stock is always unknown.
       merchants: z.array(z.object({ name: z.string(), evidence: z.string() })),
+      store_candidates: z.array(z.object({ name: z.string(), address: z.string().nullable(), source_url: z.string() })).optional(),
     }),
   ),
   // Computed by the app with Apple Maps; null minutes means it could not be estimated.
@@ -66,12 +73,33 @@ export const Citation = z.object({
   id: z.string(),
 });
 
+export const NearbyRecommendation = z.object({
+  name: z.string(),
+  category: z.enum(["food", "sight", "event", "restroom", "other"]),
+  introduction: z.string(),
+  address_local: z.string().nullable().optional(),
+  source_url: z.url(),
+  // 路程與評分各自附引用原文；無資料保留 null，不能以直線距離代替路線。
+  route: z.object({ description: z.string(), source_url: z.url(), evidence: z.string() }).nullable(),
+  rating: z.object({ display: z.string(), platform: z.string(), reviews: z.string().nullable(), source_url: z.url(), evidence: z.string() }).nullable(),
+  // 活動必須有引用所載日期範圍；不可把常態景點猜成當日活動。
+  event_period: z.object({ start_date: z.string(), end_date: z.string(), source_url: z.url(), evidence: z.string() }).nullable().optional(),
+  visit_note: z.string(),
+});
+
 export const AssistantAnswer = z.object({
   // Traditional Chinese answer shown to the user.
   answer: z.string(),
   // True when the trip data does not contain what the question needs.
   cannot_determine: z.boolean(),
   citations: z.array(Citation),
+  recommendations: z.array(NearbyRecommendation).max(6).optional(),
+  arrangements: z.array(z.object({ kind: z.enum(["saved", "shopping", "stop_move", "stop_remove"]), item_id: z.string(), day_id: z.string(),
+    source_url: z.string().nullable(), anchor_stop_id: z.string().nullable(), matched_area: z.string().nullable().optional(), reason: z.string() })).max(30).optional(),
+  packing_suggestions: z.array(z.object({ name: z.string().min(1).max(120), quantity: z.number().int().min(1).max(999), reason: z.string() })).max(30).optional(),
+  checked_at: z.string().optional(),
+  shopping_proposal: z.object({ item_id: z.string(), day_id: z.string(), source_url: z.string(),
+    anchor_stop_id: z.string(), matched_area: z.string().nullable().optional(), reason: z.string() }).nullable().optional(),
   // Optional suggestion to add a confirmed Saved place to a day. The app
   // recomputes the numbers and asks the user to confirm before anything changes.
   proposal: z

@@ -7,6 +7,11 @@ struct MembersView: View {
     let session: SessionModel
     let trip: Trip
     let myRole: TripRole?
+    @Environment(\.dismiss) private var dismiss
+    @State private var currentRole: TripRole?
+    @State private var offer: OwnershipOffer?
+    @State private var confirmingLeave = false
+    @State private var ownershipTarget: TripMember?
     @State private var members: [TripMember] = []
     @State private var inviteRole: TripRole = .editor
     @State private var inviteURL: URL?
@@ -20,11 +25,12 @@ struct MembersView: View {
                     HStack {
                         Text(member.displayName + (member.userID == session.trips.currentUserID ? "（你）" : ""))
                         Spacer()
-                        if myRole?.canManageMembers == true && member.role != .owner {
+                        if (currentRole ?? myRole)?.canManageMembers == true && member.role != .owner {
                             Menu(member.role.displayName) {
                                 ForEach([TripRole.editor, .viewer], id: \.self) { role in
                                     Button(role.displayName) { Task { await setRole(member, role) } }
                                 }
+                                if member.role == .editor { Button("邀請接任擁有者") { ownershipTarget = member } }
                                 Button("移除", role: .destructive) { Task { await remove(member) } }
                             }
                         } else {
@@ -34,12 +40,9 @@ struct MembersView: View {
                 }
             }
 
-            if myRole?.canManageMembers == true {
+            if (currentRole ?? myRole)?.canManageMembers == true {
                 Section {
-                    Picker("權限", selection: $inviteRole) {
-                        Text(TripRole.editor.displayName).tag(TripRole.editor)
-                        Text(TripRole.viewer.displayName).tag(TripRole.viewer)
-                    }
+                    Text("以可編輯旅伴身分加入；既有僅檢視成員不自動升權。")
                     Button("產生邀請連結") { Task { await invite() } }
                     if let inviteURL {
                         ShareLink(item: inviteURL) { Label("分享邀請連結", systemImage: "square.and.arrow.up") }
@@ -58,15 +61,54 @@ struct MembersView: View {
                 }
             }
 
+            if let offer {
+                Section("擁有權移交") {
+                    if offer.to_user == session.trips.currentUserID {
+                        Text("擁有者邀請你接任。接受後可管理成員及刪除旅程，原擁有者改為可編輯旅伴。")
+                        Button("接受接任") { Task { await respond(offer, accept: true) } }
+                        Button("婉拒") { Task { await respond(offer, accept: false) } }
+                    } else {
+                        Text("等待對方接受接任；目前的擁有權不變。")
+                        Button("取消移交") { Task { await transfer(to: nil) } }
+                    }
+                }
+            }
+            Section {
+                if (currentRole ?? myRole) == .owner {
+                    Text("退出前，請先在成員選單邀請接任；對方接受後才能退出。")
+                } else { Button("退出這趟旅程", role: .destructive) { confirmingLeave = true } }
+            } footer: {
+                Text("共同內容與已完成紀錄留給旅伴；未完成分工回待認領。私人來源及用品不轉公開，退出後無法修改該旅程。")
+            }
             if let errorMessage { ErrorText(errorMessage) }
         }
         .navigationTitle("成員")
         .task { await reload() }
+        .confirmationDialog("退出後將無法同步修改這趟旅程。", isPresented: $confirmingLeave, titleVisibility: .visible) {
+            Button("確認退出", role: .destructive) { Task { await leave() } }
+        }
+        .confirmationDialog("邀請這位旅伴接任擁有者？對方接受後，你會改為可編輯旅伴。", isPresented: Binding(get: { ownershipTarget != nil }, set: { if !$0 { ownershipTarget = nil } }), titleVisibility: .visible) {
+            if let target = ownershipTarget { Button("邀請 \(target.displayName) 接任") { Task { await transfer(to: target.userID) } } }
+        }
     }
 
+    private func transfer(to userID: UUID?) async {
+        do { try await session.trips.offerOwnership(tripID: trip.id, to: userID); await reload() }
+        catch { errorMessage = userMessage(for: error) }
+    }
+    private func respond(_ offer: OwnershipOffer, accept: Bool) async {
+        do { try await session.trips.respondOwnership(tripID: trip.id, from: offer.from_user, accept: accept); await reload() }
+        catch { errorMessage = userMessage(for: error) }
+    }
+    private func leave() async {
+        do { try await session.trips.leaveTrip(tripID: trip.id); dismiss() }
+        catch { errorMessage = userMessage(for: error) }
+    }
     private func reload() async {
         do {
             members = try await session.trips.members(of: trip.id)
+            currentRole = try await session.trips.myRole(in: trip.id)
+            offer = try await session.trips.ownershipOffer(tripID: trip.id)
         } catch {
             errorMessage = "讀取失敗：\(userMessage(for: error))"
         }
@@ -123,7 +165,7 @@ struct JoinTripView: View {
                 }
                 Button(joining ? "加入中…" : "加入") { Task { await join() } }
                     .disabled(joining || InviteLink.token(from: text) == nil)
-                if let errorMessage { ErrorText(errorMessage) }
+            if let errorMessage { ErrorText(errorMessage) }
             }
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("加入旅程")

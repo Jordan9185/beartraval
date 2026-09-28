@@ -42,4 +42,10 @@
 - 後端 Supabase（Postgres + RLS + Realtime + Edge Functions）；iOS 17+；登入用 Email＋密碼（D7，2026-09-24 改定）。
 - 路線與 POI：MVP 只用 Apple Maps；算不出時顯示無法估算。韓國地點提供按鈕外開 Naver／Kakao 地圖（帶店名、座標、起點、交通方式），不串接其 API、不讀回分鐘數（§4.3.1）。
 
-- AI 個人模式（2026-09-27 已確認）：所有 App AI 入口改用 Mac 上的 ChatGPT／Codex 訂閱額度；Mac 離線或額度不足時保留佇列，不退回付費 API。設定及維護見 [個人 GPT 工作程式](ai/personal-worker/README.md)。
+- AI 雙模式（2026-09-28 使用者新決策）：預設本機 ChatGPT／Codex 訂閱；可明確啟用由產品擁有者統一提供給旅伴的 Claude API。啟用及處理中必須說明共用 API 額度；Mac 不可用時不得自動轉付費 API。工作模式建立後固定，切換只影響新工作。金鑰只在後端。見[重做版規格 §12](docs/spec/rebuild-v1-spec-draft.md)；採用規格不表示已部署。
+
+## 重做版採用（2026-09-28）
+
+產品負責人已要求「按照這個規格進行調整」。[重做版 spec v0.23](docs/spec/rebuild-v1-spec-draft.md) 的已確認項目優先於舊產品流程：AI 搜尋不依賴 MapKit、行程優先的購物、用品、手動個人封存、本站問答餐飲路程與評分、雙 AI。原文匯入忠實解析；一句話生成整趟旅行延後到第二版。R1–R5 仍為工程建議，不冒充逐項採用。沿用既有 App 與相容 migration，不清除原資料。
+
+使用者設定停止門檻：Codex 帳號工作額度剩餘低於 15% 時停止開發，保存狀態、驗證與剩餘規格，交接給 Claude；不要為消耗剩餘額度而繼續。每批修改／驗證後檢查，任一可見工作限額窗口低於門檻就停止。

@@ -279,7 +279,7 @@ struct SavedView: View {
             scheduledDays = Dictionary(uniqueKeysWithValues: entries.compactMap { entry in
                 let stop = loadedStops.first {
                     $0.id == entry.saved.plannedStopId ||
-                        (entry.saved.plannedStopId == nil && entry.saved.placeId != nil && $0.placeId == entry.saved.placeId)
+                        (entry.saved.arrangementDetached != true && entry.saved.plannedStopId == nil && entry.saved.placeId != nil && $0.placeId == entry.saved.placeId)
                 }
                 return stop.flatMap { dayByID[$0.dayId] }.map { (entry.id, $0) }
             })
@@ -437,6 +437,8 @@ struct SavedDetailView: View {
     @State private var searchingAddress = false
     @State private var addressMessage: String?
     @State private var didSearchAddress = false
+    @State private var confirmingWithdrawal = false
+    @State private var withdrawing = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -444,6 +446,16 @@ struct SavedDetailView: View {
             Form {
                 Section {
                     Text(entry.title).font(.title3.weight(.semibold))
+                    if canEdit {
+                        Button(entry.saved.aiSuppressed == true ? "恢復 AI 安排建議" : "這趟不安排") {
+                            Task {
+                                do {
+                                    try await repository.suppressArrangement(kind: "saved", id: entry.id, suppressed: entry.saved.aiSuppressed != true)
+                                    onChanged(); dismiss()
+                                } catch { addressMessage = userMessage(for: error) }
+                            }
+                        }
+                    }
                     if let address = addressHint ?? entry.addressLabel {
                         Text(entry.isConfirmed ? address : "地址線索：\(address)")
                             .font(.subheadline).textSelection(.enabled)
@@ -480,6 +492,10 @@ struct SavedDetailView: View {
                     }
                 } else if let scheduledDay {
                     Section {
+                        if canEdit {
+                            Button(withdrawing ? "撤回中…" : "撤回安排，保留收藏") { confirmingWithdrawal = true }
+                                .disabled(withdrawing)
+                        }
                         Button("查看第 \(scheduledDay.displayOrder + 1) 天") {
                             onOpenDay(scheduledDay.id)
                             dismiss()
@@ -538,11 +554,34 @@ struct SavedDetailView: View {
                     .padding().background(.bar)
                 }
             }
+            .confirmationDialog("撤回這筆收藏的安排", isPresented: $confirmingWithdrawal, titleVisibility: .visible) {
+                Button("撤回關聯，保留行程站點") { Task { await withdraw(removeEmpty: false) } }
+                Button("撤回並移除沒有其他用途的站點", role: .destructive) { Task { await withdraw(removeEmpty: true) } }
+                Button("取消", role: .cancel) { }
+            } message: {
+                Text("收藏及來源會保留。固定行程、原有站點與仍供其他商品使用的站點不會移除。")
+            }
             .navigationTitle("收藏")
             .navigationBarTitleDisplayModeInline()
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
             .task { await discoverMissingAddress() }
         }
+    }
+
+    private func withdraw(removeEmpty: Bool) async {
+        guard let scheduledDay else { return }
+        withdrawing = true
+        defer { withdrawing = false }
+        do {
+            // 使用畫面所見版本，旅伴在確認期間修改時由後端拒絕覆蓋。
+            let stops = try await repository.stops(of: entry.saved.tripId)
+            guard let stopID = entry.saved.plannedStopId ?? stops.first(where: {
+                entry.saved.placeId != nil && $0.placeId == entry.saved.placeId && $0.dayId == scheduledDay.id
+            })?.id else { addressMessage = "安排已變更，請關閉並重新開啟收藏。"; return }
+            try await repository.unscheduleSaved(savedID: entry.id, stopID: stopID,
+                routeRevision: scheduledDay.routeRevision, removeEmpty: removeEmpty)
+            onChanged(); dismiss()
+        } catch { addressMessage = userMessage(for: error) }
     }
 
     private func discoverMissingAddress() async {

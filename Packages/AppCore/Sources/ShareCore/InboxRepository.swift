@@ -260,7 +260,11 @@ private actor StoreDiscoveryCache {
 }
 
 /// 所有 API 由 JWT + owner-only RLS／RPC 驗證。Extension 與主 App 可共用同一同步實作。
-public struct InboxRepository: Sendable {
+public protocol PlaceDiscovering: Sendable {
+    func discoverPlaces(query: String, context: String) async throws -> [DiscoveredPlace]
+}
+
+public struct InboxRepository: PlaceDiscovering, Sendable {
     public let client: SupabaseClient
 
     public init(client: SupabaseClient) { self.client = client }
@@ -337,6 +341,14 @@ public struct InboxRepository: Sendable {
             let _: [String: String] = try await client.functions.invoke("organize-inbox", options: FunctionInvokeOptions(
                 body: Params(capture_id: captureID)))
         } catch { throw BackendError.from(error) }
+    }
+
+    /// 先排入 AI 搜尋，不在首屏等模型，也不先查地圖。結果仍寫回本人項目。
+    public func requestDiscovery(itemID: UUID) async throws {
+        struct Body: Encodable { let item_id: UUID; let force = false }
+        struct Result: Decodable { let status: String; let reason: String? }
+        let result: Result = try await client.functions.invoke("discover-places", options: FunctionInvokeOptions(body: Body(item_id: itemID)))
+        if result.status == "failed" { throw PlaceDiscoveryError.unavailable(result.reason ?? "unknown") }
     }
 
     /// 網路結果只有店名與可回查的來源；座標仍須由地點服務搜尋並由使用者確認。

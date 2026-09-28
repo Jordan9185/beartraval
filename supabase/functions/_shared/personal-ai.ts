@@ -1,3 +1,5 @@
+declare const EdgeRuntime: { waitUntil(task: Promise<unknown>): void };
+import { runClaudeJob } from "./claude-ai.ts";
 import { createClient } from "@supabase/supabase-js";
 import { personalAIUsers } from "./personal-ai-access.ts";
 
@@ -19,6 +21,13 @@ export async function enqueuePersonalAI(authorization: string, kind: string, inp
   if (!allowedPersonalAIUsers().includes(owner)) {
     return reply({ status: "failed", reason: "personal_ai_unavailable" });
   }
+  const { data: preference, error: preferenceError } = await admin.from("ai_preferences").select("provider").eq("user_id", owner).maybeSingle();
+  if (preferenceError) return reply({ status: "failed", reason: "ai_settings_unavailable" }, 503);
+  const provider = preference?.provider ?? "local_gpt";
+  if (provider === "claude_api" && (!Deno.env.get("ANTHROPIC_API_KEY") || !Deno.env.get("CLAUDE_AI_MODEL"))) {
+    return reply({ status: "failed", reason: "claude_api_not_configured" });
+  }
+  context = { ...context, ai_provider: provider };
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([kind, input, context])));
   const key = Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
   const payload = input as Record<string, unknown>;
@@ -33,6 +42,9 @@ export async function enqueuePersonalAI(authorization: string, kind: string, inp
     return reply({ status: "failed", reason: "queue_error" }, 503);
   }
   if (job.result) return reply(job.result);
+  if (provider === "claude_api" && job.status === "queued") {
+    EdgeRuntime.waitUntil(runClaudeJob(admin, job.id));
+  }
   return reply({ status: job.status, job_id: job.id, reason: job.reason ??
-    (job.status === "running" ? "personal_ai_running" : "personal_ai_waiting") }, 202);
+    (provider === "claude_api" ? "claude_api_running" : job.status === "running" ? "personal_ai_running" : "personal_ai_waiting") }, 202);
 }

@@ -21,6 +21,7 @@ class Query {
   eq(key: string, value: any) { this.filters.push((row) => row[key] === value); return this; }
   in(key: string, values: any[]) { this.filters.push((row) => values.includes(row[key])); return this; }
   lte(key: string, value: any) { this.filters.push((row) => row[key] <= value); return this; }
+  lt(key: string, value: any) { this.filters.push((row) => row[key] < value); return this; }
   gt(key: string, value: any) { this.filters.push((row) => row[key] > value); return this; }
   or(_condition: string) {
     this.filters.push((row) => row.status === "queued" || (row.status === "running" && row.lease_until < new Date().toISOString()));
@@ -65,6 +66,7 @@ Object.assign(globalThis, {
   },
 });
 const bundled = await build({
+  nodePaths: [new URL("../../trip-assistant/node_modules", import.meta.url).pathname],
   stdin: { contents: 'import "./supabase/functions/personal-ai/index.ts"; export { enqueuePersonalAI } from "./supabase/functions/_shared/personal-ai.ts";',
     resolveDir: new URL("../../../", import.meta.url).pathname },
   bundle: true, write: false, format: "esm", platform: "node",

@@ -14,6 +14,7 @@ extension BackendError {
         case .staleRevision: "行程剛被其他人修改，已載入最新版本，請重新確認。"
         case .conflict(let code):
             switch code {
+            case "AMBIGUOUS_DUPLICATE": "已有同名來源的未確認收藏，請先到收藏清單核對分店，不會自動合併。"
             case "DUPLICATE_SAVED": "這個地點已經在收藏清單裡。"
             case "ALREADY_COMMITTED": "這份匯入已經建立過旅程。"
             case "PROPOSAL_CLOSED": "這個變更已經處理過了。"
@@ -133,6 +134,43 @@ public struct SnapshotCache: Sendable {
     /// 登出時清掉，下一個帳號離線開 App 不會看到上一個帳號的旅程。
     public func removeAll() {
         try? FileManager.default.removeItem(at: directory)
+    }
+}
+
+/// 封存清單與一般清單一起保存，按登入帳號隔離；離線只讀，不推測權限。
+public struct TripCatalogCache: Sendable {
+    public struct Entry: Codable, Sendable {
+        public var trips: [Trip]
+        public var archivedIDs: Set<UUID>
+        public var savedAt: Date
+        public init(trips: [Trip], archivedIDs: Set<UUID>, savedAt: Date = Date()) {
+            self.trips = trips; self.archivedIDs = archivedIDs; self.savedAt = savedAt
+        }
+    }
+    private let file: URL
+    public init(directory: URL, owner: UUID) {
+        file = directory.appending(path: owner.uuidString).appending(path: "catalog.json")
+    }
+    public static func shared(owner: UUID) -> TripCatalogCache? {
+        SnapshotCache.shared().map { TripCatalogCache(directory: $0.directory, owner: owner) }
+    }
+    public func save(_ entry: Entry) throws {
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(entry).write(to: file, options: .atomic)
+    }
+    public func load() -> Entry? {
+        (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(Entry.self, from: $0) }
+    }
+    public func removeTrip(_ tripID: UUID) {
+        guard var entry = load() else { return }
+        entry.trips.removeAll { $0.id == tripID }; entry.archivedIDs.remove(tripID)
+        try? save(entry)
+    }
+    public func remove() { try? FileManager.default.removeItem(at: file) }
+}
+extension SnapshotCache {
+    public static func forOwner(_ owner: UUID) -> SnapshotCache? {
+        shared().map { SnapshotCache(directory: $0.directory.appending(path: owner.uuidString)) }
     }
 }
 

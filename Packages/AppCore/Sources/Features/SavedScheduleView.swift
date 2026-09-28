@@ -20,6 +20,8 @@ struct SavedScheduleView: View {
     @State private var submitting = false
     @State private var errorMessage: String?
     @State private var operationID = UUID()
+    @State private var aiReason: String?
+    @State private var askingAI = false
 
     private var selectedDay: TripDay? { days.first { $0.id == selectedDayID } }
     private var selectedMatch: DayMatch? { selectedDayID.flatMap { matches[$0] } }
@@ -44,6 +46,11 @@ struct SavedScheduleView: View {
                 }
             }
 
+            Section("AI 安排建議") {
+                if askingAI { ProgressView("依整趟行程比較日期…") }
+                if let aiReason { Text(aiReason) }
+                Text("交通未知不阻擋安排；選好日期後仍需你確認。") .font(.caption).foregroundStyle(.secondary)
+            }
             Section("排在哪一天") {
                 if loading { ProgressView("正在載入日期…") }
                 ForEach(days) { day in
@@ -134,10 +141,33 @@ struct SavedScheduleView: View {
                 selectedDayID = days.first?.id
             }
             errorMessage = days.isEmpty ? "這趟旅程沒有可排入的日期。" : nil
+            await recommendDay()
             await calculateMatches()
         } catch {
             errorMessage = "無法載入旅程：\(userMessage(for: error))"
         }
+    }
+
+    private func recommendDay() async {
+        askingAI = true
+        defer { askingAI = false }
+        do {
+            let result = try await session.trips.ask(tripID: entry.saved.tripId,
+                question: "請比較整趟行程，為收藏 \(entry.id.uuidString.lowercased()) 提出適合日期與理由。有店名與地址線索時，即使地圖無座標仍可建議。只回傳該收藏的 proposal；不要改原有固定事項。",
+                today: nil, routeFacts: [])
+            switch result {
+            case .answered(let answer):
+                aiReason = answer.answer
+                if !selectedByUser, let proposal = answer.proposal,
+                   proposal.savedId == entry.id.uuidString.lowercased(), let id = UUID(uuidString: proposal.dayId),
+                   days.contains(where: { $0.id == id }) {
+                    selectedDayID = id
+                    selectedByUser = true
+                    aiReason = proposal.reason
+                }
+            case .failed(let reason): aiReason = PersonalAI.waitingMessage(reason) ?? "AI 暫時無法建議，仍可手動選擇日期。"
+            }
+        } catch { aiReason = "AI 暫時無法建議，仍可手動選擇日期。" }
     }
 
     private func calculateMatches() async {

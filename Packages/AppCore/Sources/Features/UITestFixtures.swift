@@ -35,7 +35,7 @@ public struct ImportUITestRoot: View {
                     .accessibilityIdentifier("tripCreated")
             } else {
                 ImportFlowView(session: FakeImportService.session, service: FakeImportService(failFirst: scenario == "failThenSucceed"),
-                               placeSearch: FakePlaceSearch()) { created = $0 }
+                               placeSearch: FakePlaceSearch(), discoveryRepository: FakeImportDiscovery()) { created = $0 }
             }
         }
     }
@@ -54,6 +54,15 @@ public struct ImportUITestRoot: View {
         #endif
     }
 
+}
+
+
+struct FakeImportDiscovery: PlaceDiscovering {
+    func discoverPlaces(query: String, context: String) async throws -> [DiscoveredPlace] {
+        let names = query == "XXX Shoes" ? ["XXX Shoes 성수점", "XXX Shoes 명동점"] : [query]
+        return names.map { name in DiscoveredPlace(saved: ShoppingStoreSuggestion(name: name, koreanName: name,
+            addressLocal: "서울특별시 성동구 測試地址", searchQuery: name, reason: "測試來源", sourceURL: "https://example.test/" + (name == "XXX Shoes 명동점" ? "second" : "first"))) }
+    }
 }
 
 final class FakeImportService: ImportService, @unchecked Sendable {
@@ -115,7 +124,10 @@ final class FakeImportService: ImportService, @unchecked Sendable {
     }
 
     func commit(importID: UUID, days: [ImportDayCommit]) async throws -> Trip {
-        Trip(id: UUID(), name: Self.session.tripName, startDate: "2026-10-01", endDate: "2026-10-02", timeZone: "Asia/Seoul", revision: 1)
+        guard days.flatMap(\.stops).allSatisfy({ $0.placeId == nil && $0.destinationAddress != nil }) else {
+            throw BackendError.invalid("測試：AI 確認必須保留地址，不能要求座標")
+        }
+        return Trip(id: UUID(), name: Self.session.tripName, startDate: "2026-10-01", endDate: "2026-10-02", timeZone: "Asia/Seoul", revision: 1)
     }
 }
 

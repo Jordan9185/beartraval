@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
   const auth = req.headers.get("Authorization");
   if (!auth) return json({ error: "UNAUTHENTICATED" }, 401);
 
-  let body: { trip_id?: string; question?: string; today?: string | null; route_facts?: unknown[] };
+  let body: { trip_id?: string; question?: string; today?: string | null; route_facts?: unknown[]; focus_stop_id?: string };
   try {
     body = await req.json();
   } catch {
@@ -46,12 +46,13 @@ Deno.serve(async (req) => {
   // Every query is scoped to this trip: RLS alone would return rows from all the
   // caller's trips, cut off at PostgREST's max_rows. A failed query means the
   // context is incomplete, so nothing is answered from it.
-  const [days, stops, saved, items, members] = await Promise.all([
+  const [days, stops, saved, items, members, extraVisits] = await Promise.all([
     db.from("trip_days").select("*").eq("trip_id", trip.id).order("display_order"),
     db.from("stops").select("*").eq("trip_id", trip.id).is("deleted_at", null).order("sort_order"),
     db.from("saved_places").select("*").eq("trip_id", trip.id).neq("status", "dismissed"),
     db.from("shopping_items").select("*").eq("trip_id", trip.id).is("deleted_at", null),
     db.from("trip_members").select("user_id").eq("trip_id", trip.id).eq("status", "active"),
+    db.from("shopping_extra_visits").select("item_id,stop_id").eq("trip_id", trip.id).is("removed_at", null),
   ]);
   const savedIdList = (saved.data ?? []).map((s) => s.id);
   const itemIdList = (items.data ?? []).map((i) => i.id);
@@ -67,7 +68,7 @@ Deno.serve(async (req) => {
     console.log(JSON.stringify({ fn: "ask-trip", status: "failed", reason: "context_error" }));
     return json({ status: "failed", reason: "context_error" });
   };
-  if ([days, stops, saved, items, members, interests, events, merchants].some((r) => r.error)) return contextFailed();
+  if ([days, stops, saved, items, members, extraVisits, interests, events, merchants].some((r) => r.error)) return contextFailed();
 
   const placeIds = new Set<string>([
     ...(stops.data ?? []).map((s) => s.place_id).filter(Boolean),
@@ -75,7 +76,7 @@ Deno.serve(async (req) => {
     ...(merchants.data ?? []).map((m) => m.place_id),
   ]);
   const [placesResult, profilesResult] = await Promise.all([
-    db.from("places").select("id, name, name_local").in("id", [...placeIds]),
+    db.from("places").select("id, name, name_local, address, address_local").in("id", [...placeIds]),
     db.from("profiles").select("user_id, display_name").in("user_id", (members.data ?? []).map((m) => m.user_id)),
   ]);
   if (placesResult.error || profilesResult.error) return contextFailed();
@@ -92,16 +93,23 @@ Deno.serve(async (req) => {
   const savedIds = new Set((saved.data ?? []).map((s) => s.id));
   const dayIds = new Set((days.data ?? []).map((d) => d.id));
 
+  if (body.focus_stop_id && !stopById.has(body.focus_stop_id)) return json({ error: "NOT_FOUND" }, 404);
   const candidate = {
     trip: { name: trip.name, start_date: trip.start_date, end_date: trip.end_date, time_zone: trip.time_zone },
     today: body.today ?? null,
+    focus_stop_id: body.focus_stop_id ?? null,
     days: (days.data ?? []).map((d) => ({
       id: d.id,
       date: d.local_date,
       transport_mode: d.transport_mode,
       stops: (stops.data ?? []).filter((s) => s.day_id === d.id).map((s) => ({
         id: s.id,
-        label: placeName(s.place_id) ?? s.raw_label,
+        label: s.destination_name ?? placeName(s.place_id) ?? s.raw_label,
+        address: s.destination_address ?? places?.find((p) => p.id === s.place_id)?.address_local
+          ?? places?.find((p) => p.id === s.place_id)?.address
+          ?? (items.data ?? []).find((entry) => entry.planned_stop_id === s.id)?.scheduled_store_address_local
+          ?? (saved.data ?? []).find((entry) => entry.raw_label === s.raw_label)?.address_hint
+          ?? null,
         start_time: s.start_time ? String(s.start_time).slice(0, 5) : null,
         fixed: s.fixed,
         kind: s.kind,
@@ -110,21 +118,28 @@ Deno.serve(async (req) => {
     })),
     saved: (saved.data ?? []).map((s) => ({
       id: s.id,
-      label: placeName(s.place_id) ?? s.raw_label,
+      label: s.destination_name ?? placeName(s.place_id) ?? s.raw_label,
       category: s.category,
       place_confirmed: s.place_id !== null,
+      address: s.address_hint ?? null,
+      ai_suppressed: s.ai_suppressed,
       added_by: who(s.added_by),
       interested: (interests.data ?? []).filter((i) => i.saved_id === s.id).map((i) => who(i.user_id)),
     })),
     shopping: (items.data ?? []).map((i) => {
       const last = (events.data ?? []).filter((e) => e.item_id === i.id).at(-1);
-      const stop = i.planned_stop_id ? stopById.get(i.planned_stop_id) : undefined;
+      const stop = stopById.get(i.planned_stop_id) ?? (extraVisits.data ?? []).filter((v) => v.item_id === i.id).map((v) => stopById.get(v.stop_id)).find(Boolean);
       return {
         id: i.id,
         name: i.name,
-        status: last?.type === "purchased" ? "purchased" : stop ? "scheduled" : "unscheduled",
+        purchase_timing: i.purchase_timing,
+        ai_suppressed: i.ai_suppressed,
+        status: last?.type === "purchased" && (i.bought_quantity ?? 1) >= (i.desired_quantity ?? 1) ? "purchased" : stop ? "scheduled" : "unscheduled",
         planned_date: stop ? (dayById.get(stop.day_id)?.local_date ?? null) : null,
-        planned_store: stop ? placeName(stop.place_id) : null,
+        planned_store: stop ? stop.destination_name ?? placeName(stop.place_id) ?? i.scheduled_store_name ?? stop.raw_label : null,
+        store_candidates: (i.store_suggestions ?? []).map((c: any) => ({
+          name: c.korean_name ?? c.name, address: c.address_local ?? null, source_url: c.source_url,
+        })),
         merchants: (merchants.data ?? []).filter((m) => m.item_id === i.id)
           .map((m) => ({ name: placeName(m.place_id) ?? "?", evidence: m.evidence_type })),
       };

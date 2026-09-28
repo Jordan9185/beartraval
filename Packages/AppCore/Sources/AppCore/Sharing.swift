@@ -17,7 +17,7 @@ public enum TripRole: String, Codable, CaseIterable, Sendable {
     public var canManageMembers: Bool { self == .owner }
 }
 
-public struct TripMember: Identifiable, Hashable, Sendable {
+public struct TripMember: Codable, Identifiable, Hashable, Sendable {
     public var userID: UUID
     public var role: TripRole
     public var displayName: String
@@ -207,5 +207,32 @@ public final class TripSync {
         tasks = []
         if let channel { await client.removeChannel(channel) }
         channel = nil
+    }
+}
+
+public struct OwnershipOffer: Decodable, Sendable {
+    public var trip_id: UUID
+    public var from_user: UUID
+    public var to_user: UUID
+}
+extension TripRepository {
+    public func ownershipOffer(tripID: UUID) async throws -> OwnershipOffer? {
+        let rows: [OwnershipOffer] = try await client.from("ownership_offers").select().eq("trip_id", value: tripID).execute().value
+        return rows.first
+    }
+    public func offerOwnership(tripID: UUID, to: UUID?) async throws {
+        struct Params: Encodable { let p_trip_id: UUID; let p_to: UUID? }
+        do { try await client.rpc("offer_trip_ownership", params: Params(p_trip_id: tripID, p_to: to)).execute() }
+        catch { throw BackendError.from(error) }
+    }
+    public func respondOwnership(tripID: UUID, from: UUID, accept: Bool) async throws {
+        struct Params: Encodable { let p_trip_id: UUID; let p_from: UUID; let p_accept: Bool }
+        do { try await client.rpc("respond_trip_ownership", params: Params(p_trip_id: tripID, p_from: from, p_accept: accept)).execute() }
+        catch { throw BackendError.from(error) }
+    }
+    public func leaveTrip(tripID: UUID) async throws {
+        struct Params: Encodable { let p_trip_id: UUID }
+        do { try await client.rpc("leave_trip", params: Params(p_trip_id: tripID)).execute() }
+        catch { throw BackendError.from(error) }
     }
 }

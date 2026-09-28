@@ -9,6 +9,7 @@ struct AssistantView: View {
     let snapshot: TripSnapshot
     let canApply: Bool
     let onApplied: () -> Void
+    var focusStop: Stop? = nil
 
     struct Turn: Identifiable {
         let id = UUID()
@@ -27,9 +28,16 @@ struct AssistantView: View {
     var body: some View {
         NavigationStack {
             List {
+                AIModeSection(session: session)
+                if let focusStop {
+                    Section("以本站為起點") {
+                        Text(focusStop.rawLabel)
+                        Text("依到訪日期搜尋；缺少地圖座標仍可查詢。") .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 if turns.isEmpty {
                     Section("可以這樣問") {
-                        ForEach(Self.examples, id: \.self) { example in
+                        ForEach(focusStop == nil ? Self.examples : ["這附近有什麼甜點？請提供路程、介紹和評分。", "附近有可以使用的廁所嗎？", "到訪當天附近有什麼景點或特殊活動？"], id: \.self) { example in
                             Button(example) { question = example }
                         }
                     }
@@ -49,6 +57,9 @@ struct AssistantView: View {
                                 Label("無法從行程資料判斷", systemImage: "questionmark.circle").foregroundStyle(.orange)
                             }
                             Text(answer.answer)
+                            ForEach(Array((answer.recommendations ?? []).enumerated()), id: \.offset) { _, candidate in
+                                RestaurantAnswerRow(candidate: candidate, checkedAt: answer.checkedAt)
+                            }
                             if !answer.citations.isEmpty {
                                 Text("依據：" + answer.citations.compactMap(citationName).joined(separator: "、"))
                                     .font(.caption).foregroundStyle(.secondary)
@@ -96,13 +107,18 @@ struct AssistantView: View {
     @ViewBuilder
     private func applySheet(_ proposal: AssistantAnswer.Proposal) -> some View {
         if let entry = snapshot.saved.first(where: { $0.id.uuidString.lowercased() == proposal.savedId.lowercased() }),
-           let place = entry.place,
            let day = snapshot.timeline.first(where: { $0.id.uuidString.lowercased() == proposal.dayId.lowercased() }) {
+            if let place = entry.place {
             ProposalReviewView(session: session, tripID: snapshot.trip.id, dayID: day.id, dayTitle: "第 \(day.day.displayOrder + 1) 天",
                                mode: day.day.transportMode, candidate: SearchResult(draft: place.asDraft),
                                dwellMinutes: entry.saved.category.defaultDwellMinutes, createdByAI: true) {
                 applying = nil
                 onApplied()
+            }
+            } else {
+                NavigationStack {
+                    SavedScheduleView(session: session, entry: entry) { _ in applying = nil; onApplied() }
+                }
             }
         }
     }
@@ -115,11 +131,11 @@ struct AssistantView: View {
         defer { asking = false }
         turns.append(Turn(question: text))
         let index = turns.count - 1
-        let facts = await routeFacts()
+        let facts: [RouteFact] = [] // AI 先讀行程；路線試算在確認安排時執行，不以地圖成功作為問答前置。
         let today = snapshot.timeline[safe: snapshot.todayIndex()]?.day.localDate
         let started = ContinuousClock.now
         do {
-            let result = try await session.trips.ask(tripID: snapshot.trip.id, question: text, today: today, routeFacts: facts)
+            let result = try await session.trips.ask(tripID: snapshot.trip.id, question: text, today: today, routeFacts: facts, focusStopID: focusStop?.id)
             turns[index].result = result
             var failure: String?
             if case .failed(let reason) = result { failure = reason }
@@ -165,5 +181,29 @@ struct AssistantView: View {
         case "route_fact": return "順路試算"
         default: return nil
         }
+    }
+}
+
+struct RestaurantAnswerRow: View {
+    let candidate: AssistantAnswer.Recommendation
+    let checkedAt: String?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(candidate.name).font(.headline)
+            Text(candidate.introduction)
+            Text("路程：" + (candidate.route?.description ?? "無法估算"))
+            if let rating = candidate.rating {
+                Text("評分：\(rating.display) · \(rating.platform)")
+                Text(rating.reviews.map { "評論數：\($0)" } ?? "評論數未取得")
+            } else { Text("評分：未取得") }
+            Text(candidate.visit_note).font(.caption)
+            if let date = checkedAt { Text("查詢時間：\(date)").font(.caption).foregroundStyle(.secondary) }
+            sourceLink(candidate.source_url, title: "店家資料來源")
+            if let route = candidate.route { sourceLink(route.source_url, title: "路程來源") }
+            if let rating = candidate.rating { sourceLink(rating.source_url, title: "評分來源") }
+        }
+    }
+    @ViewBuilder private func sourceLink(_ raw: String, title: String) -> some View {
+        if let url = URL(string: raw), url.scheme == "https" { Link(title, destination: url).font(.caption) }
     }
 }

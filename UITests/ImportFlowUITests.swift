@@ -153,32 +153,27 @@ final class ImportFlowUITests: XCTestCase {
         let app = launch("ambiguous")
         let submit = app.buttons["submitImport"]
 
-        // 名稱完全相符的地點自動選定；訂位仍要確認是否固定；分店不自動選。
-        let seongsu = app.buttons["candidate-1-XXX Shoes 성수점"]
-        XCTAssertTrue(seongsu.waitForExistence(timeout: 10))
-        XCTAssertFalse(seongsu.images["checkmark.circle.fill"].exists, "分店不會自動選定")
-
-        let restaurant = app.buttons["candidate-2-Some Restaurant"]
+        // 新版 AI 先查具來源店家；不用取得地圖座標，也不猜選分店。
+        let market = app.buttons["ai-candidate-0-광장시장"]
+        XCTAssertTrue(market.waitForExistence(timeout: 10))
+        market.tap()
+        let restaurant = app.buttons["ai-candidate-2-Some Restaurant"]
         reveal(restaurant, in: app)
-        XCTAssertTrue(restaurant.images["checkmark.circle.fill"].exists, "名稱相符的地點自動選定")
+        restaurant.tap()
         let fixed = app.buttons["fixed-2"]
-        reveal(fixed, in: app)
+        reveal(fixed, in: app, up: true)
         fixed.tap()
         app.buttons["固定"].firstMatch.tap()
-
-        // 광장시장 名稱完全相符，收在「已自動處理」；只剩分店要選。
-        let handled = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "已自動處理")).firstMatch
-        reveal(handled, in: app)
-        XCTAssertFalse(app.buttons["candidate-0-광장시장"].exists, "自動處理的項目預設收起")
-
         XCTAssertFalse(submit.isEnabled, "分店未選時不能建立 Trip")
-        let remaining = app.staticTexts["還有 1 項需要確認"]
-        reveal(remaining, in: app)
-
-        // 兩個分店都列出，選一個後才能提交。
+        let seongsu = app.buttons["ai-candidate-1-XXX Shoes 성수점"]
         reveal(seongsu, in: app, up: true)
-        XCTAssertTrue(app.buttons["candidate-1-XXX Shoes 명동점"].exists)
         seongsu.tap()
+        let picture = XCTAttachment(screenshot: app.screenshot())
+        picture.name = "AI 店家確認後"; picture.lifetime = .keepAlways; add(picture)
+        let confirmed = app.staticTexts["ai-confirmed-1"]
+        XCTAssertTrue(confirmed.waitForExistence(timeout: 3))
+        XCTAssertTrue(confirmed.label.contains("XXX Shoes 성수점"))
+        XCTAssertFalse(app.buttons["candidate-1-XXX Shoes 성수점"].exists, "未要求 MapKit 定位")
 
         XCTAssertTrue(submit.waitForExistence(timeout: 2))
         XCTAssertTrue(submit.isEnabled)
@@ -196,7 +191,7 @@ final class ImportFlowUITests: XCTestCase {
         XCTAssertTrue(raw.label.contains("XXX Shoes 買鞋"), "失敗後原文仍在")
 
         retry.tap()
-        XCTAssertTrue(app.buttons["candidate-1-XXX Shoes 성수점"].waitForExistence(timeout: 10), "重試後進入確認畫面")
+        XCTAssertTrue(app.buttons["ai-candidate-0-광장시장"].waitForExistence(timeout: 10), "重試後進入確認畫面")
         app.buttons["原文"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["rawText"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["rawText"].label.contains("19:00 晚餐訂位"), "重試後原文完整")

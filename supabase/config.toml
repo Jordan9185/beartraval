@@ -444,3 +444,6 @@ verify_jwt = true
 # 函式內分別驗證 App JWT 或限定允許名單帳號的工作憑證。
 [functions.personal-ai]
 verify_jwt = false
+
+[functions.prepare-trip]
+verify_jwt = true

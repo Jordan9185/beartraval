@@ -18,6 +18,9 @@ struct ShoppingScheduleView: View {
     @State private var submitting = false
     @State private var errorMessage: String?
     @State private var operationID = UUID()
+    @State private var recommendation: String?
+    @State private var asking = false
+    @State private var manualOverride = false
 
     private var selectedDay: TripDay? { days.first { $0.id == selectedDayID } }
 
@@ -36,6 +39,15 @@ struct ShoppingScheduleView: View {
                     Link("查看店家線索來源", destination: url)
                 }
             }
+            Section("以既有行程為主") {
+                if asking { ProgressView("AI 正在比較原有行程區域…") }
+                if let recommendation { Text(recommendation) }
+                if !asking && selectedDayID == nil {
+                    Text("目前保留待買，不為商品新增跨區行程。")
+                    Button("我仍要安排這間店，查看日期") { manualOverride = true }
+                }
+            }
+            if selectedDayID != nil || manualOverride {
             Section("排在哪一天") {
                 if loading { ProgressView("正在載入日期…") }
                 ForEach(days) { day in
@@ -50,6 +62,7 @@ struct ShoppingScheduleView: View {
                         .contentShape(Rectangle())
                     }
                 }
+            }
             }
             if let day = selectedDay {
                 Section("排入前確認") {
@@ -86,17 +99,40 @@ struct ShoppingScheduleView: View {
             days = loadedDays.sorted { $0.displayOrder < $1.displayOrder }
             stops = loadedStops
             suggestionIndex = loadedItems.first { $0.id == entry.id }?.item.savedStoreSuggestions.firstIndex(of: candidate)
-            if !days.contains(where: { $0.id == selectedDayID }) { selectedDayID = days.first?.id }
+            if !days.contains(where: { $0.id == selectedDayID }) { selectedDayID = nil }
             if suggestionIndex == nil {
                 errorMessage = "這筆店家線索已更新。請返回商品頁重新選擇。"
             } else if days.isEmpty {
                 errorMessage = "這趟旅程沒有可安排的日期。"
             } else {
                 errorMessage = nil
+                await recommend()
             }
         } catch {
             errorMessage = "無法載入旅程：\(userMessage(for: error))"
         }
+    }
+
+    private func recommend() async {
+        asking = true
+        defer { asking = false }
+        do {
+            let result = try await repository.ask(tripID: entry.item.tripId,
+                question: "請判斷商品 \(entry.id.uuidString.lowercased()) 的候選店 \(candidate.displayName)（\(candidate.sourceURL)）是否適合原有行程。僅回傳有既有同區域站點支持的 shopping_proposal；不順路、只有其他商圈有售或無法判斷時保留待買，不要新增跨區行程。",
+                today: nil, routeFacts: [])
+            switch result {
+            case .answered(let answer):
+                recommendation = answer.answer
+                if let proposal = answer.shoppingProposal, proposal.item_id == entry.id.uuidString.lowercased(),
+                   proposal.source_url == candidate.sourceURL,
+                   entry.item.savedStoreSuggestions.filter({ $0.sourceURL == candidate.sourceURL }).count == 1,
+                   let id = UUID(uuidString: proposal.day_id), days.contains(where: { $0.id == id }) {
+                    selectedDayID = id
+                    recommendation = proposal.reason
+                }
+            case .failed(let reason): recommendation = PersonalAI.waitingMessage(reason) ?? "AI 暫時無法判斷，商品保留待買。"
+            }
+        } catch { recommendation = "AI 暫時無法判斷，商品保留待買。" }
     }
 
     private func submit() async {

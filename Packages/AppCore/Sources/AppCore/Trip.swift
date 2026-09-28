@@ -68,6 +68,12 @@ public struct TripRepository: Sendable {
 
     /// RLS 只回傳目前使用者是有效成員的 Trip。
     public func myTrips() async throws -> [Trip] {
+        let archived = try await archivedTripIDs()
+        return try await allTrips().filter { !archived.contains($0.id) }
+    }
+
+    /// 封存頁仍可讀取；只有本人明確恢復才回到主要清單。
+    public func allTrips() async throws -> [Trip] {
         do {
             return try await client.from("trips").select().order("start_date", ascending: false).execute().value
         } catch {

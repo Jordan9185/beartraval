@@ -45,7 +45,9 @@ public struct SavedPlace: Codable, Identifiable, Hashable, Sendable {
     public var addressHint: String?
     public var addressSourceURL: String?
     /// 使用者選日期後的行程點；沒有定位時仍可指向 pending_text Stop。
+    public var arrangementDetached: Bool?
     public var plannedStopId: UUID?
+    public var aiSuppressed: Bool? = nil
 
     public init(id: UUID, tripId: UUID, placeId: UUID?, rawLabel: String, category: SavedCategory, sourceId: UUID?, addedBy: UUID?, status: Status,
                 addressHint: String? = nil, addressSourceURL: String? = nil, plannedStopId: UUID? = nil) {
@@ -71,7 +73,9 @@ public struct SavedPlace: Codable, Identifiable, Hashable, Sendable {
         case addedBy = "added_by"
         case addressHint = "address_hint"
         case addressSourceURL = "address_source_url"
+        case arrangementDetached = "arrangement_detached"
         case plannedStopId = "planned_stop_id"
+        case aiSuppressed = "ai_suppressed"
     }
 }
 
@@ -186,6 +190,17 @@ extension TripRepository {
         } catch { throw BackendError.from(error) }
     }
 
+    /// 撤回收藏的安排；站點若仍有其他用途，後端一律保留。
+    public func unscheduleSaved(savedID: UUID, stopID: UUID, routeRevision: Int, removeEmpty: Bool) async throws {
+        struct Params: Encodable {
+            let p_saved_id: UUID, p_stop_id: UUID, p_route_revision: Int, p_remove_empty: Bool
+        }
+        do {
+            try await client.rpc("unschedule_saved", params: Params(p_saved_id: savedID,
+                p_stop_id: stopID, p_route_revision: routeRevision, p_remove_empty: removeEmpty)).execute()
+        } catch { throw BackendError.from(error) }
+    }
+
     /// 未移除的 Saved，含地點、來源與想去成員。
     public func savedEntries(of tripID: UUID) async throws -> [SavedEntry] {
         struct Interest: Decodable { let saved_id: UUID, user_id: UUID }
@@ -272,5 +287,18 @@ extension TripRepository {
     /// 讀取（必要時更新）共用 Keychain 裡的 session；未登入或過期無法更新時為 false。
     public func isSignedIn() async -> Bool {
         (try? await client.auth.session) != nil
+    }
+}
+
+extension TripRepository {
+    public func saveStationPlace(tripID: UUID, candidate: AssistantAnswer.Recommendation, operationID: UUID) async throws -> SavedPlace {
+        struct Params: Encodable {
+            let p_trip_id: UUID; let p_name: String; let p_address: String?; let p_url: String
+            let p_summary: String; let p_category: SavedCategory; let p_operation_id: UUID
+        }
+        do { return try await client.rpc("save_station_place", params: Params(p_trip_id: tripID, p_name: candidate.name,
+            p_address: candidate.address_local, p_url: candidate.source_url, p_summary: candidate.introduction,
+            p_category: candidate.category == "food" ? .eat : .place, p_operation_id: operationID)).execute().value }
+        catch { throw BackendError.from(error) }
     }
 }

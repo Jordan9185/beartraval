@@ -8,5 +8,10 @@ export function activitySummary(rows: Array<Record<string, any>>) {
     created_at: row.created_at, updated_at: row.updated_at,
     queue_position: row.status === "queued" ? queued.findIndex((item) => item.id === row.id) + 1 : null,
     model: row.model ?? null,
+    provider: row.context?.ai_provider ?? "local_gpt",
+    usage: Array.isArray(row.usage) ? row.usage.map((u: any) => ({
+      input_tokens: Number.isFinite(u.input_tokens) ? u.input_tokens : null,
+      output_tokens: Number.isFinite(u.output_tokens) ? u.output_tokens : null,
+    })) : null,
   }));
 }

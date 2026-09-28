@@ -1,7 +1,7 @@
 import Foundation
 
 /// 地點查詢的一個候選（分店）。
-public struct PlaceOption: Identifiable, Equatable, Sendable {
+public struct PlaceOption: Codable, Identifiable, Equatable, Sendable {
     public var draft: PlaceDraft
     public var id: String { draft.providerPlaceId }
     public var name: String { draft.name }
@@ -17,11 +17,13 @@ public struct PlaceOption: Identifiable, Equatable, Sendable {
 
 /// Confirm Places 的一筆（規格 §3.1）。每筆都要有明確決定才能建立 Trip，
 /// 候選分店不會自動選定（AC-01）。
-public struct ConfirmItem: Identifiable, Equatable, Sendable {
-    public enum Decision: Equatable, Sendable {
+public struct ConfirmItem: Codable, Identifiable, Equatable, Sendable {
+    public enum Decision: Codable, Equatable, Sendable {
         case place(PlaceOption)
         /// 保留為待確認文字 Stop：沒有地點，不參與路線。
         case pendingText
+        /// 使用者已確認有來源的店家；可沒有地圖座標。
+        case researched
         case remove
     }
 
@@ -39,6 +41,9 @@ public struct ConfirmItem: Identifiable, Equatable, Sendable {
     public var searched = false
     /// 地圖搜尋失敗（離線、被節流）：不自動決定，等使用者重新搜尋。
     public var searchFailed = false
+    public var destinationName: String?
+    public var destinationAddress: String?
+    public var destinationSource: String?
     public var decision: Decision?
     /// 疑似固定的 Stop 需使用者確認（nil = 尚未確認）。
     public var fixed: Bool?
@@ -65,7 +70,7 @@ public struct ConfirmItem: Identifiable, Equatable, Sendable {
     }
 }
 
-public struct ConfirmPlacesState: Equatable, Sendable {
+public struct ConfirmPlacesState: Codable, Equatable, Sendable {
     public var items: [ConfirmItem]
     public var tripDates: [String]
 
@@ -205,6 +210,9 @@ public struct ConfirmPlacesState: Equatable, Sendable {
                 draft.placeId = placeIDs[option.id]
                 draft.dwellMinutes = item.stop.defaultDwellMinutes
             }
+            draft.destinationName = item.destinationName
+            draft.destinationAddress = item.destinationAddress
+            draft.destinationSource = item.destinationSource
             byDate[date, default: []].append(draft)
         }
         return tripDates.compactMap { date in byDate[date].map { ImportDayCommit(date: date, stops: $0) } }

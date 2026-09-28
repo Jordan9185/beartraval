@@ -17,27 +17,48 @@ struct TripListView: View {
     @State private var showsInbox = false
     @State private var showsCapture = false
     @State private var captured = false
+    @State private var archivedIDs: Set<UUID> = []
+    @State private var viewingArchive = false
+    @State private var catalogCachedAt: Date?
 
     var body: some View {
         NavigationStack {
             List {
+                if let message = session.discoveryError { ErrorText(message) }
                 if let errorMessage {
                     ErrorText(errorMessage)
                     Button("重新載入") { Task { await reload() } }
                 }
-                ForEach(trips) { trip in
+                if let catalogCachedAt {
+                    Text("顯示 \(catalogCachedAt.formatted(date: .abbreviated, time: .shortened)) 保存的清單；封存與恢復需連線。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(trips.filter { archivedIDs.contains($0.id) == viewingArchive }) { trip in
                     NavigationLink(value: trip) {
                         VStack(alignment: .leading) {
                             Text(trip.name)
                             Text(Self.subtitle(trip)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
                         }
                     }
+                    .swipeActions {
+                        Button(viewingArchive ? "恢復旅程" : "封存") {
+                            Task {
+                                do {
+                                    try await session.trips.setTripArchived(trip.id, archived: !viewingArchive)
+                                    await reload()
+                                    onTripsChanged(nil, false)
+                                } catch { errorMessage = userMessage(for: error) }
+                            }
+                        }.tint(.gray).disabled(catalogCachedAt != nil)
+                    }
                 }
             }
             .overlay {
                 if !loaded {
                     ProgressView("載入中…")
-                } else if trips.isEmpty && errorMessage == nil {
+                } else if viewingArchive && !trips.contains(where: { archivedIDs.contains($0.id) }) && errorMessage == nil {
+                    ContentUnavailableView("沒有封存旅程", systemImage: "archivebox", description: Text("旅程不會自動封存；在旅程列向左滑動可手動封存。"))
+                } else if !viewingArchive && !trips.contains(where: { !archivedIDs.contains($0.id) }) && errorMessage == nil {
                     ContentUnavailableView {
                         Label("還沒有旅程", systemImage: "calendar")
                     } description: {
@@ -50,18 +71,19 @@ struct TripListView: View {
                     }
                 }
             }
-            .navigationTitle("旅程")
+            .navigationTitle(viewingArchive ? "已封存旅程" : "旅程")
             .onChange(of: session.aiActivity.completionVersion) { Task { await reload() } }
             .navigationDestination(for: Trip.self) { trip in
-                TripDetailView(session: session, trip: trip) {
+                TripDetailView(session: session, trip: trip, isArchived: archivedIDs.contains(trip.id)) {
                     trips.removeAll { $0.id == trip.id }
                     onTripsChanged(nil, false)
                 }
-                .onAppear { onTripsChanged(trip.id, false) }
+                .onAppear { if !viewingArchive { onTripsChanged(trip.id, false) } }
             }
             .toolbar {
                 Button("交給 AI 整理", systemImage: "tray.and.arrow.down") { showsCapture = true }
                 Menu("更多", systemImage: "ellipsis.circle") {
+                    Button(viewingArchive ? "返回旅程" : "已封存旅程", systemImage: "archivebox") { viewingArchive.toggle() }
                     Button("AI 進度", systemImage: "clock") { showsAIActivity = true }
                     Button("建立旅程", systemImage: "plus") { showsCreate = true }
                     Button("分享收件匣", systemImage: "tray") { showsInbox = true }
@@ -92,7 +114,7 @@ struct TripListView: View {
             .sheet(isPresented: $showsCreate) {
                 CreateTripView(session: session) { trip in
                     trips.insert(trip, at: 0)
-                    onTripsChanged(trip.id, false)
+                    onTripsChanged(trip.id, true)
                 }
             }
             .refreshable { await reload() }
@@ -117,9 +139,21 @@ struct TripListView: View {
 
     private func reload() async {
         do {
-            trips = try await session.trips.myTrips()
+            let freshTrips = try await session.trips.allTrips()
+            let freshArchives = try await session.trips.archivedTripIDs()
+            trips = freshTrips; archivedIDs = freshArchives; catalogCachedAt = nil
+            if let owner = session.trips.currentUserID {
+                try? TripCatalogCache.shared(owner: owner)?.save(.init(trips: trips, archivedIDs: archivedIDs))
+            }
             errorMessage = nil
         } catch {
+            if case .other = BackendError.from(error), let owner = session.trips.currentUserID,
+               let cache = TripCatalogCache.shared(owner: owner)?.load() {
+                trips = cache.trips; archivedIDs = cache.archivedIDs; catalogCachedAt = cache.savedAt
+            } else {
+                trips = []; archivedIDs = []; catalogCachedAt = nil
+                if let owner = session.trips.currentUserID { TripCatalogCache.shared(owner: owner)?.remove() }
+            }
             errorMessage = "讀取失敗：\(userMessage(for: error))"
         }
         loaded = true
@@ -130,6 +164,7 @@ struct CreateTripView: View {
     let session: SessionModel
     let onCreated: (Trip) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var restoringDraft = true
     @State private var name = ""
     @State private var start = Date()
     @State private var end = Date()
@@ -143,6 +178,17 @@ struct CreateTripView: View {
     @State private var importSession: ImportSession?
     @State private var errorMessage: String?
     @State private var isSaving = false
+    @State private var prepared = false
+    @State private var preparing = false
+    @State private var summary: String?
+    @State private var datesConfirmed = false
+    private struct FormDraft: Codable {
+        var rawText: String; var name: String; var start: Date; var end: Date; var timeZone: String
+        var mode: TravelMode; var prepared: Bool; var datesConfirmed: Bool; var summary: String?; var importID: UUID?
+    }
+    private var formDraft: FormDraft { FormDraft(rawText: rawText, name: name, start: start, end: end, timeZone: timeZoneID,
+        mode: transportMode, prepared: prepared, datesConfirmed: datesConfirmed, summary: summary, importID: importSession?.id) }
+    private var draftKey: String { "trip-create-" + (session.trips.currentUserID?.uuidString ?? "unsigned") }
 
     static let timeZones = TripTimeZones.common
 
@@ -150,7 +196,37 @@ struct CreateTripView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("旅程名稱或一句話（例如：東京五天旅遊）", text: Binding(get: { name }, set: { name = $0; nameAutoFilled = false }))
+                    // 固定高度：長文在框內捲動，不會把上方的名稱、日期、時區擠出畫面。
+                    TextEditor(text: $rawText).frame(height: 180)
+                        .accessibilityLabel("行程文字")
+                        .overlay(alignment: .topLeading) {
+                            if rawText.isEmpty {
+                                Text("先貼上已有的文字行程；AI 讀完後再補必要資料").foregroundStyle(.tertiary)
+                                    .padding(.top, 8).padding(.leading, 5).allowsHitTesting(false)
+                            }
+                        }
+                } header: {
+                    HStack {
+                        Text("貼上文字行程")
+                        Spacer()
+                        if hasText {
+                            Button("清除") { rawText = "" }.font(.caption).textCase(nil)
+                        }
+                    }
+                } footer: {
+                    Text("保留原日期、順序與固定事項；未知時間不補猜。確認預覽後才建立旅程。")
+                }
+                if !prepared {
+                    Section {
+                        Button(preparing ? "AI 正在讀取…" : "讓 AI 讀取行程") { Task { await prepare() } }
+                            .disabled(preparing || rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || rawText.count > 20000)
+                        Button("手動填寫旅程資料") { prepared = true }
+                    }
+                } else {
+                    if let summary { Section("原文摘要") { Text(summary) } }
+                Section {
+                    TextField("旅程名稱", text: Binding(get: { name }, set: { name = $0; nameAutoFilled = false }))
+                    Toggle("確認以下旅行日期", isOn: $datesConfirmed)
                     DatePicker("開始", selection: $start, displayedComponents: .date)
                     DatePicker("結束", selection: Binding(get: { end }, set: { end = $0; endTouched = true }),
                                in: start..., displayedComponents: .date)
@@ -163,26 +239,6 @@ struct CreateTripView: View {
                 } footer: {
                     Text("跨國旅程建好後，可以在每一天的設定改時區與交通方式。韓國的大眾運輸 Apple 地圖算不出時間，建議選開車／計程車或步行。")
                 }
-                Section {
-                    // 固定高度：長文在框內捲動，不會把上方的名稱、日期、時區擠出畫面。
-                    TextEditor(text: $rawText).frame(height: 180)
-                        .accessibilityLabel("行程文字")
-                        .overlay(alignment: .topLeading) {
-                            if rawText.isEmpty {
-                                Text("貼上行程，或寫「我要去日本東京五天旅遊」").foregroundStyle(.tertiary)
-                                    .padding(.top, 8).padding(.leading, 5).allowsHitTesting(false)
-                            }
-                        }
-                } header: {
-                    HStack {
-                        Text("匯入行程或描述想去的地方（可略過）")
-                        Spacer()
-                        if hasText {
-                            Button("清除") { rawText = "" }.font(.caption).textCase(nil)
-                        }
-                    }
-                } footer: {
-                    Text("已有行程會照原文整理；只有目的地與天數時，AI 會搜尋並提出可編輯的建議樣板。確認後才建立正式行程。")
                 }
                 if let errorMessage {
                     ErrorText(errorMessage)
@@ -190,16 +246,24 @@ struct CreateTripView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: timeZoneID) { if !modeTouched { transportMode = TravelMode.suggested(forTimeZone: timeZoneID) } }
-            .onChange(of: rawText) { applyIdeaDefaults() }
-            .onChange(of: name) { applyIdeaDefaults() }
-            .onChange(of: start) { if !endTouched { applyIdeaDates() } }
+            .onChange(of: rawText) { persistDraft() }
+            .onChange(of: name) { persistDraft() }
+            .onChange(of: start) { persistDraft() }
+            .onChange(of: end) { persistDraft() }
+            .onChange(of: timeZoneID) { persistDraft() }
+            .onChange(of: transportMode) { persistDraft() }
+            .onChange(of: prepared) { persistDraft() }
+            .onChange(of: datesConfirmed) { persistDraft() }
+            .onChange(of: importSession?.id) { persistDraft() }
+            .task { await restoreDraft() }
             .navigationTitle("建立旅程")
             .navigationDestination(item: $importSession) { importSession in
                 ImportFlowView(session: importSession, service: session.imports, placeSearch: session.placeSearch,
                                discoveryRepository: InboxRepository(client: session.client)) { trip in
                     Task {
                         await applyMode(trip)
-                        onCreated(trip)
+                        UserDefaults.standard.removeObject(forKey: draftKey)
+                        finishCreation(trip)
                         dismiss()
                     }
                 }
@@ -208,46 +272,58 @@ struct CreateTripView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isSaving ? "處理中…" : hasText ? "下一步" : "建立") { Task { await save() } }
-                        .disabled(isSaving || (name.trimmingCharacters(in: .whitespaces).isEmpty
-                                               && TripIdeaIntent.suggestedName(for: rawText) == nil))
+                        .disabled(isSaving || !prepared || !datesConfirmed || name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
     }
 
+    private func finishCreation(_ trip: Trip) {
+        // 先進 Today，用品建議背景產生；使用者不用等 AI 就能查看正式行程。
+        onCreated(trip)
+        Task { _ = try? await session.trips.ask(tripID: trip.id, question: PackingSuggestions.question, today: nil, routeFacts: []) }
+    }
+    private func persistDraft() {
+        guard !restoringDraft else { return }
+        if let data = try? JSONEncoder().encode(formDraft) { UserDefaults.standard.set(data, forKey: draftKey) }
+    }
+    private func restoreDraft() async {
+        defer { restoringDraft = false }
+        guard rawText.isEmpty else { return }
+        if let data = UserDefaults.standard.data(forKey: draftKey), let draft = try? JSONDecoder().decode(FormDraft.self, from: data) {
+            rawText = draft.rawText; name = draft.name; start = draft.start; end = draft.end
+            timeZoneID = draft.timeZone; transportMode = draft.mode; modeTouched = true
+            prepared = draft.prepared; datesConfirmed = draft.datesConfirmed; summary = draft.summary
+            if let id = draft.importID {
+                do {
+                    let existing = try await session.imports.session(importID: id)
+                    if existing.tripId == nil { importSession = existing }
+                    else { UserDefaults.standard.removeObject(forKey: draftKey) }
+                } catch { errorMessage = "原文已恢復，確認進度需連線後重開：\(userMessage(for: error))" }
+            }
+        } else { rawText = UserDefaults.standard.string(forKey: draftKey) ?? "" }
+    }
     private var hasText: Bool {
         !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || TripIdeaIntent.shouldSuggest(name, tripDays: tripDays)
+
     }
 
-    private var tripDays: Int {
-        let calendar = Calendar.current
-        return max(1, (calendar.dateComponents([.day], from: calendar.startOfDay(for: start),
-                                                to: calendar.startOfDay(for: max(start, end))).day ?? 0) + 1)
-    }
-
-    private var ideaInput: String {
-        rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? name : rawText
-    }
-
-    private func applyIdeaDefaults() {
-        if !timeZoneTouched, let suggested = TripIdeaIntent.suggestedTimeZone(for: name + " " + rawText) {
-            timeZoneID = suggested
-        }
-        applyIdeaDates()
-        guard TripIdeaIntent.isRequest(ideaInput) else { return }
-        if !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           let suggested = TripIdeaIntent.suggestedName(for: ideaInput),
-           name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nameAutoFilled {
-            name = suggested
-            nameAutoFilled = true
-        }
-    }
-
-    private func applyIdeaDates() {
-        guard !endTouched, let days = TripIdeaIntent.inferredDayCount(name: name, text: rawText),
-              let suggested = Calendar.current.date(byAdding: .day, value: days - 1, to: start) else { return }
-        end = suggested
+    private func prepare() async {
+        preparing = true
+        defer { preparing = false }
+        do {
+            let result = try await session.trips.prepareTrip(text: rawText)
+            name = result.title
+            summary = result.summary
+            if let zone = result.time_zone, TimeZone(identifier: zone) != nil { timeZoneID = zone }
+            if let first = result.start_date.flatMap({ LocalDate.midnight($0, in: .current) }),
+               let last = result.end_date.flatMap({ LocalDate.midnight($0, in: .current) }), last >= first {
+                start = first; end = last
+                datesConfirmed = true
+            }
+            prepared = true
+            errorMessage = nil
+        } catch { errorMessage = userMessage(for: error) }
     }
 
     /// 新旅程每天預設大眾運輸；選了別的就整趟改掉（失敗不擋建立，之後可在旅程裡改）。
@@ -261,17 +337,10 @@ struct CreateTripView: View {
         defer { isSaving = false }
         // 日期選擇器的日期以裝置時區解讀，再原樣當作旅行地的當地日期。
         let device = TimeZone.current
-        let importText = rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && TripIdeaIntent.shouldSuggest(name, tripDays: tripDays)
-            ? name : rawText
-        let tripName = TripIdeaIntent.isRequest(name) && rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? TripIdeaIntent.suggestedName(for: name) ?? name.trimmingCharacters(in: .whitespaces)
-            : name.trimmingCharacters(in: .whitespaces).isEmpty
-                ? TripIdeaIntent.suggestedName(for: rawText) ?? "" : name.trimmingCharacters(in: .whitespaces)
+        let importText = rawText
+        let tripName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let startDate = LocalDate.string(from: start, timeZone: device)
-        let suggestedEnd = !endTouched && hasText
-            ? Calendar.current.date(byAdding: .day, value: (TripIdeaIntent.inferredDayCount(name: name, text: importText) ?? tripDays) - 1, to: start) : nil
-        let endDate = LocalDate.string(from: max(start, suggestedEnd ?? end), timeZone: device)
+        let endDate = LocalDate.string(from: max(start, end), timeZone: device)
         do {
             if hasText {
                 importSession = try await session.imports.createImport(
@@ -279,7 +348,7 @@ struct CreateTripView: View {
             } else {
                 let trip = try await session.trips.createTrip(name: tripName, startDate: startDate, endDate: endDate, timeZone: timeZoneID)
                 await applyMode(trip)
-                onCreated(trip)
+                finishCreation(trip)
                 dismiss()
             }
             errorMessage = nil
@@ -293,6 +362,8 @@ struct CreateTripView: View {
 struct TripDetailView: View {
     let session: SessionModel
     let trip: Trip
+    var isArchived = false
+    @State private var detailCachedAt: Date?
     @State private var timeline: [DayTimeline] = []
     @State private var places: [UUID: Place] = [:]
     @State private var saved: [SavedEntry] = []
@@ -300,6 +371,7 @@ struct TripDetailView: View {
     @State private var baseRoutes: [UUID: BaseRoute] = [:]
     @State private var errorMessage: String?
     @State private var showsRouteMatch = false
+    @State private var showsAssistant = false
     @State private var myRole: TripRole?
     @State private var sync: TripSync?
     @State private var selectedStop: Stop?
@@ -315,6 +387,27 @@ struct TripDetailView: View {
         List {
             if let errorMessage {
                 ErrorText(errorMessage)
+            }
+            if let detailCachedAt {
+                Text("離線參考：\(detailCachedAt.formatted(date: .abbreviated, time: .shortened)) 保存的行程，重新連線後再編輯。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("AI 旅行助理") {
+                Button("討論這趟旅行", systemImage: "sparkles") { showsAssistant = true }
+                if myRole?.canEdit == true {
+                    NavigationLink("彙整待安排內容") {
+                        TripAIPlanView(session: session, trip: trip) { Task { await reload() } }
+                    }
+                }
+                Text("\(saved.filter { $0.saved.status == .saved }.count) 個收藏待安排 · \(shopping.filter { !$0.isPurchased }.count) 件商品未買齊")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("先保存想去、想吃、想買的內容，AI 提出安排，由你確認後加入行程。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("出發準備") {
+                NavigationLink("旅行必備用品") {
+                    PackingView(session: session, trip: trip, canEdit: myRole?.canEdit == true)
+                }
             }
             ForEach(timeline) { day in
                 Section {
@@ -363,6 +456,10 @@ struct TripDetailView: View {
                     do {
                         try await session.trips.deleteTrip(trip.id)
                         SnapshotCache.shared()?.remove(tripID: trip.id)
+                        if let owner = session.trips.currentUserID {
+                            SnapshotCache.forOwner(owner)?.remove(tripID: trip.id)
+                            TripCatalogCache.shared(owner: owner)?.removeTrip(trip.id)
+                        }
                         onDeleted()
                         dismissView()
                     } catch let e as BackendError { errorMessage = e.userMessage } catch {}
@@ -383,15 +480,22 @@ struct TripDetailView: View {
                                    Task { await reload() }
                                }
                            },
-                           canEdit: myRole?.canEdit == true)
+                           canEdit: myRole?.canEdit == true, allowAutomaticDiscovery: !isArchived && detailCachedAt == nil)
                 .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showsAssistant) {
+            AssistantView(session: session, snapshot: TripSnapshot(trip: trip, revision: revision ?? trip.revision,
+                timeline: timeline, places: places, saved: saved, shopping: shopping), canApply: myRole?.canEdit == true) {
+                Task { await reload() }
+            }
         }
         .navigationTitle(trip.name)
         // toolbar 只留一個主要動作「試算順路」，其餘收進「更多」。
         .toolbar {
-            Button("試算順路") { showsRouteMatch = true }
+            Button("AI 助手", systemImage: "sparkles") { showsAssistant = true }
                 .disabled(timeline.isEmpty)
             Menu("更多", systemImage: "ellipsis.circle") {
+                Button("試算順路") { showsRouteMatch = true }
                 Button("成員", systemImage: "person.2") { showsMembers = true }
                 if myRole?.canEdit == true {
                     Button("整趟交通方式", systemImage: "car") { showsTripMode = true }
@@ -447,12 +551,12 @@ struct TripDetailView: View {
     private func savedFor(_ stop: Stop) -> SavedEntry? {
         saved.first {
             $0.saved.plannedStopId == stop.id ||
-                ($0.saved.plannedStopId == nil && $0.saved.placeId != nil && $0.saved.placeId == stop.placeId)
+                ($0.saved.arrangementDetached != true && $0.saved.plannedStopId == nil && $0.saved.placeId != nil && $0.saved.placeId == stop.placeId)
         }
     }
 
     private func shoppingFor(_ stop: Stop) -> ShoppingEntry? {
-        shopping.first { $0.item.plannedStopId == stop.id }
+        shopping.first { $0.item.plannedStopId == stop.id || ($0.extraVisits ?? []).contains { $0.id == stop.id } }
     }
 
     private func comparison(_ leg: BaseRoute.Leg, in day: DayTimeline) -> LegComparison? {
@@ -500,9 +604,25 @@ struct TripDetailView: View {
             let placeList = try await session.trips.places(ids: Array(Set(stops.compactMap(\.placeId))))
             places = Dictionary(uniqueKeysWithValues: placeList.map { ($0.id, $0) })
             timeline = DayTimeline.build(days: days, stops: stops)
-            revision = try? await session.trips.tripRevision(trip.id)
+            revision = try await session.trips.tripRevision(trip.id)
+            myRole = try await session.trips.myRole(in: trip.id)
+            detailCachedAt = nil
+            if let owner = session.trips.currentUserID {
+                SnapshotCache.forOwner(owner)?.save(TripSnapshot(trip: trip, revision: revision ?? trip.revision,
+                    timeline: timeline, places: places, saved: saved, shopping: shopping))
+            }
             errorMessage = nil
         } catch {
+            myRole = nil; baseRoutes = [:]
+            if case .other = BackendError.from(error), let owner = session.trips.currentUserID,
+               let cached = SnapshotCache.forOwner(owner)?.load(tripID: trip.id) {
+                timeline = cached.snapshot.timeline; places = cached.snapshot.places
+                saved = cached.snapshot.saved; shopping = cached.snapshot.shopping
+                revision = cached.snapshot.revision; detailCachedAt = cached.savedAt
+            } else {
+                timeline = []; places = [:]; saved = []; shopping = []; detailCachedAt = nil
+                if let owner = session.trips.currentUserID { SnapshotCache.forOwner(owner)?.remove(tripID: trip.id) }
+            }
             errorMessage = "讀取失敗：\(userMessage(for: error))"
             return
         }
@@ -561,6 +681,8 @@ struct StopDetailView: View {
     var session: SessionModel? = nil
     var planning: StopPlanning? = nil
     var canEdit = false
+    var allowAutomaticDiscovery = true
+    @State private var nearbyArrangement: SavedEntry?
     @Environment(\.dismiss) private var dismissDetail
 
     var body: some View {
@@ -568,9 +690,16 @@ struct StopDetailView: View {
             Form {
                 Section {
                     Text(place?.displayTitle(fallbackChinese: stop.rawLabel) ?? stop.rawLabel).font(.title3.weight(.semibold))
-                    if let address = place?.localAddress ?? saved?.addressLabel ?? shopping?.item.scheduledStoreAddressLocal {
+                    if let address = place?.localAddress ?? stop.destinationAddress ?? saved?.addressLabel ?? shopping?.item.scheduledStoreAddressLocal {
                         Text(place == nil ? "地址線索：\(address)" : address)
                             .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                    Button("複製店名", systemImage: "doc.on.doc") {
+                        copyDestination(stop.destinationName ?? place?.nameLocal ?? place?.name ?? stop.rawLabel)
+                    }
+                    if let address = place?.localAddress ?? stop.destinationAddress ?? saved?.addressLabel ?? shopping?.item.scheduledStoreAddressLocal,
+                       !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button("複製地址", systemImage: "doc.on.doc") { copyDestination(address) }
                     }
                     if let start = stop.startTime { LabeledContent("時間", value: LocalTime.hourMinute(start)) }
                     if let dwell = stop.dwellMinutes { LabeledContent("停留", value: "\(dwell) 分") }
@@ -584,12 +713,12 @@ struct StopDetailView: View {
                 if place == nil {
                     let country = LocalMapCountry.guess(name: stop.rawLabel, timeZone: timeZone)
                     Section {
-                        TaxiCardButton(unlocatedName: stop.rawLabel, countryCode: country,
-                                       addressHint: saved?.saved.addressHint ?? shopping?.item.scheduledStoreAddressLocal)
+                        TaxiCardButton(unlocatedName: stop.destinationName ?? stop.rawLabel, countryCode: country,
+                                       addressHint: stop.destinationAddress ?? saved?.saved.addressHint ?? shopping?.item.scheduledStoreAddressLocal)
                     }
                     Section {
                         LocalMapSearchButtons(name: stop.rawLabel,
-                                              localAddress: saved?.saved.addressHint ?? shopping?.item.scheduledStoreAddressLocal,
+                                              localAddress: stop.destinationAddress ?? saved?.saved.addressHint ?? shopping?.item.scheduledStoreAddressLocal,
                                               countryCode: country)
                     } header: {
                         Text("當地地圖")
@@ -618,9 +747,20 @@ struct StopDetailView: View {
                 if let source = shopping?.item.scheduledStoreSourceURL.flatMap(URL.init(string:)), source.scheme == "https" {
                     Section("店家線索來源") { Link(source.host ?? "查看來源", destination: source) }
                 }
-                if let place, let session {
-                    NearbyAroundSection(session: session, center: Coordinate(latitude: place.latitude, longitude: place.longitude),
-                                        tripID: planning?.tripID, canEdit: canEdit, mode: mode, planning: planning)
+                if let session {
+                    StationExploreSection(session: session, stop: stop, canEdit: canEdit, automatic: allowAutomaticDiscovery) { nearbyArrangement = $0 }
+                    Section("AI 附近探索") {
+                        NavigationLink("針對本站問 AI") {
+                            StopAssistantView(session: session, stop: stop, canApply: canEdit)
+                        }
+                        Text("詢問附近美食、景點、當日活動或廁所；以本站為起點，不需先在地圖找到店家。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .sheet(item: $nearbyArrangement) { entry in
+                if let session {
+                    NavigationStack { SavedScheduleView(session: session, entry: entry) { _ in nearbyArrangement = nil } }
                 }
             }
             .navigationTitle("行程點")
@@ -657,7 +797,7 @@ struct StopRow: View {
                     if let address = saved?.saved.addressHint ?? shopping?.item.scheduledStoreAddressLocal {
                         Text(address).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     }
-                } else if let address = place?.localAddress ?? saved?.addressLabel ?? shopping?.item.scheduledStoreAddressLocal {
+                } else if let address = place?.localAddress ?? stop.destinationAddress ?? saved?.addressLabel ?? shopping?.item.scheduledStoreAddressLocal {
                     Text(address).font(.caption).foregroundStyle(.secondary)
                 }
                 if let shopping {
@@ -698,6 +838,36 @@ struct RouteStatusRow: View {
         case .partial(let n): "\(n) 段無法估算"
         case .unavailable(.notSupportedInRegion): "無法估算（此地區不提供）"
         case .unavailable: "無法估算"
+        }
+    }
+}
+
+private func copyDestination(_ text: String) {
+    #if canImport(UIKit)
+    UIPasteboard.general.string = text
+    #elseif canImport(AppKit)
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(text, forType: .string)
+    #endif
+}
+
+private struct StopAssistantView: View {
+    let session: SessionModel
+    let stop: Stop
+    let canApply: Bool
+    @State private var snapshot: TripSnapshot?
+    @State private var errorMessage: String?
+    var body: some View {
+        Group {
+            if let snapshot {
+                AssistantView(session: session, snapshot: snapshot, canApply: canApply, onApplied: {}, focusStop: stop)
+            } else if let errorMessage { ErrorText(errorMessage) }
+            else { ProgressView("讀取本站行程…") }
+        }.task {
+            do {
+                guard let trip = try await session.trips.allTrips().first(where: { $0.id == stop.tripId }) else { errorMessage = "這份旅程已不存在，或你已沒有存取權限。"; return }
+                snapshot = try await session.trips.snapshot(of: trip)
+            } catch { errorMessage = userMessage(for: error) }
         }
     }
 }

@@ -13,11 +13,15 @@ public enum PersonalAI {
 
     public static func waitingMessage(_ reason: String?) -> String? {
         switch reason {
+        case "claude_api_not_configured": "共用 Claude API 尚未設定，未切換到其他模式。可選擇本機 GPT 後重試。"
+        case "claude_api_running": "Claude API・正在使用共用 API 額度。處理結果會保留在 AI 進度。"
+        case "claude_api_error": "Claude API 處理失敗，可能已產生用量。原始需求保留，可自行決定是否重試。"
+        case "ai_settings_unavailable": "無法讀取 AI 模式，為避免誤用額度，本次沒有啟動 AI。"
         case "personal_ai_waiting": "已加入處理佇列，可以先離開此頁。請在主畫面的 AI 進度查看狀態；相同需求會沿用已保存的結果。"
         case "personal_ai_running": "仍在處理中，需求已保存。可先離開，在 AI 進度查看完成狀態。"
         case "personal_ai_limit": "GPT 訂閱額度暫時用完，需求已保留，額度恢復後會繼續。"
         case "personal_ai_login": "Mac 上的 ChatGPT 登入需要更新，需求已保留。"
-        case "personal_ai_unavailable": "此帳號尚未連接個人 Mac AI。"
+        case "personal_ai_unavailable": "此帳號尚未取得 AI 使用權，請由服務提供者加入可用帳號。"
         case "personal_ai_error": "Mac 上的 GPT 處理未完成，請重試；原始需求已保留。"
         default: nil
         }
@@ -44,5 +48,31 @@ public enum PersonalAI {
             data = try await client.functions.invoke("personal-ai",
                 options: FunctionInvokeOptions(body: Body(action: "status", job_id: jobID))) { data, _ in data }
         }
+    }
+}
+
+public enum AIProvider: String, Codable, CaseIterable, Sendable {
+    case localGPT = "local_gpt"
+    case claudeAPI = "claude_api"
+    public var title: String {
+        switch self {
+        case .localGPT: "本機 GPT・訂閱額度"
+        case .claudeAPI: "Claude API・共用 API 額度"
+        }
+    }
+}
+
+extension TripRepository {
+    public func aiProvider() async throws -> AIProvider {
+        struct Row: Decodable { let provider: AIProvider }
+        do {
+            let rows: [Row] = try await client.from("ai_preferences").select("provider").execute().value
+            return rows.first?.provider ?? .localGPT
+        } catch { throw BackendError.from(error) }
+    }
+    public func setAIProvider(_ provider: AIProvider) async throws {
+        struct Params: Encodable { let p_provider: AIProvider }
+        do { try await client.rpc("set_ai_provider", params: Params(p_provider: provider)).execute() }
+        catch { throw BackendError.from(error) }
     }
 }

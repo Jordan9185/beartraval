@@ -18,6 +18,23 @@ struct ShoppingTests {
         return ShoppingEntry(item: item, interestedUserIDs: [me], events: ev, plannedDate: date)
     }
 
+    @Test func extraVisitAppearsOnItsOwnDayWithoutChangingOriginalArrangement() {
+        var item = entry(planned: true, date: "2026-10-01")
+        let original = item.item.plannedStopId
+        let day = TripDay(id: UUID(), tripId: item.item.tripId, localDate: "2026-10-02", transportMode: .walking, displayOrder: 1, routeRevision: 1)
+        let stop = Stop(id: UUID(), tripId: item.item.tripId, dayId: day.id, placeId: nil, rawLabel: "同店再訪", resolutionStatus: .pendingText,
+            startTime: nil, endTime: nil, dwellMinutes: 30, fixed: false, kind: .purchase, sortOrder: 0, revision: 1)
+        item.extraVisits = [ShoppingVisit(stop: stop, day: day)]
+        let today = TodayShopping.items([item], on: "2026-10-02")
+        #expect(today.count == 1)
+        #expect(today.first?.plannedDayID == day.id)
+        #expect(today.first?.plannedDayNumber == 2)
+        #expect(today.first?.item.plannedStopId == original)
+        #expect(TodayShopping.items([item], on: "2026-10-03").isEmpty)
+        item.item.plannedStopId = nil
+        #expect(item.status == .scheduled)
+    }
+
     @Test func statusDerivesFromLatestEvent() {
         #expect(entry().status == .unscheduled)
         #expect(entry(planned: true).status == .scheduled)

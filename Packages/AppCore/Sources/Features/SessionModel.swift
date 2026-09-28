@@ -36,6 +36,7 @@ public final class SessionModel {
     public private(set) var inboxUploadState: [UUID: InboxUploadState] = [:]
     @ObservationIgnored private var inboxSyncTask: Task<Void, Never>?
     private var resolvingInbox = false
+    public private(set) var discoveryError: String?
 
     public init(client: SupabaseClient, routingProvider: any RoutingProvider = InstrumentedProvider(AppleMapKitProvider())) {
         self.client = client
@@ -92,6 +93,10 @@ public final class SessionModel {
 
     public func flushOfflineQueue() async {
         _ = await offlineQueue.flush(using: trips)
+        if let owner = trips.currentUserID {
+            _ = await PackingJournal.shared.flush(repository: trips, owner: owner)
+            _ = await PurchaseJournal.shared.flush(repository: trips, owner: owner)
+        }
     }
 
     /// 登入與恢復連線時重送 App Group 收件；換帳號或未確認歸屬的內容不會上傳。
@@ -126,23 +131,17 @@ public final class SessionModel {
         }
     }
 
-    /// 只有 MapKit 搜到唯一、名稱明確相符的分店才自動定位；其他候選留給使用者。
+    /// AI 從一開始補查多語店名；地圖只在使用者需要定位時另外使用。
     public func resolveInboxPlaces() async {
         guard !resolvingInbox, network.isOnline else { return }
         resolvingInbox = true
         defer { resolvingInbox = false }
         let inbox = InboxRepository(client: client)
         guard let items = try? await inbox.pendingPlaces() else { return }
-        for item in items {
-            // 截圖文字沒有分店地址時，Apple 地圖的單一同名結果仍可能是錯店；先留給網路線索補查。
-            if item.sourceSpan.hasPrefix("image:") { continue }
-            let lookup = await placeSearch.lookup(item.displayName, around: nil, limit: 5)
-            guard case .found(let candidates) = lookup else { continue }
-            let source = ParsedStop(sourceExcerpt: item.sourceSpan, placeName: item.displayName,
-                                    confidence: item.confidence)
-            guard let match = PlaceMatch.confident(for: source, in: candidates),
-                  let place = try? await trips.upsertPlace(match.draft) else { continue }
-            _ = try? await inbox.confirmPlace(item, placeID: place.id)
+        discoveryError = nil
+        for item in items where item.discoveryCheckedAt == nil && item.confirmedDiscovery == nil {
+            do { try await inbox.requestDiscovery(itemID: item.id) }
+            catch { discoveryError = "AI 補查尚未完成，來源已保留：\(userMessage(for: error))"; break }
         }
     }
 
@@ -153,6 +152,7 @@ public final class SessionModel {
 
     private func clearLocalData() async {
         TripStore.clearCaches()
+        discoveryError = nil
         await offlineQueue.clear()
     }
 }

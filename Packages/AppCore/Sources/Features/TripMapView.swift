@@ -18,7 +18,7 @@ struct TripMapView: View {
         NavigationStack {
             Group {
                 if let snapshot = store.snapshot {
-                    let dayIndex = snapshot.todayIndex()
+                    let dayIndex = snapshot.timeline.firstIndex(where: { $0.id == store.selectedDayID }) ?? snapshot.todayIndex()
                     let pins = snapshot.pins(dayIndex: dayIndex, layers: layers)
                     Map(position: $position) {
                         UserAnnotation()
@@ -41,12 +41,20 @@ struct TripMapView: View {
                         MapScaleView()
                     }
                     .toolbar {
+                        ToolbarItem(placement: .secondaryAction) {
+                            Picker("查看日期", selection: Binding(get: { snapshot.timeline[safe: dayIndex]?.id }, set: { store.selectedDayID = $0 })) {
+                                ForEach(snapshot.timeline) { day in
+                                    Text(day.day.localDate).tag(Optional(day.id))
+                                }
+                            }
+                        }
                         ToolbarItem(placement: .primaryAction) {
                             Button("今天的行程", systemImage: "scope") { position = Self.frame(pins) }
                                 .accessibilityIdentifier("frameToday")
                         }
                     }
                     // 開啟時只框今天的行程（其他天與其他國家的圖釘不算），不要一打開就縮到整個東北亞。
+                    .onChange(of: store.selectedDayID) { position = Self.frame(pins) }
                     .onAppear {
                         guard framedRevision != snapshot.revision else { return }
                         framedRevision = snapshot.revision

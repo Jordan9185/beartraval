@@ -3,11 +3,21 @@ import Foundation
 /// 給當地計程車司機看的目的地卡片：當地語言的固定句子 + 店名 + 地址，
 /// 並附上繁體中文翻譯讓使用者先確認內容（句子為固定模板，不經 AI 翻譯）。
 public struct TaxiCard: Equatable, Sendable {
-    public enum Language: String, Sendable {
+    public enum Language: String, CaseIterable, Sendable {
         case korean = "ko"
         case japanese = "ja"
         case chinese = "zh-Hant"
         case english = "en"
+        case simplifiedChinese = "zh-Hans"
+        public var title: String {
+            switch self {
+            case .korean: "韓文"
+            case .japanese: "日文"
+            case .chinese: "繁體中文"
+            case .simplifiedChinese: "簡體中文"
+            case .english: "英文"
+            }
+        }
     }
 
     public var language: Language
@@ -52,10 +62,17 @@ public struct TaxiCard: Equatable, Sendable {
             && a.extras.map(\.local) == b.extras.map(\.local) && a.extras.map(\.zh) == b.extras.map(\.zh)
     }
 
+    public mutating func useLanguage(_ value: Language) {
+        language = value
+        let text = Self.phrases(value)
+        request = text.request; requestZh = text.requestZh; extras = text.extras
+    }
+
     public static func language(for countryCode: String?) -> Language {
         switch countryCode?.uppercased() {
         case "KR": .korean
         case "JP": .japanese
+        case "CN": .simplifiedChinese
         case "TW", "HK", "MO": .chinese
         default: .english
         }
@@ -65,6 +82,8 @@ public struct TaxiCard: Equatable, Sendable {
     /// 不加「請跳表」這類可能讓司機覺得被懷疑的補充。
     static func phrases(_ language: Language) -> (request: String, requestZh: String, extras: [(String, String)]) {
         switch language {
+        case .simplifiedChinese:
+            ("司机您好，麻烦您载我到这里，谢谢您。", "司機您好，麻煩您載我到這裡，謝謝您。", [])
         case .korean:
             ("기사님, 안녕하세요. 이곳으로 가 주실 수 있을까요? 감사합니다.",
              "司機您好。可以麻煩您載我到這裡嗎？謝謝您。", [])

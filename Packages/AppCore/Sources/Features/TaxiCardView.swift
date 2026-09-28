@@ -7,11 +7,18 @@ import UIKit
 /// 「給司機看」全螢幕卡片：上半部大字給司機（當地語言），下半部中文對照給使用者確認。
 struct TaxiCardView: View {
     @State var card: TaxiCard
+    @State private var cachedAddressAt: Date?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                Picker("給司機看的語言", selection: Binding(get: { card.language }, set: { card.useLanguage($0) })) {
+                    ForEach(TaxiCard.Language.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                Text("語言切換只更換禮貌請求，店名與地址保留已查得原文。")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let cachedAddressAt { Text("使用已保存地址 · \(cachedAddressAt.formatted(date: .abbreviated, time: .omitted))").font(.caption).foregroundStyle(.secondary) }
                 // 給司機看：只有兩層字級，店名最大，其餘同一級。
                 VStack(alignment: .leading, spacing: 16) {
                     Text(card.request)
@@ -64,9 +71,13 @@ struct TaxiCardView: View {
         }
         // 舊資料的地址可能是中文：打開時用當地語言反查一次（離線時維持原本的地址與提醒）。
         .task {
+            if card.needsLocalAddress, let cached = TaxiAddressCache.entry(for: card) {
+                card.useLocalAddress(cached.address); cachedAddressAt = cached.checkedAt; return
+            }
             guard card.needsLocalAddress, let latitude = card.latitude, let longitude = card.longitude,
                   let local = await LocalAddress.lookup(latitude: latitude, longitude: longitude, countryCode: card.countryCode, knownAddress: nil)
             else { return }
+            TaxiAddressCache.save(address: local, for: card)
             card.useLocalAddress(local)
         }
         #if canImport(UIKit)

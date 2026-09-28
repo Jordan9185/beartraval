@@ -44,7 +44,7 @@ test("empty answer becomes cannot_determine", () => {
 });
 
 test("schema has no field that could write the itinerary", () => {
-  assert.deepEqual(Object.keys(AssistantAnswer.shape).sort(), ["answer", "cannot_determine", "citations", "proposal"]);
+  assert.deepEqual(Object.keys(AssistantAnswer.shape).sort(), ["answer", "arrangements", "cannot_determine", "checked_at", "citations", "packing_suggestions", "proposal", "recommendations", "shopping_proposal"]);
 });
 
 test("trip data can't close the <trip> tag", () => {
@@ -54,4 +54,12 @@ test("trip data can't close the <trip> tag", () => {
   assert.equal(message.match(/<\/trip>/g)?.length, 1);
   assert.ok(message.includes("\\u003c/trip>\\u003cquestion>"));
   assert.deepEqual(JSON.parse(message.split("\n")[1]!).trip.name, planted.trip.name);
+});
+
+
+test("無地圖座標仍可傳入本站與地址線索", () => {
+  const context = TripContext.parse({ ...SEOUL, focus_stop_id: "stop1",
+    days: [{ ...SEOUL.days[0], stops: [{ id: "stop1", label: "中文譯名", address: "首爾聖水洞",
+      start_time: null, fixed: false, kind: "standard", place_confirmed: false }] }] });
+  assert.equal(context.days[0]!.stops[0]!.address, "首爾聖水洞");
 });

@@ -55,6 +55,9 @@ struct ShoppingTab: View {
                 }
             }
             .navigationTitle("購物清單")
+            .toolbar {
+                NavigationLink("私人用品採買") { PersonalPurchasesView(repository: session.trips) }
+            }
             .onChange(of: session.aiActivity.completionVersion) { Task { await reloadPersonal() } }
             .toolbar {
                 ToolbarItem(placement: .secondaryAction) {
@@ -168,6 +171,7 @@ public struct ShoppingListView: View {
     let onPhotoSelected: ((Data) -> Void)?
 
     @State private var entries: [ShoppingEntry] = []
+    @State private var pendingQuantityIDs: Set<UUID> = []
     @State private var itineraryMatches: [UUID: [ShoppingItineraryMatch]] = [:]
     @State private var itineraryMatchesLoaded = false
     @State private var newName = ""
@@ -203,7 +207,7 @@ public struct ShoppingListView: View {
     }
 
     private var rowContext: ShoppingRowContext {
-        ShoppingRowContext(service: service, tripID: tripID, canEdit: canEdit, merchantScreen: merchantScreen,
+        ShoppingRowContext(service: service, tripID: tripID, canEdit: canEdit, pendingQuantityIDs: pendingQuantityIDs, merchantScreen: merchantScreen,
                            discoveryRepository: personalRepository, regionName: tripRegionName ?? "",
                            regionCountry: tripCountryCode,
                            itineraryMatches: itineraryMatches, itineraryMatchesLoaded: itineraryMatchesLoaded,
@@ -301,6 +305,11 @@ public struct ShoppingListView: View {
         if let queue { _ = await queue.flush(using: service as? any QueuedOperationExecutor ?? NoExecutor()) }
         do {
             entries = try await service.shoppingEntries(of: tripID)
+            if let owner = service.currentUserID {
+                try await PurchaseJournal.shared.cache(entries: entries, tripID: tripID, owner: owner)
+                entries = await PurchaseJournal.shared.shoppingEntries(tripID: tripID, owner: owner)
+                pendingQuantityIDs = await PurchaseJournal.shared.pendingShoppingIDs(tripID: tripID, owner: owner)
+            }
             errorMessage = nil
             do {
                 itineraryMatches = try await service.itineraryMatches(tripID: tripID, items: entries.map(\.item))
@@ -311,6 +320,10 @@ public struct ShoppingListView: View {
                 errorMessage = "行程內販售地點暫時無法讀取：\(userMessage(for: error))"
             }
         } catch {
+            if case .other = BackendError.from(error), let owner = service.currentUserID {
+                entries = await PurchaseJournal.shared.shoppingEntries(tripID: tripID, owner: owner)
+                pendingQuantityIDs = await PurchaseJournal.shared.pendingShoppingIDs(tripID: tripID, owner: owner)
+            } else { entries = []; pendingQuantityIDs = [] }
             errorMessage = "讀取失敗：\(userMessage(for: error))"
             itineraryMatchesLoaded = false
         }
@@ -358,6 +371,7 @@ struct ShoppingRowContext {
     let service: any ShoppingService
     let tripID: UUID
     let canEdit: Bool
+    var pendingQuantityIDs: Set<UUID> = []
     let merchantScreen: (ShoppingEntry) -> AnyView
     let discoveryRepository: InboxRepository?
     let regionName: String
@@ -403,6 +417,7 @@ struct ShoppingEntryLink: View {
                                    onChanged: context.changed)
         } label: {
             ShoppingRow(entry: entry, me: context.service.currentUserID, canEdit: context.canEdit, service: context.service,
+                        quantityPending: context.pendingQuantityIDs.contains(entry.id),
                         itineraryMatches: context.itineraryMatches[entry.id] ?? [],
                         itineraryMatchesLoaded: context.itineraryMatchesLoaded,
                         toggle: { context.toggle(entry) })
@@ -415,6 +430,7 @@ struct ShoppingRow: View {
     let me: UUID?
     let canEdit: Bool
     let service: any ShoppingService
+    var quantityPending = false
     let itineraryMatches: [ShoppingItineraryMatch]
     let itineraryMatchesLoaded: Bool
     let toggle: () -> Void
@@ -429,12 +445,18 @@ struct ShoppingRow: View {
                     .foregroundStyle(entry.isPurchased ? Color.green : Color.secondary)
             }
             .buttonStyle(.borderless)
-            .disabled(!canEdit)
+            .disabled(!canEdit || quantityPending)
             .accessibilityIdentifier("purchase-\(entry.item.name)")
             .accessibilityLabel(entry.isPurchased ? "撤銷已購買" : "標記已購買")
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.item.name).strikethrough(entry.isPurchased)
+                if entry.item.purchaseTiming == "before_trip" {
+                    Text("出發前買好").font(.caption).foregroundStyle(.orange)
+                }
+                Text("已買 \(entry.item.boughtQuantity ?? (entry.isPurchased ? 1 : 0))／需要 \(entry.item.desiredQuantity ?? 1)")
+                    .font(.caption).foregroundStyle(.secondary)
+                if quantityPending { Text("數量尚未同步；點入核對或重送").font(.caption).foregroundStyle(.orange) }
                 if let storeName = entry.item.scheduledStoreName {
                     Text("已選店家：\(storeName)\(entry.item.scheduledStoreAddressLocal.map { " · \($0)" } ?? "")")
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -502,6 +524,11 @@ struct MerchantSearchView: View {
 
     var body: some View {
         Form {
+            Section("商品需求") {
+                NavigationLink("購買數量與分工") {
+                    ShoppingQuantityView(repository: session.trips, entry: entry, onSaved: onScheduled)
+                }
+            }
             Section("AI 查找的實體店候選") {
                 ProductStoreSuggestionsView(repository: InboxRepository(client: session.client),
                                             productName: entry.item.name, storeHint: entry.item.storeHint,
@@ -667,6 +694,16 @@ struct ShoppingItemDetailView: View {
             }
             Section {
                 Text(entry.item.name).font(.title3.weight(.semibold))
+                if canEdit, let repository = service as? TripRepository {
+                    Button(entry.item.aiSuppressed == true ? "恢復 AI 安排建議" : "這趟不安排") {
+                        Task {
+                            do {
+                                try await repository.suppressArrangement(kind: "shopping", id: entry.id, suppressed: entry.item.aiSuppressed != true)
+                                onChanged(); dismissDetail()
+                            } catch { errorMessage = userMessage(for: error) }
+                        }
+                    }
+                }
                 if let note = entry.item.note { Text(note) }
                 if let storeName = entry.item.scheduledStoreName {
                     LabeledContent("已安排店家", value: storeName)
@@ -689,6 +726,18 @@ struct ShoppingItemDetailView: View {
                 }
                 if let errorMessage { ErrorText(errorMessage) }
             }
+            if canEdit, let repository = service as? TripRepository {
+                Section("購買進度") {
+                    NavigationLink("購買數量與分工") {
+                        ShoppingQuantityView(repository: repository, entry: entry, onSaved: onChanged)
+                    }
+                    if entry.item.plannedStopId != nil || !(entry.extraVisits ?? []).isEmpty {
+                        NavigationLink("另安排一次到訪／管理追加到訪") {
+                            ShoppingVisitsView(repository: repository, entry: entry, onChanged: onChanged)
+                        }
+                    }
+                }
+            }
             if let discoveryRepository, !regionName.isEmpty,
                (!entry.item.savedStoreSuggestions.isEmpty || canEdit) {
                 Section("辨識出的店家與地址") {
@@ -697,7 +746,7 @@ struct ShoppingItemDetailView: View {
                                                 region: regionName, countryCode: regionCountry,
                                                 initialSuggestions: entry.item.savedStoreSuggestions,
                                                 searchOnAppear: canEdit && entry.item.storeSuggestionsChecked != true,
-                                                onSchedule: canEdit && entry.status == .unscheduled ? { candidate in
+                                                onSchedule: canEdit && entry.item.purchaseTiming != "before_trip" && entry.status == .unscheduled ? { candidate in
                                                     scheduleRequest = ShoppingScheduleRequest(candidate: candidate)
                                                 } : nil,
                                                 onResults: canEdit ? { suggestions in
@@ -716,7 +765,7 @@ struct ShoppingItemDetailView: View {
                     }
                 }
             }
-            if let merchantScreen {
+            if let merchantScreen, entry.item.purchaseTiming != "before_trip" {
                 Section {
                     NavigationLink("找可能販售的店…") { merchantScreen }
                         .accessibilityIdentifier("findMerchants")
