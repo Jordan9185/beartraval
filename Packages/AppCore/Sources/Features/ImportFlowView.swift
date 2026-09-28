@@ -17,7 +17,23 @@ public struct ImportFlowView: View {
     @State private var progress: ParseProgress?
     @State private var parseStarted = Date()
 
-    private struct ReviewDraft: Codable { let source: ImportSession; let state: ConfirmPlacesState }
+    private struct ReviewDraft: Codable {
+        var source: ImportSession
+        var state: ConfirmPlacesState
+        /// 上次與雲端同步的內容與版本；用來做三方合併，不以後寫覆蓋另一裝置先保存的選擇。
+        var base: ConfirmPlacesState? = nil
+        var revision: Int? = nil
+        var sourceVersion: String? = nil
+    }
+    private struct CloudSync {
+        var base: ConfirmPlacesState?
+        var revision: Int?
+        var sourceVersion: String?
+        var disabled = false
+    }
+    @State private var cloud = CloudSync()
+    @State private var syncMessage: String?
+    @State private var saveTask: Task<Void, Never>?
     private var reviewKey: String { "import-review-" + session.id.uuidString }
 
     enum Phase: Equatable {
@@ -56,16 +72,16 @@ public struct ImportFlowView: View {
                                       warnings: session.parseResult?.draft.warnings ?? [],
                                       suggestedTemplate: false,
                                       timeZone: session.timeZone,
-                                      isCommitting: phase == .committing, errorMessage: errorMessage) {
+                                      isCommitting: phase == .committing, errorMessage: errorMessage,
+                                      syncMessage: syncMessage) {
                         Task { await commit() }
                     }
                 }
             }
         }
         .onChange(of: confirm) {
-            if let confirm, let data = try? JSONEncoder().encode(ReviewDraft(source: session, state: confirm)) {
-                UserDefaults.standard.set(data, forKey: reviewKey)
-            }
+            writeLocal()
+            scheduleSave()
         }
         .navigationTitle(session.tripName)
         .task {
@@ -169,8 +185,81 @@ public struct ImportFlowView: View {
         if let data = UserDefaults.standard.data(forKey: reviewKey),
            let saved = try? JSONDecoder().decode(ReviewDraft.self, from: data), saved.source == updated {
             confirm = saved.state
-        } else { confirm = ConfirmPlacesState(session: updated, draft: draft) }
+            cloud = CloudSync(base: saved.base, revision: saved.revision, sourceVersion: saved.sourceVersion)
+        } else {
+            confirm = ConfirmPlacesState(session: updated, draft: draft)
+            cloud = CloudSync()
+        }
         phase = .confirming
+        Task { await pullFromCloud() }
+    }
+
+    private func writeLocal() {
+        guard let confirm, let data = try? JSONEncoder().encode(ReviewDraft(source: session, state: confirm, base: cloud.base,
+            revision: cloud.revision, sourceVersion: cloud.sourceVersion)) else { return }
+        UserDefaults.standard.set(data, forKey: reviewKey)
+    }
+
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            await pushToCloud()
+        }
+    }
+
+    /// 讀回本人雲端草稿並與此裝置合併；兩邊都改同一項人工選擇時保留雲端（先保存）版本。
+    private func pullFromCloud() async {
+        guard !cloud.disabled, phase == .confirming || phase == .committing,
+              let draft = session.parseResult?.draft, confirm != nil else { return }
+        do {
+            guard let remote = try await service.loadReview(importID: session.id), let current = confirm else { return }
+            if let version = cloud.sourceVersion, version != remote.sourceVersion {
+                // 此裝置的草稿屬於舊來源：不上傳，留在此裝置供使用者參考。
+                cloud.disabled = true
+                syncMessage = "原文已在其他裝置重新解析，這份確認內容只保存在此裝置；請重新開啟匯入。"
+                return
+            }
+            cloud.sourceVersion = remote.sourceVersion
+            if let remoteState = remote.state {
+                let result = ConfirmPlacesState.merge(base: cloud.base ?? ConfirmPlacesState(session: session, draft: draft),
+                                                      local: current, remote: remoteState)
+                cloud.base = remoteState
+                cloud.revision = remote.revision
+                if result.state != confirm { confirm = result.state }
+                syncMessage = result.conflicts.isEmpty ? nil
+                    : "另一裝置先修改了 \(result.conflicts.count) 項的選擇，已保留先保存的內容，請核對。"
+            } else {
+                cloud.base = nil
+                cloud.revision = remote.revision
+            }
+            writeLocal()
+            if confirm != cloud.base { scheduleSave() }
+        } catch {
+            syncMessage = "尚未同步到其他裝置，內容已保存在此裝置。"
+        }
+    }
+
+    private func pushToCloud() async {
+        guard !cloud.disabled, let state = confirm, phase == .confirming else { return }
+        guard let version = cloud.sourceVersion else { await pullFromCloud(); return }
+        guard state != cloud.base else { return }
+        do {
+            guard let revision = try await service.saveReview(importID: session.id, sourceVersion: version,
+                                                              expectedRevision: cloud.revision ?? 0, state: state) else { return }
+            cloud.revision = revision
+            cloud.base = state
+            if syncMessage?.hasPrefix("尚未同步") == true { syncMessage = nil }
+            writeLocal()
+        } catch BackendError.staleRevision {
+            await pullFromCloud()
+        } catch BackendError.conflict("SOURCE_CHANGED") {
+            cloud.disabled = true
+            syncMessage = "原文已在其他裝置修改或旅程已建立，這份確認內容只保存在此裝置；請重新開啟匯入。"
+        } catch {
+            syncMessage = "尚未同步到其他裝置，內容已保存在此裝置。"
+        }
     }
 
     private func saveAndParse() async {
@@ -201,6 +290,7 @@ public struct ImportFlowView: View {
                 ids[place.providerPlaceId] = try await service.registerPlace(place).id
             }
             let trip = try await service.commit(importID: session.id, days: state.commitDays(placeIDs: ids))
+            saveTask?.cancel()
             UserDefaults.standard.removeObject(forKey: reviewKey)
             onCreated(trip)
         } catch {
@@ -221,6 +311,7 @@ struct ConfirmPlacesView: View {
     var timeZone: String? = nil
     let isCommitting: Bool
     let errorMessage: String?
+    var syncMessage: String? = nil
     let onSubmit: () -> Void
     @State private var webSearching: Set<Int> = []
 
@@ -228,6 +319,10 @@ struct ConfirmPlacesView: View {
         Form {
             Section {
                 summary
+                if let syncMessage {
+                    Label(syncMessage, systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption).foregroundStyle(.orange)
+                }
                 if searchTotal > 0 && searchDone < searchTotal {
                     ProgressView(value: Double(searchDone), total: Double(searchTotal)) {
                         Text("搜尋地點 \(searchDone)/\(searchTotal)").font(.caption)
@@ -359,44 +454,39 @@ struct ConfirmPlacesView: View {
                         }) { await research(index, $0) }
     }
 
-    private func discoverWeb(at index: Int) async {
-        guard let discoveryRepository, state.items.indices.contains(index), !webSearching.contains(index) else { return }
-        let item = state.items[index]
-        webSearching.insert(index)
-        state.items[index].researchMessage = nil
-        defer { webSearching.remove(index) }
-        do {
-            let context = [item.stop.city ?? city, item.stop.sourceExcerpt, item.stop.searchQuery]
-                .compactMap { $0 }.joined(separator: "\n")
-            let candidates = try await discoveryRepository.discoverPlaces(query: item.label, context: context)
-            state.items[index].researchCandidates = candidates.map(ShoppingStoreSuggestion.init(discovered:))
-            state.items[index].searched = true
-            if candidates.isEmpty { state.items[index].researchMessage = "目前找不到可核對來源的店家，這項仍只保留名稱。" }
-        } catch let error as PlaceDiscoveryError {
-            guard !Task.isCancelled else { return }
-            state.items[index].searched = true
-            state.items[index].researchMessage = error.userMessage
-        } catch {
-            guard !Task.isCancelled else { return }
-            state.items[index].searched = true
-            state.items[index].researchMessage = "店家查找失敗：\(userMessage(for: error))"
-        }
+    private var researcher: ImportResearch? {
+        guard let discoveryRepository else { return nil }
+        let binding = $state
+        return ImportResearch(discovery: discoveryRepository, city: city,
+                              read: { binding.wrappedValue.items.indices.contains($0) ? binding.wrappedValue.items[$0] : nil },
+                              write: { index, change in
+                                  guard binding.wrappedValue.items.indices.contains(index) else { return }
+                                  change(&binding.wrappedValue.items[index])
+                              })
     }
 
-    /// AI 先依各站城市查具來源的候選；座標只在使用者另外查地圖時補上。
+    /// 使用者按重新查找：開新的要求，舊工作晚回的結果不覆蓋。
+    private func discoverWeb(at index: Int) async {
+        guard let researcher, state.items.indices.contains(index), !webSearching.contains(index) else { return }
+        state.items[index].researchJobID = nil
+        state.items[index].researchRequest = nil
+        state.items[index].researchMessage = nil
+        webSearching.insert(index)
+        defer { webSearching.remove(index) }
+        await researcher.run(index)
+    }
+
+    /// 背景逐站查找（同時最多 3 筆），使用者可先處理已有結果的項目。
     private func searchAll() async {
-        for index in state.items.indices {
-            let item = state.items[index]
-            guard item.needsInitialAIResearch else {
-                state.items[index].searched = true
-                continue
-            }
-            if Task.isCancelled { return }
-            if state.items[index].needsSearch { await discoverWeb(at: index) }
-            if Task.isCancelled { return }
+        for index in state.items.indices where !state.items[index].needsInitialAIResearch {
             state.items[index].searched = true
-            // 不把查不到店家變成移除行程；保留原文，由使用者確認候選或先保留名稱。
         }
+        guard let researcher else {
+            for index in state.items.indices { state.items[index].searched = true }
+            return
+        }
+        let pending = state.items.indices.filter { state.items[$0].needsInitialAIResearch }
+        await researcher.runAll(pending)
     }
 
     /// 使用者換關鍵字搜尋：只更新候選，由使用者自己選（不自動選定）。
@@ -656,3 +746,4 @@ private extension Array where Element: Hashable {
         return filter { seen.insert($0).inserted }
     }
 }
+

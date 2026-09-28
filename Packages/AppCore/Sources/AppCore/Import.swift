@@ -217,6 +217,24 @@ public protocol ImportService: Sendable {
     func session(importID: UUID) async throws -> ImportSession
     func registerPlace(_ draft: PlaceDraft) async throws -> Place
     func commit(importID: UUID, days: [ImportDayCommit]) async throws -> Trip
+    /// 本人的雲端確認草稿；不支援跨裝置保存的實作回傳 nil，只用本機草稿。
+    func loadReview(importID: UUID) async throws -> ImportReviewRecord?
+    /// 依 `expectedRevision` 保存，回傳新版本；版本過期丟 `staleRevision`，來源已變丟 `conflict("SOURCE_CHANGED")`。
+    func saveReview(importID: UUID, sourceVersion: String, expectedRevision: Int, state: ConfirmPlacesState) async throws -> Int?
+}
+
+public struct ImportReviewRecord: Equatable, Sendable {
+    public var sourceVersion: String
+    public var revision: Int
+    public var state: ConfirmPlacesState?
+    public init(sourceVersion: String, revision: Int, state: ConfirmPlacesState?) {
+        self.sourceVersion = sourceVersion; self.revision = revision; self.state = state
+    }
+}
+
+extension ImportService {
+    public func loadReview(importID: UUID) async throws -> ImportReviewRecord? { nil }
+    public func saveReview(importID: UUID, sourceVersion: String, expectedRevision: Int, state: ConfirmPlacesState) async throws -> Int? { nil }
 }
 
 public struct SupabaseImportService: ImportService {
@@ -272,6 +290,22 @@ public struct SupabaseImportService: ImportService {
     public func commit(importID: UUID, days: [ImportDayCommit]) async throws -> Trip {
         struct Params: Encodable { let p_import_id: UUID, p_days: [ImportDayCommit] }
         return try await call("commit_import", Params(p_import_id: importID, p_days: days))
+    }
+
+    public func loadReview(importID: UUID) async throws -> ImportReviewRecord? {
+        struct Params: Encodable { let p_import_id: UUID }
+        struct Row: Decodable { let source_version: String; let revision: Int; let state: ConfirmPlacesState? }
+        let row: Row = try await call("get_import_review", Params(p_import_id: importID))
+        return ImportReviewRecord(sourceVersion: row.source_version, revision: row.revision, state: row.state)
+    }
+
+    public func saveReview(importID: UUID, sourceVersion: String, expectedRevision: Int, state: ConfirmPlacesState) async throws -> Int? {
+        struct Params: Encodable {
+            let p_import_id: UUID, p_source_version: String, p_expected_revision: Int, p_state: ConfirmPlacesState
+        }
+        let revision: Int = try await call("save_import_review", Params(p_import_id: importID, p_source_version: sourceVersion,
+                                                                         p_expected_revision: expectedRevision, p_state: state))
+        return revision
     }
 
     private func call<P: Encodable & Sendable, R: Decodable>(_ fn: String, _ params: P) async throws -> R {

@@ -41,6 +41,10 @@ public struct ConfirmItem: Codable, Identifiable, Equatable, Sendable {
     /// AI 查得的候選隨確認草稿保存，不因離開畫面遺失。
     public var researchCandidates: [ShoppingStoreSuggestion]? = nil
     public var researchMessage: String? = nil
+    /// 已排入雲端的 AI 查找工作；重新開啟只查這筆狀態，不因離開畫面或切換模式另開新工作。
+    public var researchJobID: UUID? = nil
+    /// 本次查找要求的識別；使用者重新查找後，舊要求晚回的結果不會覆蓋新結果。
+    public var researchRequest: UUID? = nil
     public var searched = false
     /// 地圖搜尋失敗（離線、被節流）：不自動決定，等使用者重新搜尋。
     public var searchFailed = false
@@ -280,3 +284,82 @@ public enum PlaceMatch {
         return map
     }()
 }
+
+/// 兩個裝置各自修改同一份確認草稿時的三方合併結果。
+public struct ReviewMerge: Equatable, Sendable {
+    public var state: ConfirmPlacesState
+    /// 兩邊都改了同一項的人工選擇：保留先保存到雲端的版本，請使用者核對。
+    public var conflicts: [Int]
+}
+
+extension ConfirmItem {
+    struct Manual: Equatable {
+        var decision: Decision?
+        var date: String?
+        var fixed: Bool?
+        var autoDecided: Bool
+        var destinationName: String?
+        var destinationAddress: String?
+        var destinationSource: String?
+    }
+    struct Research: Equatable {
+        var candidates: [PlaceOption]
+        var researchCandidates: [ShoppingStoreSuggestion]?
+        var researchMessage: String?
+        var researchJobID: UUID?
+        var researchRequest: UUID?
+        var searched: Bool
+        var searchFailed: Bool
+        var hasResult: Bool { researchCandidates != nil || researchMessage != nil || !candidates.isEmpty }
+    }
+    var manual: Manual {
+        get { Manual(decision: decision, date: date, fixed: fixed, autoDecided: autoDecided, destinationName: destinationName,
+                     destinationAddress: destinationAddress, destinationSource: destinationSource) }
+        set {
+            decision = newValue.decision; date = newValue.date; fixed = newValue.fixed; autoDecided = newValue.autoDecided
+            destinationName = newValue.destinationName; destinationAddress = newValue.destinationAddress
+            destinationSource = newValue.destinationSource
+        }
+    }
+    var research: Research {
+        get { Research(candidates: candidates, researchCandidates: researchCandidates, researchMessage: researchMessage,
+                       researchJobID: researchJobID, researchRequest: researchRequest, searched: searched, searchFailed: searchFailed) }
+        set {
+            candidates = newValue.candidates; researchCandidates = newValue.researchCandidates
+            researchMessage = newValue.researchMessage; researchJobID = newValue.researchJobID
+            researchRequest = newValue.researchRequest; searched = newValue.searched; searchFailed = newValue.searchFailed
+        }
+    }
+}
+
+extension ConfirmPlacesState {
+    /// 以上次同步內容為基準合併。只有一邊改的項目直接採用；兩邊都改了人工選擇時保留雲端（先保存）版本，
+    /// 查找結果則保留有結果的一方。來源不同（項目不一致）時整份採用雲端並列出差異。
+    public static func merge(base: ConfirmPlacesState, local: ConfirmPlacesState, remote: ConfirmPlacesState) -> ReviewMerge {
+        let sameSource = base.tripDates == remote.tripDates && local.tripDates == remote.tripDates
+            && base.items.map(\.stop) == remote.items.map(\.stop) && local.items.map(\.stop) == remote.items.map(\.stop)
+        guard sameSource else {
+            let differing = remote.items.indices.filter { !local.items.indices.contains($0) || local.items[$0] != remote.items[$0] }
+            return ReviewMerge(state: remote, conflicts: differing)
+        }
+        var merged = remote
+        var conflicts: [Int] = []
+        for index in remote.items.indices {
+            let b = base.items[index], l = local.items[index], r = remote.items[index]
+            if l.manual == b.manual || l.manual == r.manual {
+                merged.items[index].manual = r.manual
+            } else if r.manual == b.manual {
+                merged.items[index].manual = l.manual
+            } else {
+                conflicts.append(index)
+            }
+            if l.research != b.research && r.research == b.research {
+                merged.items[index].research = l.research
+            } else if l.research != b.research && l.research != r.research && l.research.hasResult && !r.research.hasResult {
+                merged.items[index].research = l.research
+            }
+        }
+        return ReviewMerge(state: merged, conflicts: conflicts)
+    }
+}
+

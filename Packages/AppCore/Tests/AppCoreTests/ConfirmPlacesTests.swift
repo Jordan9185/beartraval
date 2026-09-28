@@ -271,3 +271,83 @@ extension ConfirmPlacesTests {
         #expect(!state.items[0].needsInitialAIResearch)
     }
 }
+
+/// C03：兩裝置同時修改確認草稿、背景查找晚回。
+extension ConfirmPlacesTests {
+    private var suggestion: ShoppingStoreSuggestion {
+        ShoppingStoreSuggestion(name: "譯名", koreanName: "원문", addressLocal: "地址", searchQuery: "원문", reason: "來源", sourceURL: "https://example.test/a")
+    }
+
+    @Test func mergeKeepsEachDevicesSeparateChanges() {
+        let base = ConfirmPlacesState(session: session, draft: draft)
+        var local = base, remote = base
+        local.items[0].decision = .pendingText
+        remote.items[1].decision = .remove
+        let result = ConfirmPlacesState.merge(base: base, local: local, remote: remote)
+        #expect(result.conflicts.isEmpty)
+        #expect(result.state.items[0].decision == .pendingText)
+        #expect(result.state.items[1].decision == .remove)
+    }
+
+    @Test func laterWriteDoesNotOverwriteEarlierSavedChoice() {
+        let base = ConfirmPlacesState(session: session, draft: draft)
+        var local = base, remote = base
+        local.items[1].decision = .pendingText
+        remote.items[1].decision = .remove
+        let result = ConfirmPlacesState.merge(base: base, local: local, remote: remote)
+        #expect(result.conflicts == [1])
+        #expect(result.state.items[1].decision == .remove)
+    }
+
+    @Test func researchResultMergesWithoutTouchingManualChoice() {
+        let base = ConfirmPlacesState(session: session, draft: draft)
+        var local = base, remote = base
+        local.items[0].researchCandidates = [suggestion]
+        local.items[0].searched = true
+        remote.items[0].decision = .pendingText
+        let result = ConfirmPlacesState.merge(base: base, local: local, remote: remote)
+        #expect(result.conflicts.isEmpty)
+        #expect(result.state.items[0].researchCandidates == [suggestion])
+        #expect(result.state.items[0].decision == .pendingText)
+    }
+
+    @Test func pendingJobDoesNotReplaceArrivedResult() {
+        let base = ConfirmPlacesState(session: session, draft: draft)
+        var local = base, remote = base
+        local.items[0].researchJobID = UUID()
+        remote.items[0].researchCandidates = [suggestion]
+        remote.items[0].searched = true
+        let result = ConfirmPlacesState.merge(base: base, local: local, remote: remote)
+        #expect(result.state.items[0].researchCandidates == [suggestion])
+        #expect(result.state.items[0].researchJobID == nil)
+    }
+
+    @Test func differentSourceTakesCloudAndListsDifferences() {
+        let base = ConfirmPlacesState(session: session, draft: draft)
+        var local = base
+        local.items[0].decision = .pendingText
+        var other = draft
+        other.days[0].stops.removeLast()
+        let remote = ConfirmPlacesState(session: session, draft: other)
+        let result = ConfirmPlacesState.merge(base: base, local: local, remote: remote)
+        #expect(result.state == remote)
+        #expect(result.conflicts.contains(0))
+    }
+
+    @Test func pendingJobResumesWithoutNewRequestAndOldDraftsStillDecode() throws {
+        var state = ConfirmPlacesState(session: session, draft: draft)
+        let job = UUID()
+        state.items[0].researchJobID = job
+        state.items[0].researchRequest = UUID()
+        let restored = try JSONDecoder().decode(ConfirmPlacesState.self, from: JSONEncoder().encode(state))
+        #expect(restored.items[0].researchJobID == job)
+        #expect(restored.items[0].needsInitialAIResearch)
+        // 舊版草稿沒有工作欄位也能讀回。
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as? [String: Any])
+        var items = try #require(json["items"] as? [[String: Any]])
+        items = items.map { var item = $0; item.removeValue(forKey: "researchJobID"); item.removeValue(forKey: "researchRequest"); return item }
+        json["items"] = items
+        let legacy = try JSONDecoder().decode(ConfirmPlacesState.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(legacy.items[0].researchJobID == nil)
+    }
+}

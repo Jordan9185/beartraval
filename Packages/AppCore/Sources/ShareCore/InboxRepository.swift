@@ -262,6 +262,23 @@ private actor StoreDiscoveryCache {
 /// 所有 API 由 JWT + owner-only RLS／RPC 驗證。Extension 與主 App 可共用同一同步實作。
 public protocol PlaceDiscovering: Sendable {
     func discoverPlaces(query: String, context: String) async throws -> [DiscoveredPlace]
+    /// 只排入一次工作，不在此等待；排隊中回傳工作 ID，之後以 `placeDiscoveryStatus` 查同一筆。
+    func startPlaceDiscovery(query: String, context: String) async throws -> PlaceDiscoveryProgress
+    func placeDiscoveryStatus(jobID: UUID) async throws -> PlaceDiscoveryProgress
+}
+
+public enum PlaceDiscoveryProgress: Sendable {
+    case pending(UUID)
+    case finished([DiscoveredPlace])
+}
+
+extension PlaceDiscovering {
+    public func startPlaceDiscovery(query: String, context: String) async throws -> PlaceDiscoveryProgress {
+        .finished(try await discoverPlaces(query: query, context: context))
+    }
+    public func placeDiscoveryStatus(jobID: UUID) async throws -> PlaceDiscoveryProgress {
+        throw PlaceDiscoveryError.unavailable("job_missing")
+    }
 }
 
 public struct InboxRepository: PlaceDiscovering, Sendable {
@@ -374,6 +391,39 @@ public struct InboxRepository: PlaceDiscovering, Sendable {
         } catch { throw BackendError.from(error) }
         guard result.status != "failed" else { throw PlaceDiscoveryError.unavailable(result.reason ?? "unknown") }
         return result.candidates ?? []
+    }
+
+    private struct DiscoveryReply: Decodable {
+        let status: String
+        let job_id: UUID?
+        let candidates: [DiscoveredPlace]?
+        let reason: String?
+        var progress: PlaceDiscoveryProgress {
+            get throws {
+                if ["queued", "running"].contains(status), let job_id { return .pending(job_id) }
+                if status == "failed" { throw PlaceDiscoveryError.unavailable(reason ?? "unknown") }
+                return .finished(candidates ?? [])
+            }
+        }
+    }
+
+    public func startPlaceDiscovery(query: String, context: String) async throws -> PlaceDiscoveryProgress {
+        struct Body: Encodable { let query: String, context: String }
+        let reply: DiscoveryReply
+        do {
+            reply = try await client.functions.invoke("discover-places", options: FunctionInvokeOptions(
+                body: Body(query: String(query.prefix(200)), context: String(context.prefix(1000)))))
+        } catch { throw BackendError.from(error) }
+        return try reply.progress
+    }
+
+    public func placeDiscoveryStatus(jobID: UUID) async throws -> PlaceDiscoveryProgress {
+        struct Body: Encodable { let action = "status"; let job_id: UUID }
+        let reply: DiscoveryReply
+        do {
+            reply = try await client.functions.invoke("personal-ai", options: FunctionInvokeOptions(body: Body(job_id: jobID)))
+        } catch { throw BackendError.from(error) }
+        return try reply.progress
     }
 
     /// 商品與旅程地區找有來源的實體門市；只回候選，不表示有賣或有庫存。
