@@ -74,6 +74,17 @@ export function validateAnswer(context: TripContext, answer: AssistantAnswer): {
       result.shopping_proposal = null;
     }
   }
+  // 安排理由不可自行宣稱路程分鐘或「趕得上」；沒有 App 實際算出的 route_fact 支持就明示未確認。
+  const routeBacked = result.citations.some((c) => c.type === "route_fact"
+    && context.route_facts.some((r) => r.id === c.id && r.added_travel_minutes !== null));
+  const flag = <T extends { reason: string }>(item: T, path: string): T => {
+    if (routeBacked || !TRAVEL_CLAIM.test(item.reason) || item.reason.includes(UNVERIFIED_TRAVEL)) return item;
+    issues.push({ path, issue: "travel claim without route fact" });
+    return { ...item, reason: item.reason + UNVERIFIED_TRAVEL };
+  };
+  result.arrangements = result.arrangements.map((a, i) => flag(a, `arrangements[${i}].reason`));
+  if (result.shopping_proposal) result.shopping_proposal = flag(result.shopping_proposal, "shopping_proposal.reason");
+  if (result.proposal) result.proposal = flag(result.proposal, "proposal.reason");
   if (result.answer.trim().length === 0) {
     issues.push({ path: "answer", issue: "empty answer" });
     result.cannot_determine = true;
@@ -84,6 +95,10 @@ export function validateAnswer(context: TripContext, answer: AssistantAnswer): {
 
 // 採買必須有兩端資料共同支持的區域名稱，不能拿任意既有站點當作順路證明。
 // 僅城市／國家相同不夠；資料不足就保留待買，仍可另外提出手動修改行程。
+export const UNVERIFIED_TRAVEL = "（交通時間未經路線試算，無法確認趕得上）";
+// 路程分鐘或趕得上之類的可行性說法；排除 10:30、10點30分 這類時刻。
+const TRAVEL_CLAIM = /(?<![點点時时:：\d]\s*)\d+\s*(?:分鐘|分钟|分(?![店享別别])|mins?\b|minutes?\b)|趕得上|赶得上|來得及|来得及|趕得及/iu;
+
 export function hasSharedArea(area: string | null | undefined, store: { name: string; address?: string | null } | undefined,
   stop: { label: string; address?: string | null } | undefined): boolean {
   const normalize = (text: string) => text.normalize("NFKC").toLowerCase().replace(/\s+/gu, "");

@@ -63,3 +63,21 @@ test("無地圖座標仍可傳入本站與地址線索", () => {
       start_time: null, fixed: false, kind: "standard", place_confirmed: false }] }] });
   assert.equal(context.days[0]!.stops[0]!.address, "首爾聖水洞");
 });
+
+test("安排理由自稱路程分鐘或趕得上，沒有路線試算就標示未確認", () => {
+  const claimed: AssistantAnswer = { ...base, proposal: { day_id: "day1", saved_id: "sv2", reason: "步行 8 分鐘，一定趕得上 19:00 晚餐" } };
+  const { answer, issues } = validateAnswer(SEOUL, claimed);
+  assert.ok(answer.proposal?.reason.endsWith("（交通時間未經路線試算，無法確認趕得上）"));
+  assert.ok(issues.some((i) => i.issue === "travel claim without route fact"));
+});
+
+test("只寫時刻不算路程宣稱；有路線試算引用則保留原理由", () => {
+  const times = validateAnswer(SEOUL, { ...base, proposal: { day_id: "day1", saved_id: "sv2", reason: "10:30 開門，10點30分後較空" } });
+  assert.equal(times.answer.proposal?.reason, "10:30 開門，10點30分後較空");
+  const fact = SEOUL.route_facts.find((r) => r.added_travel_minutes !== null);
+  if (fact) {
+    const backed = validateAnswer(SEOUL, { ...base, citations: [{ type: "route_fact", id: fact.id }],
+      proposal: { day_id: "day1", saved_id: "sv2", reason: "增加 8 分鐘" } });
+    assert.equal(backed.answer.proposal?.reason, "增加 8 分鐘");
+  }
+});
