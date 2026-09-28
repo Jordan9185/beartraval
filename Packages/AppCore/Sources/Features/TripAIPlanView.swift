@@ -6,6 +6,7 @@ import SwiftUI
 struct TripAIPlanView: View {
     let session: SessionModel
     let trip: Trip
+    var savedAnswer: AssistantAnswer? = nil
     let onApplied: () -> Void
     @State private var snapshot: TripSnapshot?
     @State private var suggestions: [AssistantAnswer.Arrangement] = []
@@ -72,7 +73,16 @@ struct TripAIPlanView: View {
             }
         }
         .navigationTitle("AI 安排建議")
-        .task { await load() }
+        .task {
+            if let savedAnswer {
+                do {
+                    snapshot = try await session.trips.snapshot(of: trip)
+                    suggestions = savedAnswer.arrangements ?? []
+                    requestedTimes = Dictionary(uniqueKeysWithValues: suggestions.enumerated().map { ($0.offset, $0.element.start_time ?? "") })
+                    message = "已載入保存的建議，未重新詢問 AI。請依目前行程重新選擇並預覽。"
+                } catch { message = userMessage(for: error) }
+            } else { await load() }
+        }
     }
 
     private func title(_ item: AssistantAnswer.Arrangement) -> String {

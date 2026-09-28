@@ -212,3 +212,32 @@ extension TripRepository {
         catch { throw BackendError.from(error) }
     }
 }
+
+/// 本人保存的回答；讀取與標示已讀都不建立新的 AI 工作。
+public struct SavedAIAnswer: Decodable, Identifiable, Sendable {
+    public let id: UUID
+    public let question: String
+    public let answer: AssistantAnswer?
+    public let status: String
+    public let created_at: String
+    public let read_at: String?
+    public var unread: Bool { status == "answered" && read_at == nil }
+}
+extension TripRepository {
+    public func savedAIAnswers(tripID: UUID, offset: Int = 0) async throws -> [SavedAIAnswer] {
+        do { return try await client.from("ai_messages").select("id,question,answer,status,created_at,read_at")
+            .eq("trip_id", value: tripID).order("created_at", ascending: false).order("id", ascending: false)
+            .range(from: offset, to: offset + 49).execute().value }
+        catch { throw BackendError.from(error) }
+    }
+    public func unreadAIAnswerCount(tripID: UUID) async throws -> Int {
+        struct Params: Encodable { let p_trip_id: UUID }
+        do { return try await client.rpc("unread_ai_message_count", params: Params(p_trip_id: tripID)).execute().value }
+        catch { throw BackendError.from(error) }
+    }
+    public func markAIAnswerRead(id: UUID) async throws {
+        struct Params: Encodable { let p_message_id: UUID }
+        do { try await client.rpc("mark_ai_message_read", params: Params(p_message_id: id)).execute() }
+        catch { throw BackendError.from(error) }
+    }
+}

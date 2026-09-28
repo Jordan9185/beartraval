@@ -393,6 +393,7 @@ struct TripDetailView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("AI 旅行助理") {
+                AIResultsLink(session: session, trip: trip, canEdit: myRole?.canEdit == true)
                 Button("討論這趟旅行", systemImage: "sparkles") { showsAssistant = true }
                 if myRole?.canEdit == true {
                     NavigationLink("彙整待安排內容") {

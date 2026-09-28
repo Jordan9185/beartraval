@@ -89,6 +89,7 @@ struct TodayView: View {
         let day = snapshot.timeline[index]
         List {
             Section("旅程 AI 助手") {
+                AIResultsLink(session: session, trip: snapshot.trip, canEdit: store.myRole?.canEdit == true)
                 Text("待安排收藏 \(snapshot.saved.filter { $0.saved.status == .saved }.count) · 未買齊商品 \(snapshot.shopping.filter { !$0.isPurchased }.count)")
                     .font(.caption).foregroundStyle(.secondary)
                 NavigationLink("檢視整趟旅程的安排建議") {
