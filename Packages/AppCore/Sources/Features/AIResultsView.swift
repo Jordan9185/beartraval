@@ -47,7 +47,7 @@ private struct AIResultsView: View {
                     }
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(record.question == PackingSuggestions.question ? "旅行用品建議" : record.question).lineLimit(2)
+                        Text(assistantQuestionTitle(record.question)).lineLimit(2)
                         Text("\(record.unread && !readIDs.contains(record.id) ? "待查看・" : "")\(record.created_at.prefix(10))")
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -91,7 +91,7 @@ private struct SavedAIAnswerView: View {
     var body: some View {
         List {
             Section {
-                Text(record.question == PackingSuggestions.question ? "旅行用品建議" : record.question)
+                Text(assistantQuestionTitle(record.question))
                 Text("保存於 \(record.created_at.prefix(10))；內容依當時行程產生，安排前請核對目前日期與資料。")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -129,4 +129,19 @@ private struct SavedAIAnswerView: View {
             catch { readError = "已讀狀態尚未同步：\(userMessage(for: error))" }
         }
     }
+}
+
+
+/// 系統產生的提示保留在原紀錄，畫面不顯示格式欄位與派送指令。
+private func assistantQuestionTitle(_ question: String) -> String {
+    if question == PackingSuggestions.question { return "旅行用品建議" }
+    if question.hasPrefix("請為這趟旅程尚未安排的收藏與商品彙整 arrangements") {
+        if let marker = question.range(of: "補充要求：", options: .backwards) {
+            let instruction = question[marker.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !instruction.isEmpty { return "整趟旅程的安排建議：\(instruction)" }
+        }
+        return "整趟旅程的安排建議"
+    }
+    if question.hasPrefix("請以本站為中心，搜尋到訪當天附近的熱門景點") { return "本站附近探索" }
+    return question
 }
