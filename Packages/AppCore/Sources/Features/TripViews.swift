@@ -465,7 +465,7 @@ struct TripDetailView: View {
                 }
             }
         }
-        .confirmationDialog("刪除「\(trip.name)」？所有旅伴都會失去這個旅程，匯入原文與 AI 紀錄也會刪除。", isPresented: $confirmDelete, titleVisibility: .visible) {
+        .confirmationDialog("刪除「\(trip.name)」？所有旅伴都會失去這個旅程，匯入原文與 AI 紀錄也會刪除；每人的私人用品與私人採買另存唯讀紀錄給本人。", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("刪除旅程", role: .destructive) {
                 Task {
                     do {

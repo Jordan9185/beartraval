@@ -105,7 +105,7 @@ struct MembersView: View {
                             }
                         }
                         Section {
-                            Text("私人用品不會轉為共同物品；退出後無法從這趟旅程存取。")
+                            Text("私人用品不會轉為共同物品；退出後無法從這趟旅程存取，但你的私人用品與私人採買會另存一份唯讀紀錄（設定 → 私人旅行紀錄）。")
                             Button(leaving ? "退出中…" : "確認退出", role: .destructive) { Task { await leave() } }
                                 .disabled(leaving)
                         }

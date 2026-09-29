@@ -120,3 +120,18 @@ import Testing
         #expect(preview.outcomes?.first?.swapped_from?.removed == true)
     }
 }
+
+@Suite struct PrivateHistoryTests {
+    @Test func decodesSnapshotAndDescribesReason() throws {
+        let data = Data("""
+        [{"id":"\(UUID())","trip_name":"首爾","start_date":"2026-10-01","end_date":"2026-10-03","reason":"trip_deleted",
+          "packing":[{"name":"雨傘","quantity":2,"note":null,"packed":true}],
+          "purchases":[{"name":"雨傘","desired_quantity":2,"bought_quantity":1,"purchase_timing":"before_trip"}],
+          "created_at":"2026-09-29T00:00:00Z"}]
+        """.utf8)
+        let records = try JSONDecoder().decode([PrivateTripHistory].self, from: data)
+        #expect(records.first?.reasonText == "旅程已刪除")
+        #expect(records.first?.packing.first?.packed == true)
+        #expect(records.first?.purchases.first?.bought_quantity == 1)
+    }
+}

@@ -49,6 +49,11 @@ struct AccountView: View {
                 }
                 AIModeSection(session: session)
                 Section {
+                    NavigationLink("私人旅行紀錄") { PrivateHistoryView(session: session) }
+                } footer: {
+                    Text("退出旅程或旅程被刪除後，你自己的私人用品與私人採買會保留一份唯讀紀錄，只有你看得到。")
+                }
+                Section {
                     Picker("導航用的地圖", selection: $navigationApp) {
                         ForEach(NavigationApp.allCases, id: \.self) { Text($0.displayName).tag($0.rawValue) }
                     }
@@ -63,7 +68,7 @@ struct AccountView: View {
                 Section {
                     Button(deleting ? "刪除中…" : "刪除帳號", role: .destructive) { confirmDelete = true }.disabled(deleting)
                 } footer: {
-                    Text("你擁有的旅程會轉給其他成員；沒有其他成員的旅程會一併刪除。你在共同旅程新增的內容會保留給旅伴，但不再顯示你的名字。")
+                    Text("你擁有的旅程會轉給其他成員；沒有其他成員的旅程會一併刪除。你在共同旅程新增的內容會保留給旅伴，但不再顯示你的名字。你的私人旅行紀錄會一併刪除。")
                 }
                 if let errorMessage { ErrorText(errorMessage) }
             }
