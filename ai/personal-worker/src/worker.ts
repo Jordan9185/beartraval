@@ -62,6 +62,11 @@ async function main() {
             console.log(JSON.stringify({ event: "waiting", reason: error.reason }));
             await sleep(60_000); continue;
           }
+          // 只記錯誤類型與 Codex 錯誤輸出中的錯誤行末段，不記原文、提示詞或憑證，供之後排查。
+          const cause = error instanceof Error ? String((error as Error & { cause?: unknown }).cause ?? "") : "";
+          console.log(JSON.stringify({ event: "task_error", id: job.id, kind: job.kind,
+            error: error instanceof Error ? error.message : "unknown",
+            detail: cause.split("\n").filter((line) => /error|fail|timeout|denied|invalid/i.test(line)).join(" | ").slice(-400) }));
           result = { status: "failed", reason: error instanceof Error &&
             ["no_verified_suggestions", "incomplete_suggestions", "invalid_output"].includes(error.message)
             ? error.message : "personal_ai_error" };
