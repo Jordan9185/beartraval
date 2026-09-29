@@ -392,7 +392,8 @@ struct SavedRow: View {
                     Button(action: schedule) { CollectionActionLabel(title: "排進旅程", icon: "calendar.badge.plus") }
                 } else if entry.saved.status == .addedToItinerary, scheduledDay != nil {
                     Button(action: showDay) {
-                        CollectionActionLabel(title: "查看第 \((scheduledDay?.displayOrder ?? 0) + 1) 天", icon: "calendar")
+                        CollectionActionLabel(title: "第 \((scheduledDay?.displayOrder ?? 0) + 1) 天", icon: "calendar",
+                                              spokenTitle: "查看第 \((scheduledDay?.displayOrder ?? 0) + 1) 天")
                     }
                 }
                 if canEdit, let remove {
@@ -824,17 +825,19 @@ struct AddSavedPlaceView: View {
 struct CollectionActionLabel: View {
     let title: String
     let icon: String
+    var spokenTitle: String? = nil
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
-            Text(title)
+            // 卡片一列三個按鈕，文字不換行，避免擠成兩行。
+            Text(title).lineLimit(1).minimumScaleFactor(0.8)
         }
         .font(.subheadline)
         .frame(maxWidth: .infinity, minHeight: 44)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
+        .accessibilityLabel(spokenTitle ?? title)
     }
 }
 

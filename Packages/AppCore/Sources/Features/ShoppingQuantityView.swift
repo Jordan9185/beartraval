@@ -50,6 +50,12 @@ struct ShoppingQuantityView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             .disabled(pending || saving || !loaded)
+            // 主要動作緊接在數量後，不放在撤回安排（破壞性）下方。
+            Section {
+                if let errorMessage { ErrorText(errorMessage) }
+                Button(saving ? "儲存中…" : "儲存數量與分工") { Task { await save() } }
+                    .disabled(!loaded || pending || saving || total < 1 || total > 999)
+            }
             if pending {
                 Section("此裝置有待送修改") {
                     Text("你的數量保留在這裡，尚未確認同步。先重試，或核對後放棄待送內容。")
@@ -61,9 +67,6 @@ struct ShoppingQuantityView: View {
                 Section { Button("撤回這件商品的行程安排", role: .destructive) { confirmUnschedule = true }.disabled(scheduledDay == nil || saving) }
                 footer: { Text("商品與購買記錄保留。其他商品仍使用的採買站、固定站及收藏共用站都不刪除。") }
             }
-            if let errorMessage { ErrorText(errorMessage) }
-            Button(saving ? "儲存中…" : "儲存") { Task { await save() } }
-                .disabled(!loaded || pending || saving || total < 1 || total > 999)
         }
         .navigationTitle("購買數量與分工")
         .confirmationDialog("撤回商品安排？未儲存的數量修改不會一併儲存。", isPresented: $confirmUnschedule, titleVisibility: .visible) {

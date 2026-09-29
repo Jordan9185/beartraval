@@ -54,6 +54,9 @@ struct InboxView: View {
                     if !loading && remote.isEmpty && local.isEmpty {
                         ContentUnavailableView("還沒有分享內容", systemImage: "tray",
                                                description: Text("在社群或相簿選「分享 → BeaRTravel」，內容會先收下再整理。"))
+                    } else if !loading && remote.isEmpty {
+                        Text("此帳號還沒有已上傳的分享；上方此裝置的內容匯入後會出現在這裡。")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }

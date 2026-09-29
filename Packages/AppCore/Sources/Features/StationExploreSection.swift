@@ -50,7 +50,7 @@ struct StationExploreSection: View {
             case .answered(let result): answer = result; errorMessage = nil
             case .failed(let reason): errorMessage = PersonalAI.waitingMessage(reason) ?? "暫時無法查詢，原行程仍可使用。"
             }
-        } catch { errorMessage = userMessage(for: error) }
+        } catch { errorMessage = "附近探索暫時無法取得（\(userMessage(for: error))）；原行程不受影響，可稍後按「查詢附近」重試。" }
     }
     private func save(_ candidate: AssistantAnswer.Recommendation, index: Int, arrange: Bool) async {
         guard !saving else { return }

@@ -81,7 +81,17 @@ struct TripListView: View {
                 .onAppear { if !viewingArchive { onTripsChanged(trip.id, false) } }
             }
             .toolbar {
-                Button("交給 AI 整理", systemImage: "tray.and.arrow.down") { showsCapture = true }
+                if viewingArchive {
+                    // 封存清單與旅程列表同一層，需要明顯的返回入口，不只藏在選單裡。
+                    ToolbarItem(placement: .navigation) {
+                        Button("返回旅程", systemImage: "chevron.backward") { viewingArchive = false }
+                            .accessibilityIdentifier("leaveArchive")
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("交給 AI 整理", systemImage: "tray.and.arrow.down") { showsCapture = true }
+                }
+                ToolbarItem(placement: .primaryAction) {
                 Menu("更多", systemImage: "ellipsis.circle") {
                     Button(viewingArchive ? "返回旅程" : "已封存旅程", systemImage: "archivebox") { viewingArchive.toggle() }
                     Button("AI 進度", systemImage: "clock") { showsAIActivity = true }
@@ -89,6 +99,7 @@ struct TripListView: View {
                     Button("分享收件匣", systemImage: "tray") { showsInbox = true }
                     Button("加入好友的旅程", systemImage: "person.badge.plus") { showsJoin = true }
                     Button("帳號設定", systemImage: "person.crop.circle") { showsAccount = true }
+                }
                 }
             }
             .sheet(isPresented: $showsCapture, onDismiss: {

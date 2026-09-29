@@ -64,7 +64,13 @@ struct TripMapView: View {
                         }
                     }
                     .safeAreaInset(edge: .bottom) {
-                        LayerPicker(layers: $layers)
+                        VStack(spacing: 4) {
+                            let unlocated = snapshot.timeline[safe: dayIndex]?.pendingCount ?? 0
+                            Text(unlocated > 0 ? "\(unlocated) 個站點尚未定位，未顯示在地圖；虛線只表示順序，不是實際路線。"
+                                 : "虛線只表示順序，不是實際路線；路程見旅程頁。")
+                                .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            LayerPicker(layers: $layers)
+                        }
                         .padding(8)
                         .background(.regularMaterial)
                     }
@@ -76,9 +82,17 @@ struct TripMapView: View {
                     TripUnavailableView(store: store, systemImage: "map", goToTrips: goToTrips)
                 }
             }
-            .navigationTitle("地圖")
+            .navigationTitle(title)
             .navigationBarTitleDisplayModeInline()
         }
+    }
+
+    /// 與 Today 共用選定日期；標題直接顯示是哪一天，不用打開選單才知道。
+    private var title: String {
+        guard let snapshot = store.snapshot else { return "地圖" }
+        let index = snapshot.timeline.firstIndex(where: { $0.id == store.selectedDayID }) ?? snapshot.todayIndex()
+        guard let day = snapshot.timeline[safe: index]?.day else { return "地圖" }
+        return "第 \(day.displayOrder + 1) 天 · \(day.localDate)"
     }
 }
 

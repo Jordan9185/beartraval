@@ -59,6 +59,8 @@
 
 記錄每屏實際裝置截圖及檢查結果；未驗證的畫面保留待驗收，不用編譯成功代表視覺完成。
 
+2026-09-29 Claude：iPhone 17 Pro 模擬器已走 16 屏並修正 7 個畫面問題，結果見 `docs/review/2026-09-29-c04-simulator/`。仍待：實機、真實 AI 畫面（05／21／22）、無旅程帳號（18）、03／04／06／19 的逐屏截圖。
+
 ## C05：雙 AI 上線配套與真實能力
 
 主要位置：`supabase/functions/_shared`、`ai/shared/tasks.ts`、`ai/personal-worker`、`AppCore/PersonalAI.swift`。

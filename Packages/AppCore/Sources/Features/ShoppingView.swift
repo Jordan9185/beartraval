@@ -473,7 +473,9 @@ struct ShoppingRow: View {
                         switch entry.status {
                         case .unscheduled: Text("未安排")
                         case .scheduled:
-                            Text("已安排：" + [entry.plannedDayNumber.map { "第 \($0) 天" } ?? entry.plannedDate, entry.plannedStore]
+                            // 店名已在「已選店家」列出時不重複。
+                            Text("已安排：" + [entry.plannedDayNumber.map { "第 \($0) 天" } ?? entry.plannedDate,
+                                              entry.plannedStore == entry.item.scheduledStoreName ? nil : entry.plannedStore]
                                 .compactMap { $0 }.joined(separator: " · "))
                         case .purchased(let by, let at):
                             Text("\(by == nil ? "已刪除帳號的成員" : by == me ? "你" : "旅伴")已購買 · \(at.formatted(date: .abbreviated, time: .shortened))")
