@@ -78,7 +78,7 @@
 - **Claude Sonnet 5.5 已於 2026-09-28 上線**，ID `claude-sonnet-5-5`，$2／$10 每百萬 token（與 Sonnet 5 同價，cache read $0.20），1M context、128K 輸出，預設 effort `high`，退役不早於 2027-09-28。Opus 5.5 為 `claude-opus-5-5`（$4／$20，預設 effort `medium`）。
 - 對本專案程式的相容性（靜態核對 ai/*/src 與 supabase/functions/_shared/claude-ai.ts）：沒有使用 `thinking: disabled`、強制 `tool_choice`、computer use 或 advisor，五項破壞性變更都不觸及；兩段式「先 web search、再結構化輸出」只傳文字摘要，不回傳思考區塊，不受思考區塊綁定影響。
 - 需實測：effort 已重新校準，現有 low／medium 設定需比對品質；兩個模型之間的搜尋工具仍用 `web_search_20250305`（官方建議新模型用 `web_search_20260209`），需以真實請求確認；Sonnet 5.5 工具呼叫之間較長的文字改為 thinking 區塊，搜尋摘要若變短需檢查。伺服器端 fallback（`fallbacks: "default"`）在 Sonnet 5.5 只重試 cyber／frontier_llm 拒答並轉 Sonnet 5。
-- 建議：`CLAUDE_AI_MODEL` 設為 `claude-sonnet-5-5`（同價、較新）；程式中各模組 DEFAULT_MODEL 仍為 `claude-sonnet-5`，只影響未設環境變數的評測腳本，未改動。實際選擇由產品擁有者決定。
+- **產品擁有者已決定使用 Sonnet 5.5**（2026-09-29）：部署時 `CLAUDE_AI_MODEL=claude-sonnet-5-5`；各模組 DEFAULT_MODEL 與評測預設已改為 `claude-sonnet-5-5`。尚未授權付費實測，品質與 effort 需在授權後以 eval 比對。
 
 ## C06：尚待確認的資料生命週期
 
@@ -89,6 +89,8 @@
 ## C07：協調部署與完整驗收
 
 1. 核對最新提交及 CI；保留工作目錄，直接 commit／push，不開 PR，push 前 fetch／rebase。
+
+2026-09-29 Claude（使用者授權只做 dry-run）：`supabase db push --dry-run` 顯示雲端待套 37–64 共 28 支。另匯出雲端 `app` 結構（不含資料），與本機 migration 1–36 產生的結構比對**完全一致**（無手動漂移）；在該結構副本上依序套用 37–64 全數成功。未以真實資料測回填型 migration（如 39 舊購買事件同步、61 已讀基線），正式套用前建議先備份或在分支資料庫試跑。七個 AI Edge 入口 `deno check` 通過；尚未部署。
 2. 說明雲端影響後 dry-run migrations，確認相容參數與 grants；新版 App 不能先接仍只有舊 schema 的雲端。
 3. 按實際最新 migration 編號部署資料庫、七個 AI Edge 入口，更新 Mac worker bundle；不可只更新 App。
 4. 真機 Release，至少兩帳號執行 spec 的 E01–E08：收件→辨識→確認→安排→Today／採買／用品／附近探索／雙語卡／離線／封存／協作。
