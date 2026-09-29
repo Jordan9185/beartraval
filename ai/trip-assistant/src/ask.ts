@@ -8,7 +8,7 @@ import { SYSTEM_PROMPT, userMessage, RESEARCH_RULES } from "./prompt.ts";
 import { AssistantAnswer, type TripContext } from "./schema.ts";
 import { validateAnswer, type ValidationIssue } from "./validate.ts";
 
-export const DEFAULT_MODEL = "claude-sonnet-5";
+export const DEFAULT_MODEL = "claude-sonnet-5-5";
 // Trip Q&A reads already-structured data; medium effort keeps answers quick.
 export const DEFAULT_EFFORT = "medium" as const;
 

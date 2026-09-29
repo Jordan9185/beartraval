@@ -32,7 +32,7 @@ async function main() {
     const startedAt = new Date().toISOString();
     const start = performance.now();
     const outcome = await organizeCapture(client, { title: null, rawText: sample.rawText, imageBase64: images },
-      process.env.ANTHROPIC_MODEL || "claude-sonnet-5");
+      process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5");
     await writeFile(join(output, `${sample.id}.json`), JSON.stringify({ id: sample.id, startedAt,
       elapsedMs: Math.round(performance.now() - start), ...outcome,
       reviewNotes: sample.reviewNotes, acceptance: "待人工逐項核對；執行成功不等於辨識正確" }, null, 2));

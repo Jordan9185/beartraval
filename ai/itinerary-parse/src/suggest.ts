@@ -160,7 +160,7 @@ export function buildSuggestedDraft(stops: SuggestedStop[], dates: string[], has
 }
 
 export async function suggestItinerary(client: Anthropic, input: ParseInput,
-                                       model = "claude-sonnet-5",
+                                       model = "claude-sonnet-5-5",
                                        context: { existingDraft?: ParseResult; dayIndexes?: number[] } = {}):
   Promise<{ result: ParseResult; model: string; usage: { input_tokens: number; output_tokens: number } } | null> {
   const dates = tripCalendar(input.tripStart, input.tripEnd).map((entry) => entry.slice(0, 10));

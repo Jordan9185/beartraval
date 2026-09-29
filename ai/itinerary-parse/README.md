@@ -38,4 +38,4 @@ npm run eval -- --effort high --only seoul-korean,hiroshima-japanese
 
 ## 模型與費用
 
-預設 `claude-sonnet-5`（2026-09-25 由 Opus 5.5 改用，以降低費用），effort `medium`（Opus 5.5 用 `high` 時，真實 7 天行程需 2–5 分鐘，接近 Edge Function 時限）、adaptive thinking，並開啟伺服器端 refusal fallback（`fallbacks: "default"`）。實際跑 `npm run eval` 前先確認費用；可用 `--effort` 比較不同設定的準確率與 token 數。
+預設 `claude-sonnet-5-5`（2026-09-29 產品擁有者選用，與 Sonnet 5 同價；2026-09-25 曾由 Opus 5.5 改用 Sonnet 5 以降低費用。Sonnet 5.5 的 effort 已重新校準，正式使用前需以 eval 比對），effort `medium`（Opus 5.5 用 `high` 時，真實 7 天行程需 2–5 分鐘，接近 Edge Function 時限）、adaptive thinking，並開啟伺服器端 refusal fallback（`fallbacks: "default"`）。實際跑 `npm run eval` 前先確認費用；可用 `--effort` 比較不同設定的準確率與 token 數。

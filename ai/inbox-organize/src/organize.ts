@@ -135,7 +135,7 @@ export function validateResult(input: InboxInput, raw: unknown): ValidatedResult
   return { content_kind, items, template_days };
 }
 
-export async function organizeCapture(client: Anthropic, input: InboxInput, model = "claude-sonnet-5"):
+export async function organizeCapture(client: Anthropic, input: InboxInput, model = "claude-sonnet-5-5"):
   Promise<{ result: ValidatedResult; rawResult: z.infer<typeof InboxResult>; model: string;
     usage: { input_tokens: number; output_tokens: number } }> {
   input = modelInput(input);

@@ -48,7 +48,7 @@ export function verifiedSuggestions(raw: unknown, sources: SearchCitation[], pur
 }
 
 export async function discoverPlaces(client: Anthropic, query: string, context: string,
-                                     model = "claude-sonnet-5", purpose: DiscoveryPurpose = "place"): Promise<DiscoveredPlace[]> {
+                                     model = "claude-sonnet-5-5", purpose: DiscoveryPurpose = "place"): Promise<DiscoveredPlace[]> {
   const storeSearch = purpose === "product_store";
   const searched = await client.messages.create({
     model, max_tokens: 2500,
