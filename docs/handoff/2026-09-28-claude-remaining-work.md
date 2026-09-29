@@ -74,6 +74,12 @@
 
 本輪沒有授權實際付費測試或正式部署；接續時依新的使用者授權決定執行範圍。
 
+2026-09-29 Claude 查官方文件（platform.claude.com models overview／Sonnet 5.5 what's new）：
+- **Claude Sonnet 5.5 已於 2026-09-28 上線**，ID `claude-sonnet-5-5`，$2／$10 每百萬 token（與 Sonnet 5 同價，cache read $0.20），1M context、128K 輸出，預設 effort `high`，退役不早於 2027-09-28。Opus 5.5 為 `claude-opus-5-5`（$4／$20，預設 effort `medium`）。
+- 對本專案程式的相容性（靜態核對 ai/*/src 與 supabase/functions/_shared/claude-ai.ts）：沒有使用 `thinking: disabled`、強制 `tool_choice`、computer use 或 advisor，五項破壞性變更都不觸及；兩段式「先 web search、再結構化輸出」只傳文字摘要，不回傳思考區塊，不受思考區塊綁定影響。
+- 需實測：effort 已重新校準，現有 low／medium 設定需比對品質；兩個模型之間的搜尋工具仍用 `web_search_20250305`（官方建議新模型用 `web_search_20260209`），需以真實請求確認；Sonnet 5.5 工具呼叫之間較長的文字改為 thinking 區塊，搜尋摘要若變短需檢查。伺服器端 fallback（`fallbacks: "default"`）在 Sonnet 5.5 只重試 cyber／frontier_llm 拒答並轉 Sonnet 5。
+- 建議：`CLAUDE_AI_MODEL` 設為 `claude-sonnet-5-5`（同價、較新）；程式中各模組 DEFAULT_MODEL 仍為 `claude-sonnet-5`，只影響未設環境變數的評測腳本，未改動。實際選擇由產品擁有者決定。
+
 ## C06：尚待確認的資料生命週期
 
 私人用品退出後歷史入口、刪 Trip 後保留私人歷史是 R4 建議中的未定細節。現行 FK／RLS 行為要明說；不能為保留資料偷偷轉為共同資料，也不能冒稱已支援歷史保留。
