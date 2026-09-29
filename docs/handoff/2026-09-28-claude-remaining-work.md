@@ -1,5 +1,7 @@
 # Claude 接續：重做版 V1 剩餘工作
 
+資料庫登入／`SUPABASE_DB_PASSWORD`／`cli_login_postgres` 排錯，先讀[資料庫連線交接補充](2026-09-29-database-connection.md)。
+
 本文件是可接續的剩餘規格，不是上線或真人驗收證明。實際提交、部署與測試狀態先核對 `2026-09-28-rebuild-v1-implementation-handoff.md`、`git status`、`git log`；不要覆蓋後續人工修改。
 
 ## 採用基準與禁止誤判
@@ -85,6 +87,12 @@
 產品擁有者決定「保留本人私人歷史」。migration 65：退出／被移出旅程或旅程刪除時，觸發器把該成員自己的私人用品（shared = false）與私人採買另存唯讀快照 `app.private_trip_history`；只有本人可讀（RLS），不複製共同資料，本人可刪除（`delete_private_history`），刪帳號隨 `auth.users` 一併清除；重新加入同一旅程會移除退出快照避免重複；沒有私人資料不建立紀錄。App：設定 → 私人旅行紀錄（列表、詳情、左滑刪除確認）；退出與刪除旅程的確認文案已說明。SQL 16 項斷言、Swift 解碼測試通過；模擬器已看列表與詳情。尚未部署、未實機兩帳號驗收。
 
 ## C07：協調部署與完整驗收
+
+**2026-09-29 部署狀態（使用者授權後執行）**：
+- 已部署：雲端資料庫由使用者以資料庫密碼執行 `supabase db push`，套用 37–65 共 29 支（套用前 Claude 已備份雲端 app 結構與資料於本機暫存，並以真實資料副本試套成功）。九個 Edge Functions 全數重新部署（新增 `prepare-trip`），JWT 設定與 config.toml 一致；`personal-ai` 冒煙測試回應正常。雲端 `CLAUDE_AI_MODEL=claude-sonnet-5-5`；`ANTHROPIC_API_KEY` 為既有設定，未驗證是否有效。
+- Mac worker：Codex 由使用者重新登入；更新 bundle 並以 install.py 重啟 LaunchAgent，確認登入檢查通過、正常領取工作。模型維持 `gpt-5.6-luna`／`gpt-5.6-sol`；帳號模型清單（CLI 0.147.0）沒有 GPT 6.0，最新 CLI 為 0.158.0，是否升級待使用者決定。
+- App：Release 已安裝並啟動於「Jordan 的 iPhone」（iPhone 15 Pro）。
+- **尚未驗收**：本機 GPT 模式六種任務實測（使用者將先測）、付費 Claude 模式、兩帳號 E01–E08、離線與封存。
 
 1. 核對最新提交及 CI；保留工作目錄，直接 commit／push，不開 PR，push 前 fetch／rebase。
 
