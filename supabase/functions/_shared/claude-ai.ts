@@ -23,7 +23,14 @@ export async function runClaudeJob(admin: ReturnType<typeof adminClient>, id: st
   });
   let result;
   try { result = await dispatchTask(client, job, model); }
-  catch { result = { status: "failed", reason: "claude_api_error" }; }
+  catch (error) {
+    // 只記 HTTP 狀態與錯誤類型（例如 401 authentication_error、429 rate_limit_error），不記金鑰、原文或回應內容。
+    const status = (error as { status?: number }).status;
+    const type = (error as { error?: { error?: { type?: string } } }).error?.error?.type
+      ?? (error instanceof Error ? error.name : "unknown");
+    console.error("claude-ai task failed", { kind: job.kind, status, type });
+    result = { status: "failed", reason: "claude_api_error", detail: status ? `${status} ${type}` : type };
+  }
   const { error: saveError } = await admin.rpc("finish_personal_ai", {
     p_owner: job.owner_id, p_id: job.id, p_lease: job.lease,
     p_result: { ...result, provider: "claude_api", usage: usages.length ? usages : "usage" in result ? result.usage : null, model }, p_model: model,
