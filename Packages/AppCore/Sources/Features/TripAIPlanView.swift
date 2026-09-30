@@ -83,7 +83,10 @@ struct TripAIPlanView: View {
                     requestedTimes = Dictionary(uniqueKeysWithValues: suggestions.enumerated().map { ($0.offset, $0.element.start_time ?? "") })
                     message = "已載入保存的建議，未重新詢問 AI。請依目前行程重新選擇並預覽。"
                 } catch { message = userMessage(for: error) }
-            } else { await load() }
+            } else {
+                // 打開不自動詢問 AI；按「取得／更新建議」才整理整趟旅程。
+                message = "按「取得／更新建議」請 AI 整理整趟旅程（會使用 AI 額度）。"
+            }
         }
     }
 

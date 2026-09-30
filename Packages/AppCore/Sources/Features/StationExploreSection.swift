@@ -6,7 +6,6 @@ struct StationExploreSection: View {
     let session: SessionModel
     let stop: Stop
     let canEdit: Bool
-    let automatic: Bool
     let onArrange: (SavedEntry) -> Void
     @State private var answer: AssistantAnswer?
     @State private var loading = false
@@ -29,10 +28,10 @@ struct StationExploreSection: View {
                 }
             }
             Button(answer == nil ? "查詢附近" : "再次查看附近建議") { Task { await load() } }.disabled(loading)
-            Text("以本站及到訪日期查詢，不使用手機位置；收藏會加入本旅程共同清單。安排前仍需確認，未查得的路程與評分保留未知。")
+            Text("按下才查詢，會使用 AI 額度。以本站及到訪日期查詢，不使用手機位置；收藏會加入本旅程共同清單。安排前仍需確認，未查得的路程與評分保留未知。")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .task(id: stop.id) { if automatic { await load() } }
+        // 點開站點不自動查（每站都會消耗 AI 額度）；按「查詢附近」才開始。
         .disabled(saving)
     }
     private func key(_ candidate: AssistantAnswer.Recommendation) -> String {

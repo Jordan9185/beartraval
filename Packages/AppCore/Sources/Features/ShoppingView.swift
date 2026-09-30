@@ -748,7 +748,8 @@ struct ShoppingItemDetailView: View {
                                                 productName: entry.item.name, storeHint: entry.item.storeHint,
                                                 region: regionName, countryCode: regionCountry,
                                                 initialSuggestions: entry.item.savedStoreSuggestions,
-                                                searchOnAppear: canEdit && entry.item.storeSuggestionsChecked != true,
+                                                // 打開商品不自動查店（避免每件商品都消耗 AI 額度）；由「用 AI 查找店家」明確啟動。
+                                                searchOnAppear: false,
                                                 onSchedule: canEdit && entry.item.purchaseTiming != "before_trip" && !entry.isPurchased
                                                     && (entry.status == .unscheduled || entry.item.plannedStopId != nil) ? { candidate in
                                                     scheduleRequest = ShoppingScheduleRequest(candidate: candidate)

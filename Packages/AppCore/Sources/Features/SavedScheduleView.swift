@@ -49,6 +49,12 @@ struct SavedScheduleView: View {
             Section("AI 安排建議") {
                 if askingAI { ProgressView("依整趟行程比較日期…") }
                 if let aiReason { Text(aiReason) }
+                if !askingAI && !days.isEmpty {
+                    Button(aiReason == nil ? "請 AI 依整趟行程建議日期" : "重新請 AI 建議", systemImage: "sparkles") {
+                        Task { await recommendDay() }
+                    }
+                    Text("會使用 AI 額度；也可以直接在下方選日期。").font(.caption).foregroundStyle(.secondary)
+                }
                 Text("交通未知不阻擋安排；選好日期後仍需你確認。") .font(.caption).foregroundStyle(.secondary)
             }
             Section("排在哪一天") {
@@ -141,7 +147,6 @@ struct SavedScheduleView: View {
                 selectedDayID = days.first?.id
             }
             errorMessage = days.isEmpty ? "這趟旅程沒有可排入的日期。" : nil
-            await recommendDay()
             await calculateMatches()
         } catch {
             errorMessage = "無法載入旅程：\(userMessage(for: error))"

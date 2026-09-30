@@ -334,6 +334,12 @@ struct ConfirmPlacesView: View {
                     Button("重新搜尋") { retryFailedSearches() }
                         .accessibilityIdentifier("retrySearch")
                 }
+                if discoveryRepository != nil && !unresearched.isEmpty {
+                    Button("用 AI 查找 \(unresearched.count) 項店名與地址") { Task { await researchSelected(unresearched) } }
+                        .accessibilityIdentifier("researchAll")
+                    Text("會使用 AI 額度；同時最多查 3 項。也可以在各項目單獨查找，或先只保留名稱。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 // 搜尋跑完才給批次操作，否則本來能自動定位的地點也會被標成未定位。
                 if state.undecidedCount > 0 {
                     if suggestedTemplate && state.suggestedMatchCount > 0 {
@@ -408,7 +414,7 @@ struct ConfirmPlacesView: View {
         return VStack(alignment: .leading, spacing: 2) {
             Text(suggestedTemplate ? "AI 建議 \(state.items.count) 項，可逐一調整" : "解析出 \(state.items.count) 項")
                 .font(.subheadline.weight(.semibold))
-            Text(searchDone < searchTotal ? "AI 正在查找店家與地址"
+            Text(!webSearching.isEmpty ? "AI 正在查找店家與地址"
                  : needs == 0 ? "全部已自動處理，可以直接建立"
                  : state.canSubmit ? "可以建立；\(needs) 項地點可再核對"
                  : "\(needs) 項需要你確認，其餘已自動處理")
@@ -476,17 +482,32 @@ struct ConfirmPlacesView: View {
         await researcher.run(index)
     }
 
-    /// 背景逐站查找（同時最多 3 筆），使用者可先處理已有結果的項目。
+    /// 開啟確認頁不自動為每站呼叫 AI（避免一次消耗大量額度）：只接續先前已排入的工作，不另開新工作；
+    /// 其餘由使用者逐項或一次明確啟動查找。
     private func searchAll() async {
-        for index in state.items.indices where !state.items[index].needsInitialAIResearch {
-            state.items[index].searched = true
+        let resumable = state.items.indices.filter { state.items[$0].researchJobID != nil && state.items[$0].needsInitialAIResearch }
+        for index in state.items.indices where !resumable.contains(index) { state.items[index].searched = true }
+        guard let researcher, !resumable.isEmpty else { return }
+        webSearching.formUnion(resumable)
+        defer { webSearching.subtract(resumable) }
+        await researcher.runAll(resumable)
+    }
+
+    /// 尚未用 AI 查過、也還沒決定的項目；由使用者按一次才開始（同時最多 3 筆）。
+    private var unresearched: [Int] {
+        state.items.indices.filter { state.items[$0].needsInitialAIResearch && state.items[$0].researchJobID == nil
+            && !webSearching.contains($0) }
+    }
+
+    private func researchSelected(_ indices: [Int]) async {
+        guard let researcher, !indices.isEmpty else { return }
+        for index in indices {
+            state.items[index].researchRequest = nil
+            state.items[index].researchMessage = nil
         }
-        guard let researcher else {
-            for index in state.items.indices { state.items[index].searched = true }
-            return
-        }
-        let pending = state.items.indices.filter { state.items[$0].needsInitialAIResearch }
-        await researcher.runAll(pending)
+        webSearching.formUnion(indices)
+        defer { webSearching.subtract(indices) }
+        await researcher.runAll(indices)
     }
 
     /// 使用者換關鍵字搜尋：只更新候選，由使用者自己選（不自動選定）。
@@ -502,8 +523,9 @@ struct ConfirmPlacesView: View {
     }
 
     private func retryFailedSearches() {
+        let failed = state.items.indices.filter { state.items[$0].searchFailed }
         state.resetFailedSearches()
-        Task { await searchAll() }
+        Task { await researchSelected(failed) }
     }
 }
 

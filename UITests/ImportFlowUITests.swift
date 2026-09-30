@@ -153,7 +153,11 @@ final class ImportFlowUITests: XCTestCase {
         let app = launch("ambiguous")
         let submit = app.buttons["submitImport"]
 
-        // 新版 AI 先查具來源店家；不用取得地圖座標，也不猜選分店。
+        // AI 查店由使用者明確啟動，不在開啟確認頁時自動消耗額度；不用取得地圖座標，也不猜選分店。
+        XCTAssertFalse(app.buttons["ai-candidate-0-광장시장"].waitForExistence(timeout: 2), "未按查找前不自動呼叫 AI")
+        let researchAll = app.buttons["researchAll"]
+        XCTAssertTrue(researchAll.waitForExistence(timeout: 10))
+        researchAll.tap()
         let market = app.buttons["ai-candidate-0-광장시장"]
         XCTAssertTrue(market.waitForExistence(timeout: 10))
         market.tap()
@@ -191,7 +195,9 @@ final class ImportFlowUITests: XCTestCase {
         XCTAssertTrue(raw.label.contains("XXX Shoes 買鞋"), "失敗後原文仍在")
 
         retry.tap()
-        XCTAssertTrue(app.buttons["ai-candidate-0-광장시장"].waitForExistence(timeout: 10), "重試後進入確認畫面")
+        XCTAssertTrue(app.buttons["researchAll"].waitForExistence(timeout: 10), "重試後進入確認畫面")
+        app.buttons["researchAll"].tap()
+        XCTAssertTrue(app.buttons["ai-candidate-0-광장시장"].waitForExistence(timeout: 10))
         app.buttons["原文"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["rawText"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["rawText"].label.contains("19:00 晚餐訂位"), "重試後原文完整")

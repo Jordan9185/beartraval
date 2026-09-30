@@ -50,6 +50,10 @@ struct ShoppingScheduleView: View {
             Section("以既有行程為主") {
                 if asking { ProgressView("AI 正在比較原有行程區域…") }
                 if let recommendation { Text(recommendation) }
+                if !asking && recommendation == nil && suggestionIndex != nil {
+                    Button("請 AI 依原有行程判斷", systemImage: "sparkles") { Task { await recommend() } }
+                    Text("會使用 AI 額度；打開此頁不會自動詢問。").font(.caption).foregroundStyle(.secondary)
+                }
                 if !asking && selectedDayID == nil {
                     Text(isSwap ? "目前維持原安排，不為換店新增跨區行程。" : "目前保留待買，不為商品新增跨區行程。")
                     Button(isSwap ? "我仍要換到這間店，查看日期" : "我仍要安排這間店，查看日期") { manualOverride = true }
@@ -124,7 +128,6 @@ struct ShoppingScheduleView: View {
                 errorMessage = "這趟旅程沒有可安排的日期。"
             } else {
                 errorMessage = nil
-                await recommend()
             }
         } catch {
             errorMessage = "無法載入旅程：\(userMessage(for: error))"

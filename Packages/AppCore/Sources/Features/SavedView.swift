@@ -470,6 +470,12 @@ struct SavedDetailView: View {
                     if !entry.isConfirmed {
                         Label("未定位，不計入路線", systemImage: "mappin.slash").font(.caption).foregroundStyle(.secondary)
                     }
+                    if canEdit && !entry.isConfirmed && entry.addressLabel == nil && !searchingAddress && candidates.isEmpty {
+                        Button(didSearchAddress ? "重新用 AI 查找店名與地址" : "用 AI 查找店名與地址", systemImage: "sparkles") {
+                            Task { await discoverMissingAddress(force: true) }
+                        }
+                        Text("會使用 AI 額度；打開收藏時不自動查找。").font(.caption).foregroundStyle(.secondary)
+                    }
                     if searchingAddress { ProgressView("正在補查當地店名與地址…") }
                     if let addressMessage { Text(addressMessage).font(.caption).foregroundStyle(.secondary) }
                 }
@@ -569,7 +575,6 @@ struct SavedDetailView: View {
             .navigationTitle("收藏")
             .navigationBarTitleDisplayModeInline()
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
-            .task { await discoverMissingAddress() }
         }
     }
 
@@ -589,8 +594,8 @@ struct SavedDetailView: View {
         } catch { addressMessage = userMessage(for: error) }
     }
 
-    private func discoverMissingAddress() async {
-        guard !didSearchAddress, canEdit, !entry.isConfirmed, entry.addressLabel == nil else { return }
+    private func discoverMissingAddress(force: Bool = false) async {
+        guard force || !didSearchAddress, canEdit, !entry.isConfirmed, entry.addressLabel == nil, !searchingAddress else { return }
         didSearchAddress = true
         searchingAddress = true
         defer { searchingAddress = false }

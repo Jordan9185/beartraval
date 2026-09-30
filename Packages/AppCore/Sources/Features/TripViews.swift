@@ -290,9 +290,8 @@ struct CreateTripView: View {
     }
 
     private func finishCreation(_ trip: Trip) {
-        // 先進 Today，用品建議背景產生；使用者不用等 AI 就能查看正式行程。
+        // 不在建立時自動產生用品建議（避免未使用也消耗 AI 額度）；到「旅行必備用品」按鈕再請 AI 建議。
         onCreated(trip)
-        Task { _ = try? await session.trips.ask(tripID: trip.id, question: PackingSuggestions.question, today: nil, routeFacts: []) }
     }
     private func persistDraft() {
         guard !restoringDraft else { return }
@@ -495,7 +494,7 @@ struct TripDetailView: View {
                                    Task { await reload() }
                                }
                            },
-                           canEdit: myRole?.canEdit == true, allowAutomaticDiscovery: !isArchived && detailCachedAt == nil)
+                           canEdit: myRole?.canEdit == true)
                 .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showsAssistant) {
@@ -696,7 +695,6 @@ struct StopDetailView: View {
     var session: SessionModel? = nil
     var planning: StopPlanning? = nil
     var canEdit = false
-    var allowAutomaticDiscovery = true
     @State private var nearbyArrangement: SavedEntry?
     @Environment(\.dismiss) private var dismissDetail
 
@@ -763,7 +761,7 @@ struct StopDetailView: View {
                     Section("店家線索來源") { Link(source.host ?? "查看來源", destination: source) }
                 }
                 if let session {
-                    StationExploreSection(session: session, stop: stop, canEdit: canEdit, automatic: allowAutomaticDiscovery) { nearbyArrangement = $0 }
+                    StationExploreSection(session: session, stop: stop, canEdit: canEdit) { nearbyArrangement = $0 }
                     Section("AI 附近探索") {
                         NavigationLink("針對本站問 AI") {
                             StopAssistantView(session: session, stop: stop, canApply: canEdit)
