@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, chmod, rm, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { infer, codexClient, codexSchema, imageOnlySchema, WaitingError, isolatedEnvironment, type Config } from "../src/codex.ts";
+import { infer, codexClient, codexSchema, imageOnlySchema, WaitingError, isolatedEnvironment, verifyLogin, type Config } from "../src/codex.ts";
 import { publicAddress, pageText, readPublicPage } from "../src/sources.ts";
 
 async function fixture(run: (config: Config) => Promise<void>) {
@@ -84,3 +84,21 @@ test("純圖片來源限於實際附件編號，避免 OCR 文字被當成不存
   assert.equal(result.properties.items.items.properties.store_evidence.anyOf[1].type, "null");
   assert.equal((schema.properties.items.items.properties.source_span as any).enum, undefined);
 });
+
+test("登入檢查逾時或無法執行時只算等待，不冒稱需要重新登入", () => fixture(async config => {
+  await writeFile(config.codex, "#!/usr/bin/env node\nsetTimeout(() => {}, 60000);\n", { mode: 0o700 });
+  const started = Date.now();
+  assert.throws(() => verifyLogin({ ...config, codex: join(config.runtime, "missing-codex") }),
+    (error: unknown) => error instanceof WaitingError && error.reason === "personal_ai_waiting");
+  assert.ok(Date.now() - started < 5000);
+}));
+test("明確未登入才要求重新登入；成功結果短暫沿用", () => fixture(async config => {
+  await writeFile(config.codex, "#!/usr/bin/env node\nconsole.log('Not logged in'); process.exit(1);\n", { mode: 0o700 });
+  assert.throws(() => verifyLogin(config), (error: unknown) => error instanceof WaitingError && error.reason === "personal_ai_login");
+  await writeFile(config.codex, "#!/usr/bin/env node\nconsole.error('Logged in using ChatGPT');\n", { mode: 0o700 });
+  verifyLogin(config, 1_000_000);
+  await writeFile(config.codex, "#!/usr/bin/env node\nprocess.exit(1);\n", { mode: 0o700 });
+  verifyLogin(config, 1_000_000 + 60_000);
+  assert.throws(() => verifyLogin(config, 1_000_000 + 6 * 60_000), (error: unknown) =>
+    error instanceof WaitingError && error.reason === "personal_ai_login");
+}));
